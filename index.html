@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Encriptador de Texto</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="logo">
+            <img src="images/logo.png" alt="Logo">
+        </div>
+        <div class="left-panel">
+            <textarea id="inputText" placeholder="Ingrese el texto aquí"></textarea>
+            <div class="nota-container">
+                <img src="images/exclamation-icon.png" alt="Exclamación" class="bi-exclamation">
+                <span class="text-wrapper">Solo letras minúsculas y sin acentos</span>
+            </div>
+            <div id="warningMessage" class="warning">
+                El texto no puede contener caracteres especiales, números y mayúsculas.
+            </div>
+            <div class="buttons-container">
+                <div class="button" onclick="encriptarTexto()">
+                    <span class="text-wrapper">Encriptar</span>
+                </div>
+                <div class="button-wrapper" onclick="desencriptarTexto()">
+                    <span class="div">Desencriptar</span>
+                </div>
+            </div>
+        </div>
+        <div class="right-panel">
+            <div class="right-panel-content">
+                <img id="noMessageImg" src="images/muneco.png" alt="No Message">
+                <p id="outputText" class="message">Ningún mensaje fue encontrado</p>
+                <p class="submessage">Ingresa el texto que desees encriptar o desencriptar.</p>
+                <div class="copy-button" onclick="copiarTexto()">
+                    <span class="text-wrapper">Copiar</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="script.js"></script>
+</body>
+<footer class="footer">
+    <p>Fabián Manquelipe 2024</p>
+</footer>
+</html>
