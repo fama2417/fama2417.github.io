@@ -33,6 +33,7 @@ button:disabled { cursor: wait; opacity: 0.65; }
 .login-card h1, .login-card p { margin: 0; }
 .login-card label { color: var(--muted); display: grid; gap: 6px; }
 .form-error { color: var(--danger); }
+.form-notice { color: var(--success); }
 .session-bar { align-items: center; background: #ffffff; border-bottom: 1px solid var(--border); display: flex; font-size: 0.85rem; gap: 12px; justify-content: flex-end; padding: 8px 24px; }
 .session-bar span { color: var(--muted); }
 .session-bar button { background: transparent; border: 0; color: var(--primary); cursor: pointer; font-weight: 700; }
