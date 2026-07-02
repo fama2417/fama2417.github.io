@@ -12,6 +12,7 @@ export type Appointment = {
   status: AppointmentStatus;
   reason: string;
   modality: "US" | "DX" | "CT" | "MR" | "MG";
+  studyInstanceUid?: string;
 };
 
 export const initialAppointments: Appointment[] = [
