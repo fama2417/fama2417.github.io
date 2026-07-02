@@ -1,21 +1,12 @@
-# Arquitectura propuesta
+# Arquitectura
 
-Este proyecto se inicia como una agenda clínica web y se prepara para crecer hacia pacientes, lista de trabajo, visualización de imágenes DICOM/no DICOM e interoperabilidad clínica.
+- Next.js + TypeScript para la interfaz.
+- Supabase PostgreSQL/Auth para datos, roles, RLS y auditoría.
+- Orthanc con DICOMweb y su plugin oficial de OHIF para el PACS/visor de pruebas.
+- Patient, Appointment e ImagingStudy de HL7 FHIR como referencia de interoperabilidad.
 
-## Decisiones iniciales
+El navegador usa `localStorage` sólo para la demostración. Al activar Supabase, las mismas colecciones se reemplazan por consultas autenticadas; no se mantiene sincronización doble.
 
-- **Frontend:** Next.js + TypeScript.
-- **Base de datos:** Supabase PostgreSQL para el MVP interno.
-- **Autenticación:** Supabase Auth en una iteración posterior.
-- **DICOM:** Orthanc como PACS Open Source de pruebas.
-- **Visor:** OHIF Viewer para visualización DICOM vía DICOMweb.
-- **Interoperabilidad:** HL7 FHIR como referencia de modelado, empezando por Patient, Practitioner, Appointment, Schedule, Slot e ImagingStudy.
+## Límite de seguridad
 
-## Fases
-
-1. Base técnica y navegación clínica.
-2. Gestión mínima de pacientes.
-3. Agenda diaria/semanal con estados normalizados.
-4. Auditoría, roles y Row Level Security.
-5. Worklist derivada de citas.
-6. Integración Orthanc/OHIF para estudios DICOM.
+La configuración Docker y sus credenciales son exclusivamente locales. Un despliegue clínico exige HTTPS, secretos externos, backups probados, control de acceso, trazabilidad, retención definida y revisión de la normativa aplicable.

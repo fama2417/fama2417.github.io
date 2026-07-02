@@ -1,24 +1,6 @@
 export const implementationPhases = [
-  {
-    title: "Hito 1: Base técnica",
-    items: ["Next.js + TypeScript", "Supabase Auth/PostgreSQL", "Navegación clínica base"],
-  },
-  {
-    title: "Hito 2: Pacientes",
-    items: ["Creación de pacientes", "Búsqueda", "Prevención de duplicados"],
-  },
-  {
-    title: "Hito 3: Agenda MVP",
-    items: ["Vista diaria/semanal", "Crear y editar citas", "Estados normalizados"],
-  },
-  {
-    title: "Hito 4: Imágenes",
-    items: ["Orthanc", "DICOMweb", "OHIF Viewer"],
-  },
-];
-
-export const clinicalStandards = [
-  "FHIR Patient, Practitioner, Appointment, Schedule, Slot e ImagingStudy como referencia de interoperabilidad.",
-  "Orthanc + DICOMweb para PACS de pruebas y conexión futura con OHIF.",
-  "Auditoría, roles y trazabilidad desde las primeras iteraciones antes de usar datos reales.",
+  { title: "Agenda y pacientes", state: "Operativo", items: ["Altas y búsqueda de pacientes", "Citas y control de conflictos", "Estados normalizados"] },
+  { title: "Worklist e imágenes", state: "Preparado", items: ["Worklist derivada de citas", "Orthanc con DICOMweb", "OHIF Viewer integrado"] },
+  { title: "Datos y seguridad", state: "Listo para conectar", items: ["Migración PostgreSQL", "Roles y Row Level Security", "Auditoría de cambios"] },
+  { title: "Producción", state: "Pendiente", items: ["Proyecto Supabase y credenciales", "Usuarios autorizados", "HTTPS, respaldo y evaluación normativa"] },
 ];
