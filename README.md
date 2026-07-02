@@ -25,6 +25,14 @@ npm run dicom:start
 
 Para detenerlo: `npm run dicom:stop`.
 
+En producción, configure `NEXT_PUBLIC_ORTHANC_URL` y `NEXT_PUBLIC_OHIF_URL` con las URLs HTTPS del PACS desplegado.
+
+## Demo en Render
+
+El archivo `render.yaml` crea la aplicación y Orthanc/OHIF en servicios gratuitos. Durante la creación, Render solicita las variables de Supabase, las URLs públicas generadas y `ORTHANC__REGISTERED_USERS` con formato `{"usuario":"clave"}`.
+
+La capa gratuita es solo para pruebas: se suspende por inactividad y no conserva los DICOM después de reinicios o despliegues. Agregue un disco persistente en `/var/lib/orthanc/db` antes de usar información que deba conservarse.
+
 ## Supabase
 
 El proyecto se gestiona mediante `supabase/config.toml` y migraciones versionadas. Para enlazar otra instalación:

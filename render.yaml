@@ -1,0 +1,36 @@
+services:
+  - type: web
+    runtime: node
+    name: agenda-web-pacs
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: NEXT_PUBLIC_ORTHANC_URL
+        sync: false
+      - key: NEXT_PUBLIC_OHIF_URL
+        sync: false
+
+  - type: web
+    runtime: image
+    name: agenda-orthanc
+    plan: free
+    image:
+      url: docker.io/orthancteam/orthanc:latest
+    envVars:
+      - key: DICOM_WEB_PLUGIN_ENABLED
+        value: "true"
+      - key: OHIF_PLUGIN_ENABLED
+        value: "true"
+      - key: ORTHANC__OHIF__DATA_SOURCE
+        value: dicom-web
+      - key: ORTHANC__HTTP_PORT
+        value: "10000"
+      - key: ORTHANC__NAME
+        value: Agenda Imagenología - Demo
+      - key: ORTHANC__REGISTERED_USERS
+        sync: false

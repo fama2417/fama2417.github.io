@@ -5,9 +5,10 @@ type AppointmentRow = {
   id: string; patient_id: string; practitioner_name: string; location_name: string; appointment_date: string;
   start_time: string; end_time: string; status: Appointment["status"]; reason: string; modality: Appointment["modality"];
   patient: { full_name: string } | null;
+  study: { study_instance_uid: string | null } | null;
 };
 
-const columns = "id, patient_id, practitioner_name, location_name, appointment_date, start_time, end_time, status, reason, modality, patient:patients(full_name)";
+const columns = "id, patient_id, practitioner_name, location_name, appointment_date, start_time, end_time, status, reason, modality, patient:patients(full_name), study:imaging_studies(study_instance_uid)";
 
 const mapAppointment = (row: AppointmentRow): Appointment => ({
   id: row.id,
@@ -21,6 +22,7 @@ const mapAppointment = (row: AppointmentRow): Appointment => ({
   status: row.status,
   reason: row.reason,
   modality: row.modality,
+  studyInstanceUid: row.study?.study_instance_uid ?? undefined,
 });
 
 const toRow = (appointment: Appointment) => ({
