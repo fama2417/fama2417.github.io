@@ -1,16 +1,16 @@
 export type SupabaseEnvironment = {
   url?: string;
-  anonKey?: string;
+  publishableKey?: string;
   isConfigured: boolean;
 };
 
 export function getSupabaseEnvironment(): SupabaseEnvironment {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
   return {
     url,
-    anonKey,
-    isConfigured: Boolean(url && anonKey),
+    publishableKey,
+    isConfigured: Boolean(url && publishableKey),
   };
 }

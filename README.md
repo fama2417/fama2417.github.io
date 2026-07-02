@@ -9,7 +9,7 @@ npm install
 npm run dev
 ```
 
-Abrir <http://localhost:3000>. Los datos de demostración se guardan en el navegador.
+Abrir <http://localhost:3000> e ingresar con un usuario creado en Supabase Auth.
 
 ## Iniciar Orthanc y OHIF
 
@@ -25,11 +25,15 @@ npm run dicom:start
 
 Para detenerlo: `npm run dicom:stop`.
 
-## Conectar Supabase
+## Supabase
 
-1. Crear un proyecto Supabase y ejecutar `supabase/migrations/202607020001_initial_clinical_schema.sql` en su editor SQL.
-2. Copiar `.env.example` a `.env.local` y reemplazar sus dos valores.
-3. Crear los usuarios en Supabase Auth y asignar sus perfiles/roles desde SQL.
+El proyecto se gestiona mediante `supabase/config.toml` y migraciones versionadas. Para enlazar otra instalación:
+
+1. Ejecutar `npx supabase login` y `npx supabase link`.
+2. Copiar `.env.example` a `.env.local` y usar la URL y clave publicable del proyecto.
+3. Ejecutar `npx supabase db push --dry-run` antes de `npx supabase db push`.
+
+Las contraseñas, tokens y claves secretas nunca se guardan en Git.
 
 No usar en producción hasta habilitar autenticación en la aplicación, HTTPS, copias de seguridad, monitoreo y revisión normativa.
 

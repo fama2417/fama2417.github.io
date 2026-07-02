@@ -5,7 +5,7 @@
 - Orthanc con DICOMweb y su plugin oficial de OHIF para el PACS/visor de pruebas.
 - Patient, Appointment e ImagingStudy de HL7 FHIR como referencia de interoperabilidad.
 
-El navegador usa `localStorage` sólo para la demostración. Al activar Supabase, las mismas colecciones se reemplazan por consultas autenticadas; no se mantiene sincronización doble.
+La aplicación usa Supabase Auth y consultas autenticadas a PostgreSQL. Las políticas RLS autorizan cada operación y los cambios clínicos generan registros de auditoría.
 
 ## Límite de seguridad
 
