@@ -9,7 +9,7 @@ import { fetchReport, saveReport, type RadiologyReport } from "./repository";
 const ohifUrl = (process.env.NEXT_PUBLIC_OHIF_URL ?? "http://localhost:8042/ohif").replace(/\/$/, "");
 
 const emptyReport = (appointmentId: string): RadiologyReport => ({
-  appointmentId, clinicalIndication: "", technique: "", comparison: "Sin estudios previos disponibles.", findings: "", impression: "", status: "draft",
+  appointmentId, clinicalIndication: "", technique: "", comparison: "Sin estudios previos disponibles.", findings: "", impression: "", status: "draft", criticalFinding: false,
 });
 
 // Secciones del informe estructurado según las guías de comunicación diagnóstica del ACR (ACR Practice Parameter for Communication of Diagnostic Imaging Findings).
@@ -87,6 +87,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
             </label>
           ))}
         </div>
+        <label className="consent-field critical-field"><input type="checkbox" checked={report.criticalFinding} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, criticalFinding: event.target.checked }))} />Hallazgo crítico: requiere comunicación inmediata al solicitante (queda marcado en la lista de trabajo).</label>
         <footer className="report-actions">
           {report.status === "final"
             ? <button className="button secondary" type="button" disabled={saving} onClick={() => persist("draft")}>Reabrir como borrador</button>

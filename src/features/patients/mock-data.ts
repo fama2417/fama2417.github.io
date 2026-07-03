@@ -11,9 +11,10 @@ export type Patient = {
   email: string;
   allergies: string;
   morbidHistory: string;
+  prevision: string;
 };
 
-export const emptyPatientRecord = { address: "", comuna: "", email: "", allergies: "", morbidHistory: "" };
+export const emptyPatientRecord = { address: "", comuna: "", email: "", allergies: "", morbidHistory: "", prevision: "" };
 
 export const patients: Patient[] = [
   {
