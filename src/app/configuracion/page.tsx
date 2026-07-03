@@ -1,5 +1,6 @@
 import { AppShell } from "@/components/AppShell";
 import { CatalogManager } from "@/features/catalog/CatalogManager";
+import { UsersManager } from "@/features/users/UsersManager";
 import { getSupabaseEnvironment } from "@/lib/supabase";
 
 export default function SettingsPage() {
@@ -9,6 +10,7 @@ export default function SettingsPage() {
   return (
     <AppShell>
       <div className="page-header"><div><p className="eyebrow">Configuración</p><h2>Parámetros e integraciones</h2><p>Administra los listados de la agenda y revisa el estado de los servicios.</p></div></div>
+      <UsersManager />
       <CatalogManager />
       <section className="grid two-columns">
         <article className="card"><div className="card-heading"><h3>Supabase</h3><span className={`phase-state ${supabase.isConfigured ? "ready" : "pending"}`}>{supabase.isConfigured ? "Configurado" : "Pendiente"}</span></div><p>PostgreSQL, autenticación, RLS y auditoría. La migración está en <code>supabase/migrations</code>.</p></article>
