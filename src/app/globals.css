@@ -228,17 +228,6 @@ tr.row-link:hover td { background: var(--surface-muted); }
 .catalog-list li.inactive > span { color: var(--muted); text-decoration: line-through; }
 .catalog-list li.inactive:last-child > span { text-decoration: none; }
 
-/* Alertas y utilidades de worklist */
-.priority-dot { background: var(--danger); border-radius: 50%; display: inline-block; height: 9px; margin-right: 7px; width: 9px; }
-.alert-icons { align-items: center; display: inline-flex; gap: 6px; }
-.alert-icons .text-button { font-size: 1rem; padding: 0; }
-.preset-row { display: flex; flex-wrap: wrap; gap: 6px; }
-.column-picker { position: relative; }
-.column-menu { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); display: grid; gap: 6px; padding: 12px; position: absolute; right: 0; top: 28px; width: 170px; z-index: 20; }
-.column-menu label { align-items: center; color: var(--text); display: flex; font-size: 0.85rem; font-weight: 400; gap: 8px; }
-.column-menu input { width: auto; }
-.critical-field { color: var(--danger); font-size: 0.85rem; }
-
 /* Worklist con panel de filtros lateral */
 .filter-layout { align-items: start; display: grid; gap: 16px; grid-template-columns: 240px 1fr; }
 .filter-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; display: grid; gap: 12px; padding: 14px; }
