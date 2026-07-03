@@ -4,7 +4,9 @@ import { useEffect, useState } from "react";
 import type { Appointment } from "@/features/appointments/mock-data";
 import { fetchAppointments } from "@/features/appointments/repository";
 import { appointmentStatusLabels } from "@/features/appointments/status";
+import { fetchMyTenant, type Tenant } from "@/features/tenant/repository";
 import { fetchReport, saveReport, type RadiologyReport } from "./repository";
+import { fetchTemplates, type ReportTemplate } from "./templates";
 
 const ohifUrl = (process.env.NEXT_PUBLIC_OHIF_URL ?? "http://localhost:8042/ohif").replace(/\/$/, "");
 
@@ -28,6 +30,8 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [templates, setTemplates] = useState<ReportTemplate[]>([]);
+  const [tenant, setTenant] = useState<Tenant | null>(null);
 
   useEffect(() => {
     Promise.all([fetchAppointments(), fetchReport(appointmentId)])
@@ -37,7 +41,16 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
       })
       .catch(() => setError("No fue posible cargar el estudio."))
       .finally(() => setLoading(false));
+    fetchTemplates().then(setTemplates).catch(() => undefined);
+    fetchMyTenant().then(setTenant).catch(() => undefined);
   }, [appointmentId]);
+
+  function applyTemplate(id: string) {
+    const template = templates.find((item) => item.id === id);
+    if (!template) return;
+    setReport((current) => ({ ...current, technique: template.technique, comparison: template.comparison, findings: template.findings, impression: template.impression }));
+    setNotice(`Plantilla "${template.name}" aplicada.`);
+  }
 
   async function persist(status: RadiologyReport["status"]) {
     setSaving(true);
@@ -73,6 +86,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
       </div>
       <div className="report-header-actions">
         <span className={`report-status ${report.status}`}>{report.status === "final" ? "Definitivo" : "Borrador"}</span>
+        {report.status === "final" && <button className="text-button" type="button" onClick={() => window.print()}>Imprimir</button>}
         {viewer && <a className="text-button" href={viewer} target="_blank" rel="noreferrer">Pantalla completa ↗</a>}
       </div>
     </header>
@@ -80,7 +94,13 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
     <div className="report-layout">
       <section className="report-editor" aria-label="Editor de informe">
         <div className="report-fields">
-          <h3>Informe estructurado (ACR)</h3>
+          <div className="card-heading"><h3>Informe estructurado (ACR)</h3>
+            {report.status !== "final" && templates.some((template) => template.active && template.modality === appointment.modality) &&
+              <select defaultValue="" onChange={(event) => { applyTemplate(event.target.value); event.target.value = ""; }} aria-label="Aplicar plantilla">
+                <option value="" disabled>Aplicar plantilla…</option>
+                {templates.filter((template) => template.active && template.modality === appointment.modality).map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}
+              </select>}
+          </div>
           {sections.map((section) => (
             <label key={section.name}>{section.label}
               <textarea name={section.name} value={report[section.name]} placeholder={section.hint} onChange={(event) => setSection(section.name, event.target.value)} disabled={report.status === "final"} />
@@ -102,6 +122,25 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
           ? <iframe src={viewer} title="Visor OHIF" allow="fullscreen" />
           : <p className="empty-state">Este estudio aún no tiene imágenes vinculadas en el PACS.</p>}
       </section>
+    </div>
+
+    <div className="print-sheet" aria-hidden="true">
+      <header>
+        {tenant?.logoUrl && <img src={tenant.logoUrl} alt="" />}
+        <div>
+          <h1>{tenant?.name ?? "Informe radiológico"}</h1>
+          <p>{[tenant?.rut && `RUT ${tenant.rut}`, tenant?.address, tenant?.phone].filter(Boolean).join(" · ")}</p>
+        </div>
+      </header>
+      <h2>Informe radiológico</h2>
+      <p><strong>Paciente:</strong> {appointment.patientName} · <strong>ID:</strong> {appointment.patientIdentifier || "—"}</p>
+      <p><strong>Examen:</strong> {appointment.modality} · {appointment.reason} · <strong>Fecha:</strong> {appointment.date}</p>
+      {report.criticalFinding && <p><strong>⚠ HALLAZGO CRÍTICO comunicado al solicitante.</strong></p>}
+      {sections.map((section) => report[section.name] && <section key={section.name}><h3>{section.label}</h3><p>{report[section.name]}</p></section>)}
+      <footer>
+        <p>{appointment.practitionerName}</p>
+        <p>Informe firmado electrónicamente · {report.updatedAt ? new Date(report.updatedAt).toLocaleString("es-CL") : ""}</p>
+      </footer>
     </div>
   </div>;
 }
