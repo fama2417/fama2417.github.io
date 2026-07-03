@@ -42,6 +42,7 @@ export function PatientsManager() {
         email: String(form.get("email") ?? "").trim(),
         allergies: String(form.get("allergies") ?? "").trim(),
         morbidHistory: String(form.get("morbidHistory") ?? "").trim(),
+        prevision: String(form.get("prevision") ?? "").trim(),
       });
       setPatients((current) => [...current, patient].sort((a, b) => a.name.localeCompare(b.name)));
       formElement.reset();
@@ -66,6 +67,7 @@ export function PatientsManager() {
           <label>Fecha de nacimiento<input name="birthDate" type="date" required /></label>
           <label>Sexo registral<select name="sex" defaultValue="unknown">{Object.entries(sexLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           <label>Teléfono<input name="phone" type="tel" /></label>
+          <label>Previsión<input name="prevision" placeholder="FONASA / Isapre / Particular" /></label>
           <label>Correo electrónico<input name="email" type="email" /></label>
           <label>Dirección<input name="address" /></label>
           <label>Comuna<input name="comuna" /></label>

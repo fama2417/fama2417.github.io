@@ -26,12 +26,30 @@ export type Appointment = {
   tags: string;
   diagnosticHypothesis: string;
   comment: string;
+  requesterType: "interno" | "externo";
+  requesterName: string;
+  requesterRun: string;
+  requesterEmail: string;
+  pickupName: string;
+  pickupRun: string;
+  pickupPhone: string;
+  originType: "interna" | "externa";
+  originDesc: string;
+  statusReason: string;
+  orderFile: string;
+  reportStatus?: "draft" | "final";
+  criticalFinding?: boolean;
+  patientIdentifier?: string;
+  patientPrevision?: string;
 };
 
 export const emptyClinicalDetail = {
   branch: "",
   service: "", specialty: "", procedureCode: "", treatingPhysician: "", orderDate: "",
   anesthesia: false, contrast: false, priority: "normal" as const, paymentOrder: "", tags: "", diagnosticHypothesis: "", comment: "",
+  requesterType: "interno" as const, requesterName: "", requesterRun: "", requesterEmail: "",
+  pickupName: "", pickupRun: "", pickupPhone: "",
+  originType: "interna" as const, originDesc: "", statusReason: "", orderFile: "",
 };
 
 export const initialAppointments: Appointment[] = [

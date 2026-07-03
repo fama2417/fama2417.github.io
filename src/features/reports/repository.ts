@@ -8,12 +8,13 @@ export type RadiologyReport = {
   findings: string;
   impression: string;
   status: "draft" | "final";
+  criticalFinding: boolean;
   updatedAt?: string;
 };
 
-const columns = "appointment_id, clinical_indication, technique, comparison, findings, impression, status, updated_at";
+const columns = "appointment_id, clinical_indication, technique, comparison, findings, impression, status, critical_finding, updated_at";
 
-type ReportRow = { appointment_id: string; clinical_indication: string; technique: string; comparison: string; findings: string; impression: string; status: RadiologyReport["status"]; updated_at: string };
+type ReportRow = { appointment_id: string; clinical_indication: string; technique: string; comparison: string; findings: string; impression: string; status: RadiologyReport["status"]; critical_finding: boolean; updated_at: string };
 
 const mapReport = (row: ReportRow): RadiologyReport => ({
   appointmentId: row.appointment_id,
@@ -23,6 +24,7 @@ const mapReport = (row: ReportRow): RadiologyReport => ({
   findings: row.findings,
   impression: row.impression,
   status: row.status,
+  criticalFinding: row.critical_finding,
   updatedAt: row.updated_at,
 });
 
@@ -41,6 +43,7 @@ export async function saveReport(report: RadiologyReport) {
     findings: report.findings,
     impression: report.impression,
     status: report.status,
+    critical_finding: report.criticalFinding,
     updated_at: new Date().toISOString(),
   }, { onConflict: "appointment_id" });
   if (error) throw error;
