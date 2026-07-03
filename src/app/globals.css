@@ -229,6 +229,23 @@ tr.row-link:hover td { background: var(--surface-muted); }
 .catalog-list li.inactive > span { color: var(--muted); text-decoration: line-through; }
 .catalog-list li.inactive:last-child > span { text-decoration: none; }
 
+/* Informe impreso con membrete institucional */
+.print-sheet { display: none; }
+@media print {
+  body { background: #fff !important; color: #000 !important; }
+  .session-bar, .topbar, .report-workstation-header, .report-layout, .notice { display: none !important; }
+  body:has(.report-workstation) { display: block; height: auto; overflow: visible; }
+  .print-sheet { color: #000; display: block; font-size: 12pt; line-height: 1.5; padding: 8mm; }
+  .print-sheet header { align-items: center; border-bottom: 2px solid #000; display: flex; gap: 16px; margin-bottom: 16px; padding-bottom: 12px; }
+  .print-sheet header img { height: 56px; }
+  .print-sheet header h1 { font-size: 15pt; margin: 0; }
+  .print-sheet header p { color: #444; font-size: 9pt; margin: 2px 0 0; }
+  .print-sheet h2 { font-size: 13pt; margin: 0 0 8px; text-transform: uppercase; }
+  .print-sheet h3 { font-size: 11pt; margin: 12px 0 2px; text-transform: uppercase; }
+  .print-sheet p { margin: 2px 0; white-space: pre-wrap; }
+  .print-sheet footer { border-top: 1px solid #000; margin-top: 32px; padding-top: 8px; text-align: right; }
+}
+
 /* Asistente de reserva por pasos */
 .stepper { display: flex; flex-wrap: wrap; gap: 10px; }
 .step-chip { align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: 999px; color: var(--muted); cursor: pointer; display: inline-flex; font-weight: 600; gap: 10px; padding: 8px 18px 8px 8px; }

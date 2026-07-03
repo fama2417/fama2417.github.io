@@ -5,6 +5,7 @@ import { emptyPatientRecord, type Patient } from "@/features/patients/mock-data"
 import { createPatient, fetchPatients } from "@/features/patients/repository";
 import { activeOptions, fetchCatalog, type CatalogItem } from "@/features/catalog/repository";
 import { compressOrderFile } from "@/lib/compress-image";
+import { fetchHolidays, fetchSchedules, scheduleError, type Holiday, type RoomSchedule } from "@/features/schedule/repository";
 import { emptyClinicalDetail, type Appointment } from "./mock-data";
 import { fetchAppointments, saveAppointment, setAppointmentStatus, uploadOrderFile } from "./repository";
 import { APPOINTMENT_STATUSES, appointmentStatusLabels, type AppointmentStatus } from "./status";
@@ -28,6 +29,8 @@ export function AgendaManager() {
   const [step, setStep] = useState(0);
   const [newPatient, setNewPatient] = useState<typeof emptyNewPatient | null>(null);
   const [pendingOrder, setPendingOrder] = useState<File | null>(null);
+  const [schedules, setSchedules] = useState<RoomSchedule[]>([]);
+  const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
@@ -39,6 +42,8 @@ export function AgendaManager() {
       setPatients(nextPatients);
       setCatalog(nextCatalog);
     }).catch(() => setError("No fue posible cargar la agenda.")).finally(() => setLoading(false));
+    fetchSchedules().then(setSchedules).catch(() => undefined);
+    fetchHolidays().then(setHolidays).catch(() => undefined);
   }, []);
 
   const options = useMemo(() => ({
@@ -119,8 +124,8 @@ export function AgendaManager() {
     const patient = patients.find((item) => item.id === draft.patientId);
     const exists = Boolean(draft.id);
     const candidate = { ...draft, id: draft.id || crypto.randomUUID(), patientName: patient?.name ?? "" };
-    const message = appointmentError(candidate, appointments);
-    if (message) return setError(message);
+    const message = appointmentError(candidate, appointments) || scheduleError(candidate, schedules, holidays);
+    if (message) { setStep(1); return setError(message); }
     setSaving(true);
     try {
       await saveAppointment(candidate, exists);
