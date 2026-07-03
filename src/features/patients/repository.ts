@@ -1,10 +1,10 @@
 import { supabase } from "@/lib/supabase-client";
 import type { Patient } from "./mock-data";
 
-const columns = "id, identifier, full_name, birth_date, sex, phone";
+const columns = "id, identifier, full_name, birth_date, sex, phone, privacy_consent_at";
 
-function mapPatient(row: { id: string; identifier: string; full_name: string; birth_date: string; sex: Patient["sex"]; phone: string }): Patient {
-  return { id: row.id, identifier: row.identifier, name: row.full_name, birthDate: row.birth_date, sex: row.sex, phone: row.phone };
+function mapPatient(row: { id: string; identifier: string; full_name: string; birth_date: string; sex: Patient["sex"]; phone: string; privacy_consent_at: string | null }): Patient {
+  return { id: row.id, identifier: row.identifier, name: row.full_name, birthDate: row.birth_date, sex: row.sex, phone: row.phone, consentAt: row.privacy_consent_at ?? undefined };
 }
 
 export async function fetchPatients() {
@@ -20,6 +20,7 @@ export async function createPatient(patient: Omit<Patient, "id">) {
     birth_date: patient.birthDate,
     sex: patient.sex,
     phone: patient.phone,
+    privacy_consent_at: patient.consentAt ?? null,
   }).select(columns).single();
   if (error) throw error;
   return mapPatient(data);
