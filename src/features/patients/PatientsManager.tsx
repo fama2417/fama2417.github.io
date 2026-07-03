@@ -37,6 +37,11 @@ export function PatientsManager() {
         sex: String(form.get("sex")) as Patient["sex"],
         phone: String(form.get("phone")).trim(),
         consentAt: new Date().toISOString(),
+        address: String(form.get("address") ?? "").trim(),
+        comuna: String(form.get("comuna") ?? "").trim(),
+        email: String(form.get("email") ?? "").trim(),
+        allergies: String(form.get("allergies") ?? "").trim(),
+        morbidHistory: String(form.get("morbidHistory") ?? "").trim(),
       });
       setPatients((current) => [...current, patient].sort((a, b) => a.name.localeCompare(b.name)));
       formElement.reset();
@@ -61,6 +66,11 @@ export function PatientsManager() {
           <label>Fecha de nacimiento<input name="birthDate" type="date" required /></label>
           <label>Sexo registral<select name="sex" defaultValue="unknown">{Object.entries(sexLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           <label>Teléfono<input name="phone" type="tel" /></label>
+          <label>Correo electrónico<input name="email" type="email" /></label>
+          <label>Dirección<input name="address" /></label>
+          <label>Comuna<input name="comuna" /></label>
+          <label className="span-2">Alergias<input name="allergies" placeholder="Sin alergias conocidas" /></label>
+          <label className="span-2">Antecedentes mórbidos<input name="morbidHistory" placeholder="Sin antecedentes relevantes" /></label>
           <label className="consent-field"><input name="consent" type="checkbox" required />El paciente (o su representante) otorgó consentimiento expreso para el tratamiento de sus datos personales y de salud, según la <a href="/privacidad" className="text-button">política de privacidad</a> (Ley 19.628/21.668). Se registrará fecha y usuario.</label>
           <button className="button primary" type="submit">Guardar paciente</button>
           {error && <p className="form-error" role="alert">{error}</p>}
