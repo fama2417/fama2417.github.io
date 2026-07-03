@@ -36,6 +36,7 @@ export function PatientsManager() {
         birthDate: String(form.get("birthDate")),
         sex: String(form.get("sex")) as Patient["sex"],
         phone: String(form.get("phone")).trim(),
+        consentAt: new Date().toISOString(),
       });
       setPatients((current) => [...current, patient].sort((a, b) => a.name.localeCompare(b.name)));
       formElement.reset();
@@ -60,6 +61,7 @@ export function PatientsManager() {
           <label>Fecha de nacimiento<input name="birthDate" type="date" required /></label>
           <label>Sexo registral<select name="sex" defaultValue="unknown">{Object.entries(sexLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           <label>Teléfono<input name="phone" type="tel" /></label>
+          <label className="consent-field"><input name="consent" type="checkbox" required />El paciente (o su representante) otorgó consentimiento expreso para el tratamiento de sus datos personales y de salud, según la <a href="/privacidad" className="text-button">política de privacidad</a> (Ley 19.628/21.668). Se registrará fecha y usuario.</label>
           <button className="button primary" type="submit">Guardar paciente</button>
           {error && <p className="form-error" role="alert">{error}</p>}
         </form>
@@ -67,8 +69,8 @@ export function PatientsManager() {
 
       <section className="toolbar" aria-label="Búsqueda de pacientes"><label className="wide-field">Buscar paciente<input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nombre o identificador" type="search" /></label></section>
       <section className="table-card">
-        <table><thead><tr><th>Identificador</th><th>Nombre</th><th>Fecha nacimiento</th><th>Sexo</th><th>Teléfono</th></tr></thead><tbody>
-          {visiblePatients.map((patient) => <tr key={patient.id}><td>{patient.identifier}</td><td>{patient.name}</td><td>{patient.birthDate}</td><td>{sexLabels[patient.sex]}</td><td>{patient.phone || "—"}</td></tr>)}
+        <table><thead><tr><th>Identificador</th><th>Nombre</th><th>Fecha nacimiento</th><th>Sexo</th><th>Teléfono</th><th>Consentimiento</th></tr></thead><tbody>
+          {visiblePatients.map((patient) => <tr key={patient.id}><td>{patient.identifier}</td><td>{patient.name}</td><td>{patient.birthDate}</td><td>{sexLabels[patient.sex]}</td><td>{patient.phone || "—"}</td><td>{patient.consentAt ? <span className="status status-completed">Otorgado</span> : <span className="status status-cancelled">Pendiente</span>}</td></tr>)}
         </tbody></table>
         {!loading && !visiblePatients.length && <p className="empty-state">No se encontraron pacientes.</p>}
         {loading && <p className="empty-state">Cargando pacientes…</p>}

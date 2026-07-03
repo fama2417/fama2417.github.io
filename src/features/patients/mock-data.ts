@@ -5,6 +5,7 @@ export type Patient = {
   birthDate: string;
   sex: "female" | "male" | "other" | "unknown";
   phone: string;
+  consentAt?: string;
 };
 
 export const patients: Patient[] = [
