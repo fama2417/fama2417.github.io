@@ -8,6 +8,7 @@ export const CATALOG_CATEGORIES = {
   sala: "Salas / equipos",
   prestacion: "Prestaciones",
   etiqueta: "Etiquetas de cita",
+  prevision: "Previsiones",
 } as const;
 
 export type CatalogCategory = keyof typeof CATALOG_CATEGORIES;

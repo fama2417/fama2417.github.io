@@ -228,6 +228,30 @@ tr.row-link:hover td { background: var(--surface-muted); }
 .catalog-list li.inactive > span { color: var(--muted); text-decoration: line-through; }
 .catalog-list li.inactive:last-child > span { text-decoration: none; }
 
+/* Asistente de reserva por pasos */
+.stepper { display: flex; flex-wrap: wrap; gap: 10px; }
+.step-chip { align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: 999px; color: var(--muted); cursor: pointer; display: inline-flex; font-weight: 600; gap: 10px; padding: 8px 18px 8px 8px; }
+.step-chip span { align-items: center; background: var(--surface-muted); border-radius: 50%; display: inline-flex; font-size: 0.8rem; height: 26px; justify-content: center; width: 26px; }
+.step-chip.current { border-color: var(--primary); color: var(--text); }
+.step-chip.current span { background: var(--primary); color: #04211d; }
+.step-chip.done { color: var(--primary); }
+.step-chip.done span { background: rgba(31, 182, 166, 0.2); color: var(--primary); }
+.patient-chip { background: var(--surface-muted); border-radius: 8px; color: var(--text); display: flex; flex-wrap: wrap; gap: 8px 24px; margin-top: 14px; padding: 14px 16px; }
+.patient-chip strong { color: var(--primary); font-weight: 600; }
+.inner-form { background: #0a1a1d; border: 1px dashed var(--border); border-radius: 8px; margin-top: 14px; padding: 14px; }
+.booking-grid-action { align-self: end; display: grid; }
+
+/* Alertas y utilidades de worklist */
+.priority-dot { background: var(--danger); border-radius: 50%; display: inline-block; height: 9px; margin-right: 7px; width: 9px; }
+.alert-icons { align-items: center; display: inline-flex; gap: 6px; }
+.alert-icons .text-button { font-size: 1rem; padding: 0; }
+.preset-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.column-picker { position: relative; }
+.column-menu { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); display: grid; gap: 6px; padding: 12px; position: absolute; right: 0; top: 28px; width: 170px; z-index: 20; }
+.column-menu label { align-items: center; color: var(--text); display: flex; font-size: 0.85rem; font-weight: 400; gap: 8px; }
+.column-menu input { width: auto; }
+.critical-field { color: var(--danger); font-size: 0.85rem; }
+
 /* Worklist con panel de filtros lateral */
 .filter-layout { align-items: start; display: grid; gap: 16px; grid-template-columns: 240px 1fr; }
 .filter-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; display: grid; gap: 12px; padding: 14px; }

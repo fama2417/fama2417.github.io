@@ -1,11 +1,11 @@
 import { supabase } from "@/lib/supabase-client";
 import type { Patient } from "./mock-data";
 
-const columns = "id, identifier, full_name, birth_date, sex, phone, privacy_consent_at, address, comuna, email, allergies, morbid_history";
+const columns = "id, identifier, full_name, birth_date, sex, phone, privacy_consent_at, address, comuna, email, allergies, morbid_history, prevision";
 
 type PatientRow = {
   id: string; identifier: string; full_name: string; birth_date: string; sex: Patient["sex"]; phone: string;
-  privacy_consent_at: string | null; address: string; comuna: string; email: string; allergies: string; morbid_history: string;
+  privacy_consent_at: string | null; address: string; comuna: string; email: string; allergies: string; morbid_history: string; prevision: string;
 };
 
 function mapPatient(row: PatientRow): Patient {
@@ -13,6 +13,7 @@ function mapPatient(row: PatientRow): Patient {
     id: row.id, identifier: row.identifier, name: row.full_name, birthDate: row.birth_date, sex: row.sex, phone: row.phone,
     consentAt: row.privacy_consent_at ?? undefined,
     address: row.address ?? "", comuna: row.comuna ?? "", email: row.email ?? "", allergies: row.allergies ?? "", morbidHistory: row.morbid_history ?? "",
+    prevision: row.prevision ?? "",
   };
 }
 
@@ -35,6 +36,7 @@ export async function createPatient(patient: Omit<Patient, "id">) {
     email: patient.email,
     allergies: patient.allergies,
     morbid_history: patient.morbidHistory,
+    prevision: patient.prevision,
   }).select(columns).single();
   if (error) throw error;
   return mapPatient(data as PatientRow);
