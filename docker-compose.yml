@@ -8,10 +8,12 @@ services:
       DICOM_WEB_PLUGIN_ENABLED: "true"
       OHIF_PLUGIN_ENABLED: "true"
       ORTHANC__OHIF__DATA_SOURCE: "dicom-web"
+      ORTHANC__OHIF__USER_CONFIGURATION: "/etc/orthanc/ohif.js"
       ORTHANC__REGISTERED_USERS: '{"demo":"demo"}'
       ORTHANC__NAME: "Agenda Imagenología - Demo"
     volumes:
       - orthanc-data:/var/lib/orthanc/db
+      - ./orthanc/ohif.js:/etc/orthanc/ohif.js:ro
     restart: unless-stopped
 
 volumes:

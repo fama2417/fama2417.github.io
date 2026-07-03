@@ -1,0 +1,72 @@
+"use client";
+
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { CATALOG_CATEGORIES, createCatalogItem, fetchCatalog, updateCatalogItem, type CatalogCategory, type CatalogItem } from "./repository";
+
+export function CatalogManager() {
+  const [catalog, setCatalog] = useState<CatalogItem[]>([]);
+  const [category, setCategory] = useState<CatalogCategory>("sucursal");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => { fetchCatalog().then(setCatalog).catch(() => setError("No fue posible cargar los catálogos.")).finally(() => setLoading(false)); }, []);
+
+  const items = useMemo(() => catalog.filter((item) => item.category === category), [catalog, category]);
+
+  async function addItem(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    const label = String(form.get("label")).trim();
+    if (!label) return;
+    try {
+      const item = await createCatalogItem({ category, code: String(form.get("code")).trim(), label, active: true, sort: items.length + 1 });
+      setCatalog((current) => [...current, item]);
+      formElement.reset();
+      setError("");
+    } catch {
+      setError("No fue posible guardar. Revisa que el valor no exista y que tu perfil tenga permisos.");
+    }
+  }
+
+  async function toggleItem(item: CatalogItem) {
+    const next = { ...item, active: !item.active };
+    try {
+      await updateCatalogItem(next);
+      setCatalog((current) => current.map((entry) => entry.id === item.id ? next : entry));
+    } catch {
+      setError("No fue posible actualizar el valor.");
+    }
+  }
+
+  return (
+    <section className="card" aria-label="Parámetros de la agenda">
+      <div className="card-heading"><h3>Parámetros de la agenda</h3><span className="phase-state">Autoservicio</span></div>
+      <p>Los valores activos aparecen como opciones al agendar. Desactiva en vez de borrar para conservar el historial.</p>
+      <div className="catalog-layout">
+        <nav className="catalog-tabs" aria-label="Categorías">
+          {Object.entries(CATALOG_CATEGORIES).map(([value, label]) => (
+            <button key={value} type="button" className={value === category ? "active" : ""} onClick={() => setCategory(value as CatalogCategory)}>{label}</button>
+          ))}
+        </nav>
+        <div>
+          <form className="catalog-form" onSubmit={addItem}>
+            <label>Código (opcional)<input name="code" placeholder="Ej: 04.04.001.101" /></label>
+            <label>Nombre<input name="label" required placeholder={`Nueva opción de ${CATALOG_CATEGORIES[category].toLowerCase()}`} /></label>
+            <button className="button primary" type="submit">Agregar</button>
+          </form>
+          {error && <p className="form-error" role="alert">{error}</p>}
+          <ul className="catalog-list">
+            {items.map((item) => (
+              <li key={item.id} className={item.active ? "" : "inactive"}>
+                <span>{item.code && <code>{item.code}</code>} {item.label}</span>
+                <button className="text-button" type="button" onClick={() => toggleItem(item)}>{item.active ? "Desactivar" : "Activar"}</button>
+              </li>
+            ))}
+            {!loading && !items.length && <li className="inactive"><span>Sin valores. Agrega el primero.</span></li>}
+          </ul>
+        </div>
+      </div>
+    </section>
+  );
+}

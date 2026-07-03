@@ -13,11 +13,31 @@ export type Appointment = {
   reason: string;
   modality: "US" | "DX" | "CT" | "MR" | "MG";
   studyInstanceUid?: string;
+  branch: string;
+  service: string;
+  specialty: string;
+  procedureCode: string;
+  treatingPhysician: string;
+  orderDate: string;
+  anesthesia: boolean;
+  contrast: boolean;
+  priority: "normal" | "urgente";
+  paymentOrder: string;
+  tags: string;
+  diagnosticHypothesis: string;
+  comment: string;
+};
+
+export const emptyClinicalDetail = {
+  branch: "",
+  service: "", specialty: "", procedureCode: "", treatingPhysician: "", orderDate: "",
+  anesthesia: false, contrast: false, priority: "normal" as const, paymentOrder: "", tags: "", diagnosticHypothesis: "", comment: "",
 };
 
 export const initialAppointments: Appointment[] = [
   {
     id: "apt-001",
+    ...emptyClinicalDetail,
     patientId: "pat-001",
     patientName: "Paciente de prueba 01",
     practitionerName: "Dra. Imagenología",
@@ -31,6 +51,7 @@ export const initialAppointments: Appointment[] = [
   },
   {
     id: "apt-002",
+    ...emptyClinicalDetail,
     patientId: "pat-002",
     patientName: "Paciente de prueba 02",
     practitionerName: "Dr. Radiología",
@@ -44,6 +65,7 @@ export const initialAppointments: Appointment[] = [
   },
   {
     id: "apt-003",
+    ...emptyClinicalDetail,
     patientId: "pat-003",
     patientName: "Paciente de prueba 03",
     practitionerName: "Dra. Imagenología",

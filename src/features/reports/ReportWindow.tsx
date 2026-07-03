@@ -61,8 +61,8 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
   const setSection = (name: string, value: string) => setReport((current) => ({ ...current, [name]: value }));
   const viewer = appointment.studyInstanceUid ? `${ohifUrl}/viewer?StudyInstanceUIDs=${encodeURIComponent(appointment.studyInstanceUid)}` : null;
 
-  return <>
-    <div className="page-header">
+  return <div className="report-workstation">
+    <header className="report-workstation-header">
       <div>
         <p className="eyebrow">Informe radiológico</p>
         <h2>{appointment.patientName}</h2>
@@ -71,25 +71,30 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
           <span>{appointment.locationName}</span><span>{appointmentStatusLabels[appointment.status]}</span>
         </p>
       </div>
-      <span className={`report-status ${report.status}`}>{report.status === "final" ? "Definitivo" : "Borrador"}</span>
-    </div>
+      <div className="report-header-actions">
+        <span className={`report-status ${report.status}`}>{report.status === "final" ? "Definitivo" : "Borrador"}</span>
+        {viewer && <a className="text-button" href={viewer} target="_blank" rel="noreferrer">Pantalla completa ↗</a>}
+      </div>
+    </header>
     {error && <p className="notice" role="alert">{error}</p>}
     <div className="report-layout">
       <section className="report-editor" aria-label="Editor de informe">
-        <h3>Informe estructurado (ACR)</h3>
-        {sections.map((section) => (
-          <label key={section.name}>{section.label}
-            <textarea name={section.name} value={report[section.name]} placeholder={section.hint} onChange={(event) => setSection(section.name, event.target.value)} disabled={report.status === "final"} />
-          </label>
-        ))}
-        <div className="report-actions">
+        <div className="report-fields">
+          <h3>Informe estructurado (ACR)</h3>
+          {sections.map((section) => (
+            <label key={section.name}>{section.label}
+              <textarea name={section.name} value={report[section.name]} placeholder={section.hint} onChange={(event) => setSection(section.name, event.target.value)} disabled={report.status === "final"} />
+            </label>
+          ))}
+        </div>
+        <footer className="report-actions">
           {report.status === "final"
             ? <button className="button secondary" type="button" disabled={saving} onClick={() => persist("draft")}>Reabrir como borrador</button>
             : <><button className="button secondary" type="button" disabled={saving} onClick={() => persist("draft")}>Guardar borrador</button>
               <button className="button primary" type="button" disabled={saving} onClick={() => persist("final")}>Firmar definitivo</button></>}
           {notice && <span className="form-notice" role="status">{notice}</span>}
-        </div>
-        {report.updatedAt && <p className="report-meta"><span>Última modificación: {new Date(report.updatedAt).toLocaleString("es-CL")}</span></p>}
+          {report.updatedAt && <span className="report-updated">Última modificación: {new Date(report.updatedAt).toLocaleString("es-CL")}</span>}
+        </footer>
       </section>
       <section className="viewer-pane" aria-label="Visor de imágenes">
         {viewer
@@ -97,6 +102,5 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
           : <p className="empty-state">Este estudio aún no tiene imágenes vinculadas en el PACS.</p>}
       </section>
     </div>
-    {viewer && <p className="report-meta" style={{ marginTop: 8 }}><a className="text-button" href={viewer} target="_blank" rel="noreferrer">Abrir visor en ventana completa ↗</a></p>}
-  </>;
+  </div>;
 }

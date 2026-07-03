@@ -1,4 +1,5 @@
 import { AppShell } from "@/components/AppShell";
+import { CatalogManager } from "@/features/catalog/CatalogManager";
 import { getSupabaseEnvironment } from "@/lib/supabase";
 
 export default function SettingsPage() {
@@ -7,7 +8,8 @@ export default function SettingsPage() {
   const ohifUrl = (process.env.NEXT_PUBLIC_OHIF_URL ?? `${orthancUrl}/ohif`).replace(/\/$/, "");
   return (
     <AppShell>
-      <div className="page-header"><div><p className="eyebrow">Integraciones</p><h2>Configuración técnica</h2><p>Estado de los servicios externos del MVP.</p></div></div>
+      <div className="page-header"><div><p className="eyebrow">Configuración</p><h2>Parámetros e integraciones</h2><p>Administra los listados de la agenda y revisa el estado de los servicios.</p></div></div>
+      <CatalogManager />
       <section className="grid two-columns">
         <article className="card"><div className="card-heading"><h3>Supabase</h3><span className={`phase-state ${supabase.isConfigured ? "ready" : "pending"}`}>{supabase.isConfigured ? "Configurado" : "Pendiente"}</span></div><p>PostgreSQL, autenticación, RLS y auditoría. La migración está en <code>supabase/migrations</code>.</p></article>
         <article className="card"><div className="card-heading"><h3>Orthanc + OHIF</h3><span className="phase-state">Configurado</span></div><p>PACS DICOM de prueba y visor web integrados en un contenedor Docker.</p><div className="integration-links"><a href={`${orthancUrl}/ui/app/`} target="_blank" rel="noreferrer">Orthanc ↗</a><a href={ohifUrl} target="_blank" rel="noreferrer">OHIF ↗</a></div></article>
