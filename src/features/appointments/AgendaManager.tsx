@@ -5,7 +5,7 @@ import type { Patient } from "@/features/patients/mock-data";
 import { fetchPatients } from "@/features/patients/repository";
 import { activeOptions, fetchCatalog, type CatalogItem } from "@/features/catalog/repository";
 import { emptyClinicalDetail, type Appointment } from "./mock-data";
-import { fetchAppointments, saveAppointment, setAppointmentStatus, uploadOrderFile } from "./repository";
+import { fetchAppointments, saveAppointment, setAppointmentStatus } from "./repository";
 import { APPOINTMENT_STATUSES, appointmentStatusLabels, type AppointmentStatus } from "./status";
 import { appointmentError } from "./validation";
 
@@ -81,23 +81,11 @@ export function AgendaManager() {
   }
 
   async function changeStatus(id: string, status: AppointmentStatus) {
-    const reason = ["cancelled", "no_show"].includes(status) ? window.prompt("Motivo del cambio de estado:") ?? "" : "";
     try {
-      await setAppointmentStatus(id, status, reason);
-      setAppointments((current) => current.map((item) => item.id === id ? { ...item, status, statusReason: reason } : item));
+      await setAppointmentStatus(id, status);
+      setAppointments((current) => current.map((item) => item.id === id ? { ...item, status } : item));
     } catch {
       setError("No fue posible actualizar el estado.");
-    }
-  }
-
-  async function attachOrder(file: File | undefined) {
-    if (!file || !draft?.id) return;
-    try {
-      const path = await uploadOrderFile(draft.id, file);
-      setDraft((current) => current && { ...current, orderFile: path });
-      setAppointments((current) => current.map((item) => item.id === draft.id ? { ...item, orderFile: path } : item));
-    } catch {
-      setError("No fue posible adjuntar la orden.");
     }
   }
 
@@ -138,36 +126,6 @@ export function AgendaManager() {
               <div className="booking-tags"><span>Etiquetas de cita</span><div>{options.etiqueta.map((item) => <button key={item.id} type="button" className={`tag ${draft.tags.split(",").includes(item.label) ? "active" : ""}`} onClick={() => toggleTag(item.label)}>{item.label}</button>)}{!options.etiqueta.length && <span className="empty-inline">Sin etiquetas configuradas.</span>}</div></div>
               <label className="span-2">Hipótesis diagnóstica<textarea value={draft.diagnosticHypothesis} onChange={(event) => set("diagnosticHypothesis", event.target.value)} /></label>
               <label className="span-2">Comentario<textarea value={draft.comment} onChange={(event) => set("comment", event.target.value)} /></label>
-            </div>
-          </fieldset>
-
-          <fieldset className="booking-section">
-            <legend>Procedencia</legend>
-            <div className="booking-grid">
-              <label>Tipo<select value={draft.originType} onChange={(event) => set("originType", event.target.value as Appointment["originType"])}><option value="interna">Interna</option><option value="externa">Externa</option></select></label>
-              <label className="span-2">Descripción<input value={draft.originDesc} onChange={(event) => set("originDesc", event.target.value)} placeholder="Servicio o institución de origen" /></label>
-            </div>
-          </fieldset>
-
-          <fieldset className="booking-section">
-            <legend>Solicitante del examen</legend>
-            <div className="booking-grid">
-              <label>Tipo<select value={draft.requesterType} onChange={(event) => set("requesterType", event.target.value as Appointment["requesterType"])}><option value="interno">Interno</option><option value="externo">Externo</option></select></label>
-              <label>Nombre<input value={draft.requesterName} onChange={(event) => set("requesterName", event.target.value)} /></label>
-              <label>RUN<input value={draft.requesterRun} onChange={(event) => set("requesterRun", event.target.value)} /></label>
-              <label>Correo electrónico<input type="email" value={draft.requesterEmail} onChange={(event) => set("requesterEmail", event.target.value)} /></label>
-            </div>
-          </fieldset>
-
-          <fieldset className="booking-section">
-            <legend>Retiro de examen</legend>
-            <div className="booking-grid">
-              <label>Nombre<input value={draft.pickupName} onChange={(event) => set("pickupName", event.target.value)} placeholder="Quien retira los resultados" /></label>
-              <label>RUN<input value={draft.pickupRun} onChange={(event) => set("pickupRun", event.target.value)} /></label>
-              <label>Teléfono<input type="tel" value={draft.pickupPhone} onChange={(event) => set("pickupPhone", event.target.value)} /></label>
-              {draft.id
-                ? <label>Orden médica escaneada{draft.orderFile && <span className="form-notice">Adjunta: {draft.orderFile.split("/").pop()}</span>}<input type="file" accept="image/*,.pdf" onChange={(event) => attachOrder(event.target.files?.[0])} /></label>
-                : <label>Orden médica escaneada<span className="empty-inline">Guarda la reserva y vuelve a editarla para adjuntar.</span></label>}
             </div>
           </fieldset>
 
