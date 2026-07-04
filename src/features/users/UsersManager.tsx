@@ -36,7 +36,8 @@ export function UsersManager() {
     .then((payload) => { setUsers(payload.users); setAvailable(true); setAllowed(true); })
     .catch((cause: Error) => {
       if (cause.message.includes("SERVICE_ROLE")) setAvailable(false);
-      else setAllowed(false);
+      else if (cause.message.includes("Solo administradores")) setAllowed(false);
+      else setError(cause.message);
     }), []);
   useEffect(() => { load(); }, [load]);
 
