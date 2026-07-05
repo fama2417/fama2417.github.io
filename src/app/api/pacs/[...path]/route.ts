@@ -30,6 +30,10 @@ async function proxy(request: NextRequest, { params }: { params: Promise<{ path:
   responseHeaders.delete("content-encoding");
   responseHeaders.delete("content-length");
   responseHeaders.delete("www-authenticate"); // nunca mostrar el diálogo de login del navegador
+  // Los bundles de OHIF llevan hash en el nombre: cachearlos fuerte evita repetir el viaje Render→Orthanc.
+  if (upstream.ok && /\.(js|css|woff2?|ttf|png|svg|ico|wasm|json)$/.test(path[path.length - 1] ?? "")) {
+    responseHeaders.set("cache-control", "public, max-age=86400, immutable");
+  }
   const location = upstream.headers.get("location");
   if (location) responseHeaders.set("location", location.replace(orthancUrl, ""));
   return new NextResponse(upstream.body, { status: upstream.status, headers: responseHeaders });

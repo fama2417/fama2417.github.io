@@ -6,7 +6,7 @@ type AppointmentRow = {
   start_time: string; end_time: string; status: Appointment["status"]; reason: string; modality: Appointment["modality"];
   branch?: string; service?: string; specialty?: string; procedure_code?: string; treating_physician?: string; order_date?: string | null;
   anesthesia?: boolean; contrast?: boolean; priority?: Appointment["priority"]; payment_order?: string; tags?: string;
-  diagnostic_hypothesis?: string; comment?: string;
+  anamnesis?: string; diagnostic_hypothesis?: string; comment?: string;
   requester_type?: Appointment["requesterType"]; requester_name?: string; requester_run?: string; requester_email?: string;
   pickup_name?: string; pickup_run?: string; pickup_phone?: string;
   origin_type?: Appointment["originType"]; origin_desc?: string; status_reason?: string; order_file?: string;
@@ -16,7 +16,9 @@ type AppointmentRow = {
 };
 
 const baseColumns = "id, patient_id, practitioner_name, location_name, appointment_date, start_time, end_time, status, reason, modality, patient:patients(full_name, identifier, prevision), study:imaging_studies(study_instance_uid)";
-const columns = "id, patient_id, practitioner_name, location_name, appointment_date, start_time, end_time, status, reason, modality, branch, service, specialty, procedure_code, treating_physician, order_date, anesthesia, contrast, priority, payment_order, tags, diagnostic_hypothesis, comment, requester_type, requester_name, requester_run, requester_email, pickup_name, pickup_run, pickup_phone, origin_type, origin_desc, status_reason, order_file, patient:patients(full_name, identifier, prevision), study:imaging_studies(study_instance_uid), report:radiology_reports(status, critical_finding)";
+const columns = "id, patient_id, practitioner_name, location_name, appointment_date, start_time, end_time, status, reason, modality, branch, service, specialty, procedure_code, treating_physician, order_date, anesthesia, contrast, priority, payment_order, tags, anamnesis, diagnostic_hypothesis, comment, requester_type, requester_name, requester_run, requester_email, pickup_name, pickup_run, pickup_phone, origin_type, origin_desc, status_reason, order_file, patient:patients(full_name, identifier, prevision), study:imaging_studies(study_instance_uid), report:radiology_reports(status, critical_finding)";
+// ponytail: fallback mientras la migración de anamnesis no esté aplicada; quitar cuando esté en producción
+const columnsSinAnamnesis = columns.replace("anamnesis, ", "");
 
 const mapAppointment = (row: AppointmentRow): Appointment => ({
   id: row.id,
@@ -42,6 +44,7 @@ const mapAppointment = (row: AppointmentRow): Appointment => ({
   priority: row.priority ?? "normal",
   paymentOrder: row.payment_order ?? "",
   tags: row.tags ?? "",
+  anamnesis: row.anamnesis ?? "",
   diagnosticHypothesis: row.diagnostic_hypothesis ?? "",
   comment: row.comment ?? "",
   requesterType: row.requester_type ?? "interno",
@@ -83,6 +86,7 @@ const toRow = (appointment: Appointment) => ({
   priority: appointment.priority,
   payment_order: appointment.paymentOrder,
   tags: appointment.tags,
+  anamnesis: appointment.anamnesis,
   diagnostic_hypothesis: appointment.diagnosticHypothesis,
   comment: appointment.comment,
   requester_type: appointment.requesterType,
@@ -101,6 +105,8 @@ const toRow = (appointment: Appointment) => ({
 export async function fetchAppointments() {
   const result = await supabase.from("appointments").select(columns).order("appointment_date").order("start_time");
   if (!result.error) return (result.data as unknown as AppointmentRow[]).map(mapAppointment);
+  const sinAnamnesis = await supabase.from("appointments").select(columnsSinAnamnesis).order("appointment_date").order("start_time");
+  if (!sinAnamnesis.error) return (sinAnamnesis.data as unknown as AppointmentRow[]).map(mapAppointment);
   const fallback = await supabase.from("appointments").select(baseColumns).order("appointment_date").order("start_time");
   if (fallback.error) throw fallback.error;
   return (fallback.data as unknown as AppointmentRow[]).map(mapAppointment);

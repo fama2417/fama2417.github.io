@@ -45,7 +45,6 @@ const appointmentDetail = (appointment: Appointment): [string, string][] => [
   ["Anestesia", appointment.anesthesia ? "Sí" : ""],
   ["Contraste", appointment.contrast ? "Sí" : ""],
   ["Orden de pago", appointment.paymentOrder],
-  ["Hipótesis diagnóstica", appointment.diagnosticHypothesis],
   ["Comentario", appointment.comment],
   ["Solicitante", [appointment.requesterName, appointment.requesterRun, appointment.requesterEmail].filter(Boolean).join(" · ")],
   ["Retira resultados", [appointment.pickupName, appointment.pickupRun, appointment.pickupPhone].filter(Boolean).join(" · ")],
@@ -64,6 +63,7 @@ const sections = [
 
 export function ReportWindow({ appointmentId }: { appointmentId: string }) {
   const [appointment, setAppointment] = useState<Appointment | null>(null);
+  const [priorReports, setPriorReports] = useState<Appointment[]>([]);
   const [report, setReport] = useState<RadiologyReport>(() => emptyReport(appointmentId));
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -85,7 +85,11 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
   useEffect(() => {
     Promise.all([fetchAppointments(), fetchReport(appointmentId)])
       .then(([appointments, storedReport]) => {
-        setAppointment(appointments.find((item) => item.id === appointmentId) ?? null);
+        const current = appointments.find((item) => item.id === appointmentId) ?? null;
+        setAppointment(current);
+        if (current) setPriorReports(appointments
+          .filter((item) => item.patientId === current.patientId && item.id !== current.id && item.reportStatus)
+          .sort((a, b) => `${b.date}${b.startTime}`.localeCompare(`${a.date}${a.startTime}`)));
         if (storedReport) setReport(storedReport);
       })
       .catch(() => setError("No fue posible cargar el estudio."))
@@ -126,7 +130,12 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
 
   const setSection = (name: string, value: string) => setReport((current) => ({ ...current, [name]: value }));
   const viewer = appointment.studyInstanceUid && viewerBase ? `${viewerBase}/viewer?StudyInstanceUIDs=${encodeURIComponent(appointment.studyInstanceUid)}` : null;
-  const detail = appointmentDetail(appointment).filter(([, value]) => value);
+  // Anamnesis e hipótesis siempre visibles, aunque estén vacías; el resto solo si tiene contenido.
+  const detail: [string, string][] = [
+    ["Anamnesis", appointment.anamnesis || "—"],
+    ["Hipótesis diagnóstica", appointment.diagnosticHypothesis || "—"],
+    ...appointmentDetail(appointment).filter(([, value]) => value),
+  ];
 
   return <div className="report-workstation">
     <header className="report-workstation-header">
@@ -172,6 +181,18 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
               <textarea name={section.name} value={report[section.name]} placeholder={section.hint} onChange={(event) => setSection(section.name, event.target.value)} disabled={report.status === "final"} />
             </label>
           ))}
+          {priorReports.length > 0 && (
+            <div className="prior-reports">
+              <h4>Informes anteriores del paciente</h4>
+              {priorReports.map((prior) => (
+                <a key={prior.id} href={`/informe/${prior.id}`} target="_blank" rel="noreferrer">
+                  <span>{prior.date}</span>
+                  <span className="prior-reason">{prior.modality} · {prior.reason}</span>
+                  <span className={`report-status ${prior.reportStatus}`}>{prior.reportStatus === "final" ? "Definitivo" : "Borrador"}</span>
+                </a>
+              ))}
+            </div>
+          )}
         </div>
         <label className="consent-field critical-field"><input type="checkbox" checked={report.criticalFinding} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, criticalFinding: event.target.checked, criticalFindingType: event.target.checked ? current.criticalFindingType : "" }))} />Hallazgo crítico: requiere comunicación inmediata al solicitante (queda marcado en la lista de trabajo).</label>
         {report.criticalFinding && (

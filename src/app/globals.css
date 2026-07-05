@@ -321,7 +321,25 @@ body:has(.report-workstation) .app-shell { flex: 1; min-height: 0; }
 .appointment-info dl { display: grid; gap: 8px 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; }
 .appointment-info dt { color: var(--muted); font-size: 0.72rem; letter-spacing: 0.04em; text-transform: uppercase; }
 .appointment-info dd { margin: 0 0 6px; }
-.critical-type { margin-top: -6px; }
+
+/* Hallazgo crítico destacado dentro del editor de informe */
+.report-workstation .critical-field {
+  background: rgba(248, 113, 113, 0.1);
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  border-radius: 8px;
+  font-weight: 600;
+  margin: 0 18px 12px;
+  padding: 12px 14px;
+}
+.report-workstation .critical-type { display: grid; gap: 6px; margin-top: -6px; }
+.report-workstation .critical-type select { border-color: rgba(248, 113, 113, 0.45); }
+
+/* Informes anteriores del mismo paciente */
+.prior-reports { border-top: 1px solid var(--border); display: grid; gap: 6px; padding-top: 12px; }
+.prior-reports h4 { color: var(--muted); font-size: 0.72rem; letter-spacing: 0.06em; margin: 0; text-transform: uppercase; }
+.prior-reports a { align-items: center; border: 1px solid var(--border); border-radius: 8px; color: var(--text); display: flex; font-size: 0.82rem; gap: 12px; padding: 8px 12px; text-decoration: none; }
+.prior-reports a:hover { border-color: var(--report-accent); }
+.prior-reports .prior-reason { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Página de privacidad */
 .legal-content { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; display: grid; gap: 14px; line-height: 1.7; max-width: 900px; padding: 28px; }
