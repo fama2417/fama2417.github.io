@@ -4,6 +4,8 @@ import { FormEvent, useEffect, useState } from "react";
 import type { AuthError, Session } from "@supabase/supabase-js";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase-client";
 
+const roleLabels: Record<string, string> = { admin: "Administrador", operator: "Operador", radiologist: "Radiólogo" };
+
 const authMessage = (error: AuthError) => {
   if (error.code === "email_not_confirmed") return "El correo del usuario todavía no está confirmado.";
   if (error.code === "invalid_credentials") return "Correo o contraseña incorrectos.";
@@ -18,6 +20,14 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const [notice, setNotice] = useState("");
   const [recovering, setRecovering] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [profile, setProfile] = useState<{ role: string; tenant: string } | null>(null);
+
+  useEffect(() => {
+    if (!session?.user.id) return setProfile(null);
+    supabase.from("profiles").select("role, tenant:tenants(name)").eq("id", session.user.id).single().then(({ data }) => {
+      if (data) setProfile({ role: data.role, tenant: (data.tenant as unknown as { name: string } | null)?.name ?? "" });
+    });
+  }, [session?.user.id]);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -85,5 +95,11 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     </main>
   );
 
-  return <><div className="session-bar"><span>{session.user.email}</span><button type="button" onClick={() => supabase.auth.signOut()}>Cerrar sesión</button></div>{children}</>;
+  return <><div className="session-bar">
+    <span className="session-identity">
+      <strong>{session.user.email}</strong>
+      {profile && <span>{roleLabels[profile.role] ?? profile.role}{profile.tenant && ` · ${profile.tenant}`}</span>}
+    </span>
+    <button type="button" onClick={() => supabase.auth.signOut()}>Cerrar sesión</button>
+  </div>{children}</>;
 }
