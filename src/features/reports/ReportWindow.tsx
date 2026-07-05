@@ -130,6 +130,10 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
 
   const setSection = (name: string, value: string) => setReport((current) => ({ ...current, [name]: value }));
   const viewer = appointment.studyInstanceUid && viewerBase ? `${viewerBase}/viewer?StudyInstanceUIDs=${encodeURIComponent(appointment.studyInstanceUid)}` : null;
+  // Pantalla completa va directo a la VM vía handoff (sin el salto por Render); si el proxy no está activo, usa la URL normal.
+  const fullScreen = appointment.studyInstanceUid && viewerBase === "/ohif"
+    ? `/api/pacs/handoff?next=${encodeURIComponent(`/ohif/viewer?StudyInstanceUIDs=${appointment.studyInstanceUid}`)}`
+    : viewer;
   // Anamnesis e hipótesis siempre visibles, aunque estén vacías; el resto solo si tiene contenido.
   const detail: [string, string][] = [
     ["Anamnesis", appointment.anamnesis || "—"],
@@ -151,7 +155,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
         <button className="text-button" type="button" onClick={() => setShowDetail(true)}>Datos de la cita</button>
         <span className={`report-status ${report.status}`}>{report.status === "final" ? "Definitivo" : "Borrador"}</span>
         {report.status === "final" && <button className="text-button" type="button" onClick={() => window.print()}>Imprimir</button>}
-        {viewer && <a className="text-button" href={viewer} target="_blank" rel="noreferrer">Pantalla completa ↗</a>}
+        {fullScreen && <a className="text-button" href={fullScreen} target="_blank" rel="noreferrer">Pantalla completa ↗</a>}
       </div>
     </header>
     {error && <p className="notice" role="alert">{error}</p>}
