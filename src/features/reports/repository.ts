@@ -31,9 +31,12 @@ const mapReport = (row: ReportRow): RadiologyReport => ({
 });
 
 export async function fetchReport(appointmentId: string) {
-  const { data, error } = await supabase.from("radiology_reports").select(columns).eq("appointment_id", appointmentId).maybeSingle();
-  if (error) throw error;
-  return data ? mapReport(data as ReportRow) : null;
+  const result = await supabase.from("radiology_reports").select(columns).eq("appointment_id", appointmentId).maybeSingle();
+  if (!result.error) return result.data ? mapReport(result.data as ReportRow) : null;
+  // ponytail: fallback mientras la migración critical_finding_type no esté aplicada; quitar cuando esté en producción
+  const fallback = await supabase.from("radiology_reports").select(columns.replace(", critical_finding_type", "")).eq("appointment_id", appointmentId).maybeSingle();
+  if (fallback.error) throw fallback.error;
+  return fallback.data ? mapReport(fallback.data as unknown as ReportRow) : null;
 }
 
 export async function saveReport(report: RadiologyReport) {

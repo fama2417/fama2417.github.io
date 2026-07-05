@@ -122,7 +122,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
   }
 
   if (loading) return <p className="empty-state">Cargando estudio…</p>;
-  if (!appointment) return <p className="notice" role="alert">Estudio no encontrado.</p>;
+  if (!appointment) return <p className="notice" role="alert">{error || "Estudio no encontrado."}</p>;
 
   const setSection = (name: string, value: string) => setReport((current) => ({ ...current, [name]: value }));
   const viewer = appointment.studyInstanceUid && viewerBase ? `${viewerBase}/viewer?StudyInstanceUIDs=${encodeURIComponent(appointment.studyInstanceUid)}` : null;
