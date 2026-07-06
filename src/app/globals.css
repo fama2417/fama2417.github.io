@@ -321,6 +321,10 @@ body:has(.report-workstation) .app-shell { flex: 1; min-height: 0; }
 .appointment-info dl { display: grid; gap: 8px 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; }
 .appointment-info dt { color: var(--muted); font-size: 0.72rem; letter-spacing: 0.04em; text-transform: uppercase; }
 .appointment-info dd { margin: 0 0 6px; }
+.patient-detail { max-width: 820px; }
+.patient-detail dl > div:nth-last-child(-n+2) { grid-column: 1 / -1; }
+.audit-list { border-top: 1px solid var(--border); display: grid; gap: 8px; padding-top: 14px; }
+.audit-list h4 { margin: 0; }
 
 /* Hallazgo crítico destacado dentro del editor de informe */
 .report-workstation .critical-field {
