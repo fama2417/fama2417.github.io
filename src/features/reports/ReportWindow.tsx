@@ -130,7 +130,8 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
 
   const setSection = (name: string, value: string) => setReport((current) => ({ ...current, [name]: value }));
   const viewer = appointment.studyInstanceUid && viewerBase ? `${viewerBase}/viewer?StudyInstanceUIDs=${encodeURIComponent(appointment.studyInstanceUid)}` : null;
-  // Pantalla completa va directo a la VM vía handoff (sin el salto por Render); si el proxy no está activo, usa la URL normal.
+  // El visor (iframe y pantalla completa) va directo a la VM vía handoff, sin el salto por Render.
+  // La cookie particionada (CHIPS) lo permite dentro del iframe; si Caddy no responde, el handoff cae al proxy.
   const fullScreen = appointment.studyInstanceUid && viewerBase === "/ohif"
     ? `/api/pacs/handoff?next=${encodeURIComponent(`/ohif/viewer?StudyInstanceUIDs=${appointment.studyInstanceUid}`)}`
     : viewer;
@@ -217,8 +218,8 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
         </footer>
       </section>
       <section className="viewer-pane" aria-label="Visor de imágenes">
-        {viewer
-          ? <iframe src={viewer} title="Visor OHIF" allow="fullscreen" />
+        {fullScreen
+          ? <iframe src={fullScreen} title="Visor OHIF" allow="fullscreen" />
           : <p className="empty-state">Este estudio aún no tiene imágenes vinculadas en el PACS.</p>}
       </section>
     </div>

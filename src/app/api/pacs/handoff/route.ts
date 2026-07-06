@@ -15,6 +15,11 @@ export async function GET(request: NextRequest) {
   const next = request.nextUrl.searchParams.get("next") ?? "/ohif/";
   if (!next.startsWith("/") || next.startsWith("//")) return NextResponse.json({ error: "Ruta inválida." }, { status: 400 });
 
+  // ponytail: Safari bloquea cookies de terceros (sin soporte CHIPS estable) — dentro de un iframe se queda en el proxy
+  const agent = request.headers.get("user-agent") ?? "";
+  const isSafari = /safari/i.test(agent) && !/chrome|crios|edg/i.test(agent);
+  if (isSafari && request.headers.get("sec-fetch-dest") === "iframe") return NextResponse.redirect(new URL(next, request.nextUrl.origin));
+
   const target = `${pacsUrl}/pacs-session?t=${encodeURIComponent(secret)}&next=${encodeURIComponent(next)}`;
   // Si Caddy aún no tiene el handoff configurado, cae al visor vía proxy en vez de mostrar un 404.
   const probe = await fetch(target, { redirect: "manual" }).catch(() => null);
