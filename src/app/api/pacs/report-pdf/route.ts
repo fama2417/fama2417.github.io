@@ -101,9 +101,18 @@ export async function POST(request: NextRequest) {
       const pair = keyImages.slice(index, index + 2);
       const embedded = await Promise.all(pair.map(async (item) => {
         try {
-          const preview = await fetch(`${orthancUrl}/instances/${item.instance_id}/preview`, { headers: { Authorization: basicAuth, Accept: "image/png" } });
-          if (!preview.ok) return null;
-          return await pdf.embedPng(await preview.arrayBuffer());
+          let bytes: ArrayBuffer;
+          if (item.instance_id.includes("/")) {
+            // Captura del visor guardada en el bucket "capturas"
+            const file = await db.storage.from("capturas").download(item.instance_id);
+            if (!file.data) return null;
+            bytes = await file.data.arrayBuffer();
+          } else {
+            const preview = await fetch(`${orthancUrl}/instances/${item.instance_id}/preview`, { headers: { Authorization: basicAuth, Accept: "image/png" } });
+            if (!preview.ok) return null;
+            bytes = await preview.arrayBuffer();
+          }
+          try { return await pdf.embedPng(bytes); } catch { return await pdf.embedJpg(bytes); }
         } catch { return null; }
       }));
       const sizes = embedded.map((image) => {

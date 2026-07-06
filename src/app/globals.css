@@ -381,6 +381,8 @@ body:has(.report-workstation) .app-shell { flex: 1; min-height: 0; }
 .collapsible > :not(summary) { margin-top: 10px; }
 
 /* Imágenes clave (KIN) */
+.capture-upload { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; }
+.capture-upload .button { cursor: pointer; }
 .key-images-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
 .key-images-grid img { background: #000; border-radius: 6px; display: block; height: 96px; object-fit: contain; width: 100%; }
 .key-images-grid .key-image { display: grid; gap: 4px; margin: 0; }
