@@ -28,8 +28,9 @@ const COLUMNS = ["Fecha", "Hora", "Paciente", "ID Paciente", "Previsión", "Moda
 type Column = (typeof COLUMNS)[number];
 const DEFAULT_COLUMNS: Column[] = ["Hora", "Paciente", "ID Paciente", "Previsión", "Modalidad", "Prestación", "Estado", "Informe", "Asignado", "Alertas"];
 
-type Filters = { from: string; to: string; patient: string; modality: string; status: string; report: string; professional: string; room: string; priority: string; assignment: string; tag: string };
-const emptyFilters = (): Filters => ({ from: today(), to: today(), patient: "", modality: "", status: "", report: "", professional: "", room: "", priority: "", assignment: "", tag: "" });
+type Filters = { from: string; to: string; patient: string; modality: string; status: string; report: string; professional: string; room: string; priority: string; assignment: string; tag: string; quick: string };
+const emptyFilters = (): Filters => ({ from: today(), to: today(), patient: "", modality: "", status: "", report: "", professional: "", room: "", priority: "", assignment: "", tag: "", quick: "" });
+const quickLabels: Record<string, string> = { pending: "Por informar", critical: "Hallazgos críticos", follow: "Seguimientos pendientes", mine: "Asignados a mí" };
 
 // ponytail: filtros guardados en localStorage (mismo patrón que las columnas); mover a tabla si se necesitan entre dispositivos
 type SavedFilter = { name: string; isDefault: boolean; filters: Filters };
@@ -61,6 +62,10 @@ export function Worklist() {
     setSaved(savedFilters);
     const preset = savedFilters.find((item) => item.isDefault);
     if (preset) { setFilters({ ...emptyFilters(), ...preset.filters }); setSelectedSaved(preset.name); }
+    // Acceso directo desde los indicadores del Inicio: /worklist?view=pending|critical|follow|mine|today
+    const view = new URLSearchParams(window.location.search).get("view") ?? "";
+    if (view === "today") setFilters((current) => ({ ...current, from: today(), to: today() }));
+    else if (quickLabels[view]) setFilters((current) => ({ ...current, quick: view, from: "", to: "" }));
   }, []);
 
   function toggleColumn(column: Column) {
@@ -107,6 +112,11 @@ export function Worklist() {
     .filter((item) => (!filters.professional || item.practitionerName === filters.professional) && (!filters.room || item.locationName === filters.room) && (!filters.priority || item.priority === filters.priority))
     .filter((item) => !filters.assignment || (filters.assignment === "mias" ? item.assignedTo === uid : !item.assignedTo))
     .filter((item) => !filters.tag || item.tags.split(",").map((tag) => tag.trim()).includes(filters.tag))
+    .filter((item) => !filters.quick
+      || (filters.quick === "pending" && item.studyInstanceUid && item.reportStatus !== "final")
+      || (filters.quick === "critical" && item.criticalFinding)
+      || (filters.quick === "follow" && item.actionablePending)
+      || (filters.quick === "mine" && item.assignedTo === uid))
     .sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`)), [appointments, filters, uid]);
 
   async function changeStatus(item: Appointment, status: AppointmentStatus) {
@@ -213,6 +223,7 @@ export function Worklist() {
         <label>Profesional<select value={filters.professional} onChange={(event) => set("professional", event.target.value)}><option value="">Todos</option>{professionals.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
         <label>Sala<select value={filters.room} onChange={(event) => set("room", event.target.value)}><option value="">Todas</option>{rooms.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
         <label>Prioridad<select value={filters.priority} onChange={(event) => set("priority", event.target.value)}><option value="">Todas</option><option value="normal">Normal</option><option value="urgente">Urgente</option></select></label>
+        <label>Vista rápida<select value={filters.quick} onChange={(event) => set("quick", event.target.value)}><option value="">Todas</option>{Object.entries(quickLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
         <label>Asignación<select value={filters.assignment} onChange={(event) => set("assignment", event.target.value)}><option value="">Todas</option><option value="mias">Asignadas a mí</option><option value="sin">Sin asignar</option></select></label>
         {tags.length > 0 && <label>Etiqueta de cita<select value={filters.tag} onChange={(event) => set("tag", event.target.value)}><option value="">Todas</option>{tags.map((tag) => <option key={tag} value={tag}>{tag}</option>)}</select></label>}
         <button className="text-button" type="button" onClick={() => { setFilters(emptyFilters()); setSelectedSaved(""); }}>Restablecer</button>

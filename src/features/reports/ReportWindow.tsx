@@ -7,10 +7,10 @@ import { appointmentStatusLabels } from "@/features/appointments/status";
 import { fetchMyTenant, renderHeader, type Tenant } from "@/features/tenant/repository";
 import { supabase } from "@/lib/supabase-client";
 import {
-  addAddendum, addCommunication, addFollowUp, addKeyImage, captureUrl, fetchAddenda, fetchCommunications,
-  fetchFollowUps, fetchKeyImages, fetchReport, fetchSignatureUrl, isCaptureKeyImage, removeKeyImage, saveReport,
-  updateFollowUpStatus, updateKeyImageCaption, uploadKeyImageCapture, type FollowUpStatus, type RadiologyReport,
-  type ReportAddendum, type ReportCommunication, type ReportFollowUp, type ReportKeyImage,
+  addAddendum, addCommunication, addFollowUp, addKeyImage, captureUrl, deleteReport, fetchAddenda, fetchCommunications,
+  fetchFollowUps, fetchKeyImages, fetchMyProfile, fetchReport, fetchSignatureUrl, isCaptureKeyImage, removeKeyImage,
+  reopenReport, saveReport, updateFollowUpStatus, updateKeyImageCaption, uploadKeyImageCapture, type FollowUpStatus,
+  type RadiologyReport, type ReportAddendum, type ReportCommunication, type ReportFollowUp, type ReportKeyImage,
 } from "./repository";
 import { fetchTemplates, type ReportTemplate } from "./templates";
 import { validateFinalReport } from "./validation";
@@ -73,6 +73,8 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
   const [pickerInstances, setPickerInstances] = useState<string[] | null>(null);
   const [pickerLoading, setPickerLoading] = useState(false);
   const [captureUrls, setCaptureUrls] = useState<Record<string, string>>({});
+  const [role, setRole] = useState<string>("");
+  const [tenantId, setTenantId] = useState<string>("");
 
   useEffect(() => {
     keyImages.filter((item) => isCaptureKeyImage(item.instanceId)).forEach((item) => {
@@ -107,6 +109,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
     fetchTemplates().then(setTemplates).catch(() => undefined);
     fetchMyTenant().then(setTenant).catch(() => undefined);
     fetchKeyImages(appointmentId).then(setKeyImages).catch(() => undefined);
+    fetchMyProfile().then(({ tenantId: tid, role: r }) => { setTenantId(tid); setRole(r); }).catch(() => undefined);
   }, [appointmentId]);
 
   useEffect(() => {
@@ -235,12 +238,39 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
     if (file && report.status !== "final") { event.preventDefault(); uploadCapture(file); }
   }
 
+  const [addendumFiles, setAddendumFiles] = useState<File[]>([]);
+
   async function signAddendum(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setSaving(true); setError("");
     try {
       const created = await addAddendum(appointmentId, addendumText.trim());
-      setAddenda((current) => [...current, created]); setAddendumText(""); setNotice("Adenda firmada.");
+      const images = await Promise.all(addendumFiles.map((file) => uploadKeyImageCapture(appointmentId, file, created.id)));
+      setAddenda((current) => [...current, created]);
+      if (images.length) setKeyImages((current) => [...current, ...images]);
+      setAddendumText(""); setAddendumFiles([]); setNotice("Adenda firmada.");
     } catch { setError("No fue posible firmar la adenda. Requiere perfil de administración/radiología y un informe definitivo."); }
+    finally { setSaving(false); }
+  }
+
+  async function reopen() {
+    const reason = window.prompt("Motivo de la reapertura (queda registrado):")?.trim();
+    if (!reason) return;
+    setSaving(true); setError("");
+    try {
+      const reopened = await reopenReport(appointmentId, tenantId, reason);
+      setReport(reopened); setNotice("Informe reabierto como borrador. El motivo quedó registrado.");
+    } catch { setError("No fue posible reabrir el informe."); }
+    finally { setSaving(false); }
+  }
+
+  async function removeReport() {
+    const reason = window.prompt("Eliminar el informe es irreversible. Indica el motivo (queda registrado):")?.trim();
+    if (!reason) return;
+    setSaving(true); setError("");
+    try {
+      await deleteReport(appointmentId, tenantId, reason);
+      setReport(emptyReport(appointmentId)); setAddenda([]); setKeyImages([]); setNotice("Informe eliminado. El motivo quedó registrado.");
+    } catch { setError("No fue posible eliminar el informe."); }
     finally { setSaving(false); }
   }
 
@@ -253,6 +283,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
     ? `/api/pacs/handoff?next=${encodeURIComponent(`/ohif/viewer?StudyInstanceUIDs=${appointment.studyInstanceUid}`)}` : viewer;
   const detail: [string, string][] = [["Anamnesis", appointment.anamnesis || "—"], ["Hipótesis diagnóstica", appointment.diagnosticHypothesis || "—"], ...appointmentDetail(appointment).filter(([, value]) => value)];
   const acknowledgedCommunication = communications.findLast((item) => item.urgency === "critical" && item.acknowledged);
+  const baseKeyImages = keyImages.filter((item) => !item.addendumId);
 
   return <div className="report-workstation">
     <header className="report-workstation-header">
@@ -308,9 +339,9 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
           </details>}
 
           <details className="report-clinical-panel collapsible">
-            <summary><span className="collapsible-icon">🩻</span>Imágenes clave (KIN){keyImages.length > 0 && <span className="collapsible-count">{keyImages.length}</span>}</summary>
-            {keyImages.length > 0 && <div className="key-images-grid">
-              {keyImages.map((item) => <figure key={item.id} className="key-image">
+            <summary><span className="collapsible-icon">🩻</span>Imágenes clave (KIN){baseKeyImages.length > 0 && <span className="collapsible-count">{baseKeyImages.length}</span>}</summary>
+            {baseKeyImages.length > 0 && <div className="key-images-grid">
+              {baseKeyImages.map((item) => <figure key={item.id} className="key-image">
                 {keyImageSrc(item) && <img src={keyImageSrc(item)} alt="Imagen clave" loading="lazy" />}
                 {report.status === "final"
                   ? (item.caption && <figcaption>{item.caption}</figcaption>)
@@ -318,6 +349,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
                 {report.status !== "final" && <button className="text-button" type="button" onClick={() => toggleKeyImage(item.instanceId)}>Quitar</button>}
               </figure>)}
             </div>}
+            {report.status === "final" && <p className="empty-inline">El informe está firmado: adjunta nuevas imágenes desde una adenda.</p>}
             {report.status !== "final" && <div className="capture-upload">
               <label className="button secondary">Subir captura del visor<input type="file" accept="image/png,image/jpeg" hidden onChange={(event) => { uploadCapture(event.target.files?.[0]); event.target.value = ""; }} /></label>
               <span className="empty-inline">Para CT/MR/PET-CT: usa la cámara 📷 de OHIF para exportar el corte con sus anotaciones y súbelo aquí, o pégalo directo con Ctrl+V.</span>
@@ -353,17 +385,28 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
             <div className="prior-reports">{priorReports.map((prior) => <a key={prior.id} href={`/informe/${prior.id}`} target="_blank" rel="noreferrer"><span>{prior.date}</span><span className="prior-reason">{prior.modality} · {prior.reason}</span><span className={`report-status ${prior.reportStatus}`}>{prior.reportStatus === "final" ? "Definitivo" : "Borrador"}</span></a>)}</div>
           </details>}
 
-          {report.status === "final" && <details className="report-clinical-panel collapsible">
-            <summary><span className="collapsible-icon">✍️</span>Versiones y adendas{addenda.length > 0 && <span className="collapsible-count">{addenda.length + 1}</span>}</summary>
+          {report.status === "final" && <details className="report-clinical-panel collapsible" open>
+            <summary><span className="collapsible-icon">✍️</span>Versiones y adendas<span className="collapsible-count">{addenda.length + 1}</span></summary>
             <div className="workflow-entry"><strong>Versión 1 · Informe definitivo</strong><span>{report.signedAt && new Date(report.signedAt).toLocaleString("es-CL")} · {report.signer && signerLabel(report.signer.name, report.signer.registration)}</span></div>
-            {addenda.map((item, index) => <div className="workflow-entry" key={item.id}><strong>Adenda {index + 1}</strong><span>{item.text}</span><span>{new Date(item.signedAt).toLocaleString("es-CL")} · {signerLabel(item.signer.name, item.signer.registration)}</span></div>)}
-            <form className="report-inline-form" onSubmit={signAddendum}><label className="span-2">Nueva adenda<textarea required value={addendumText} onChange={(event) => setAddendumText(event.target.value)} placeholder="Corrección o información adicional; no reemplaza el informe original." /></label><button className="button secondary" disabled={saving} type="submit">Firmar adenda</button></form>
+            {addenda.map((item, index) => <div className="workflow-entry" key={item.id}>
+              <strong>Adenda {index + 1}</strong><span>{item.text}</span>
+              <span>{new Date(item.signedAt).toLocaleString("es-CL")} · {signerLabel(item.signer.name, item.signer.registration)}</span>
+              {keyImages.some((img) => img.addendumId === item.id) && <div className="key-images-grid">
+                {keyImages.filter((img) => img.addendumId === item.id).map((img) => <figure key={img.id} className="key-image">{keyImageSrc(img) && <img src={keyImageSrc(img)} alt="Imagen de adenda" loading="lazy" />}{img.caption && <figcaption>{img.caption}</figcaption>}</figure>)}
+              </div>}
+            </div>)}
+            <form className="report-inline-form" onSubmit={signAddendum}>
+              <label className="span-2">Nueva adenda<textarea required value={addendumText} onChange={(event) => setAddendumText(event.target.value)} placeholder="Corrección o información adicional; no reemplaza el informe original." /></label>
+              <label className="span-2">Imágenes de la adenda (opcional)<input type="file" accept="image/png,image/jpeg" multiple onChange={(event) => setAddendumFiles(Array.from(event.target.files ?? []))} /><span className="empty-inline">{addendumFiles.length ? `${addendumFiles.length} imagen(es) adjunta(s).` : "Captura desde OHIF y adjunta el corte con la anotación."}</span></label>
+              <button className="button secondary" disabled={saving} type="submit">Firmar adenda</button>
+            </form>
           </details>}
         </div>
 
         <footer className="report-actions">
           {report.status === "draft" && <><button className="button secondary" type="button" disabled={saving} onClick={() => persist("draft")}>Guardar borrador</button><button className="button primary" type="button" disabled={saving} onClick={() => persist("final")}>Firmar definitivo</button></>}
-          {report.status === "final" && <span>Definitivo inmutable · las correcciones se agregan como adenda.</span>}
+          {report.status === "final" && <span>Definitivo · las correcciones se agregan como adenda.</span>}
+          {report.status === "final" && role === "admin" && <><button className="button secondary" type="button" disabled={saving} onClick={reopen}>Reabrir informe</button><button className="text-button danger" type="button" disabled={saving} onClick={removeReport}>Eliminar informe</button></>}
           {notice && <span className="form-notice" role="status">{notice}</span>}
           {report.updatedAt && <span className="report-updated">Última modificación: {new Date(report.updatedAt).toLocaleString("es-CL")}</span>}
         </footer>
@@ -379,11 +422,13 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
         : <><p><strong>Paciente:</strong> {appointment.patientName} · <strong>ID:</strong> {appointment.patientIdentifier || "—"}</p><p><strong>Examen:</strong> {appointment.modality} · {appointment.reason} · <strong>Fecha:</strong> {appointment.date}</p></>}
       {report.criticalFinding && <p><strong>⚠ HALLAZGO CRÍTICO{report.criticalFindingType && `: ${report.criticalFindingType}`}</strong>{acknowledgedCommunication && <> · Comunicado a {acknowledgedCommunication.recipient} por {channelLabels[acknowledgedCommunication.channel]}, {new Date(acknowledgedCommunication.communicatedAt).toLocaleString("es-CL")}.</>}</p>}
       {sections.map((section) => report[section.name] && <section key={section.name}><h3>{section.label}</h3><p>{report[section.name]}</p></section>)}
-      {keyImages.length > 0 && <section className="key-images-print"><h3>Imágenes clave</h3><div>
-        {keyImages.map((item) => <figure key={item.id}>{keyImageSrc(item) && <img src={keyImageSrc(item)} alt="Imagen clave" />}{item.caption && <figcaption>{item.caption}</figcaption>}</figure>)}
+      {baseKeyImages.length > 0 && <section className="key-images-print"><h3>Imágenes clave</h3><div>
+        {baseKeyImages.map((item) => <figure key={item.id}>{keyImageSrc(item) && <img src={keyImageSrc(item)} alt="Imagen clave" />}{item.caption && <figcaption>{item.caption}</figcaption>}</figure>)}
       </div></section>}
       {followUps.length > 0 && <section><h3>Recomendaciones y seguimiento</h3>{followUps.map((item) => <p key={item.id}>{item.recommendation} · Plazo {new Date(`${item.dueDate}T00:00:00`).toLocaleDateString("es-CL")} · {followUpLabels[item.status]}</p>)}</section>}
-      {addenda.map((item, index) => <section key={item.id}><h3>Adenda {index + 1}</h3><p>{item.text}</p><p>{signerLabel(item.signer.name, item.signer.registration)} · {new Date(item.signedAt).toLocaleString("es-CL")}</p></section>)}
+      {addenda.map((item, index) => <section key={item.id}><h3>Adenda {index + 1}</h3><p>{item.text}</p><p>{signerLabel(item.signer.name, item.signer.registration)} · {new Date(item.signedAt).toLocaleString("es-CL")}</p>
+        {keyImages.some((img) => img.addendumId === item.id) && <div className="key-images-print"><div>{keyImages.filter((img) => img.addendumId === item.id).map((img) => <figure key={img.id}>{keyImageSrc(img) && <img src={keyImageSrc(img)} alt="Imagen de adenda" />}{img.caption && <figcaption>{img.caption}</figcaption>}</figure>)}</div></div>}
+      </section>)}
       <footer>{signatureImage && <img className="signature-image" src={signatureImage} alt="Firma" />}<p>{report.signer ? signerLabel(report.signer.name, report.signer.registration) : "Informe sin firma"}</p><p>Firmado electrónicamente · {report.signedAt ? new Date(report.signedAt).toLocaleString("es-CL") : ""}</p></footer>
     </div>
   </div>;

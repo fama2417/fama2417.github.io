@@ -19,7 +19,7 @@ const modules: { href: string; icon: string; title: string; description: string;
   { href: "/privacidad", icon: "🔒", title: "Privacidad", description: "Política de tratamiento de datos personales (Ley 19.628).", roles: ["admin", "operator", "radiologist"] },
 ];
 
-type Stat = { label: string; value: number; hint: string; tone?: "danger" | "warning" };
+type Stat = { label: string; value: number; hint: string; view: string; tone?: "danger" | "warning" };
 
 export function HomeDashboard() {
   const [role, setRole] = useState<Role | null>(null);
@@ -48,14 +48,14 @@ export function HomeDashboard() {
     const withStudy = appointments.filter((item) => item.studyInstanceUid);
     const pending = withStudy.filter((item) => item.reportStatus !== "final");
     const base: Stat[] = [
-      { label: "Citas de hoy", value: appointments.filter((item) => item.date === day).length, hint: "Agendadas para la fecha actual" },
-      { label: "Estudios por informar", value: pending.length, hint: "Con imágenes vinculadas y sin informe definitivo", tone: pending.length ? "warning" : undefined },
-      { label: "Hallazgos críticos", value: appointments.filter((item) => item.criticalFinding).length, hint: "Marcados en informes", tone: appointments.some((item) => item.criticalFinding) ? "danger" : undefined },
-      { label: "Seguimientos pendientes", value: appointments.filter((item) => item.actionablePending).length, hint: "Recomendaciones accionables abiertas" },
+      { label: "Citas de hoy", value: appointments.filter((item) => item.date === day).length, hint: "Agendadas para la fecha actual", view: "today" },
+      { label: "Estudios por informar", value: pending.length, hint: "Con imágenes vinculadas y sin informe definitivo", view: "pending", tone: pending.length ? "warning" : undefined },
+      { label: "Hallazgos críticos", value: appointments.filter((item) => item.criticalFinding).length, hint: "Marcados en informes", view: "critical", tone: appointments.some((item) => item.criticalFinding) ? "danger" : undefined },
+      { label: "Seguimientos pendientes", value: appointments.filter((item) => item.actionablePending).length, hint: "Recomendaciones accionables abiertas", view: "follow" },
     ];
     if (role === "radiologist") {
       const mine = appointments.filter((item) => item.assignedTo === uid && item.reportStatus !== "final").length;
-      return [{ label: "Asignados a mí", value: mine, hint: "Casos que debo informar", tone: mine ? "warning" : undefined }, ...base.slice(1)];
+      return [{ label: "Asignados a mí", value: mine, hint: "Casos que debo informar", view: "mine", tone: mine ? "warning" : undefined }, ...base.slice(1)];
     }
     return base;
   }, [appointments, role, uid]);
@@ -72,11 +72,11 @@ export function HomeDashboard() {
     </section>
 
     <section className="stat-grid" aria-label="Indicadores">
-      {stats.map((stat) => <article key={stat.label} className={`stat-card ${stat.tone ?? ""}`}>
+      {stats.map((stat) => <Link key={stat.label} href={`/worklist?view=${stat.view}`} className={`stat-card ${stat.tone ?? ""}`}>
         <span className="stat-value">{loading ? "…" : stat.value}</span>
         <span className="stat-label">{stat.label}</span>
         <span className="stat-hint">{stat.hint}</span>
-      </article>)}
+      </Link>)}
     </section>
 
     <section className="module-grid" aria-label="Módulos">
