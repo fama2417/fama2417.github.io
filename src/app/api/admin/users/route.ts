@@ -51,12 +51,21 @@ export async function PATCH(request: NextRequest) {
   const context = await requireAdmin(request);
   if ("error" in context) return context.error;
   const { admin, tenantId } = context;
-  const { userId, role, professionalRegistration, fullName, signaturePath } = (await request.json()) ?? {};
+  const { userId, role, professionalRegistration, fullName, signaturePath, password } = (await request.json()) ?? {};
   if (!userId || !ROLES.includes(role)) return NextResponse.json({ error: "Datos incompletos." }, { status: 400 });
   const update: Record<string, string> = { role, professional_registration: String(professionalRegistration ?? "").trim() };
   if (typeof fullName === "string" && fullName.trim()) update.full_name = fullName.trim();
   if (typeof signaturePath === "string") update.signature_url = signaturePath;
   const { error } = await admin.from("profiles").update(update).eq("id", userId).eq("tenant_id", tenantId);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+
+  if (password !== undefined) {
+    if (String(password).length < 12) return NextResponse.json({ error: "La contraseña debe tener al menos 12 caracteres." }, { status: 400 });
+    // El usuario debe pertenecer a esta institución (updateUserById no filtra por tenant).
+    const { data: target } = await admin.from("profiles").select("tenant_id").eq("id", userId).single();
+    if (target?.tenant_id !== tenantId) return NextResponse.json({ error: "Usuario de otra institución." }, { status: 403 });
+    const { error: pwError } = await admin.auth.admin.updateUserById(userId, { password });
+    if (pwError) return NextResponse.json({ error: pwError.message }, { status: 400 });
+  }
   return NextResponse.json({ ok: true });
 }
