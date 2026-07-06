@@ -11,15 +11,15 @@ type AppointmentRow = {
   pickup_name?: string; pickup_run?: string; pickup_phone?: string;
   origin_type?: Appointment["originType"]; origin_desc?: string; status_reason?: string; order_file?: string;
   patient: { full_name: string; identifier?: string; prevision?: string } | null;
-  study: { study_instance_uid: string | null } | null;
+  study: { study_instance_uid: string | null; orthanc_study_id?: string | null } | null;
   report?: { status: "draft" | "final"; critical_finding: boolean } | null;
   followups?: { status: "pending" | "acknowledged" | "completed" }[] | null;
   assigned_to?: string | null;
   assignee?: { full_name: string } | null;
 };
 
-const baseColumns = "id, patient_id, practitioner_name, location_name, appointment_date, start_time, end_time, status, reason, modality, patient:patients(full_name, identifier, prevision), study:imaging_studies(study_instance_uid)";
-const columns = "id, patient_id, practitioner_name, location_name, appointment_date, start_time, end_time, status, reason, modality, branch, service, specialty, procedure_code, treating_physician, order_date, anesthesia, contrast, priority, payment_order, tags, anamnesis, diagnostic_hypothesis, comment, requester_type, requester_name, requester_run, requester_email, pickup_name, pickup_run, pickup_phone, origin_type, origin_desc, status_reason, order_file, assigned_to, patient:patients(full_name, identifier, prevision), study:imaging_studies(study_instance_uid), report:radiology_reports(status, critical_finding), followups:report_follow_ups(status), assignee:profiles(full_name)";
+const baseColumns = "id, patient_id, practitioner_name, location_name, appointment_date, start_time, end_time, status, reason, modality, patient:patients(full_name, identifier, prevision), study:imaging_studies(study_instance_uid, orthanc_study_id)";
+const columns = "id, patient_id, practitioner_name, location_name, appointment_date, start_time, end_time, status, reason, modality, branch, service, specialty, procedure_code, treating_physician, order_date, anesthesia, contrast, priority, payment_order, tags, anamnesis, diagnostic_hypothesis, comment, requester_type, requester_name, requester_run, requester_email, pickup_name, pickup_run, pickup_phone, origin_type, origin_desc, status_reason, order_file, assigned_to, patient:patients(full_name, identifier, prevision), study:imaging_studies(study_instance_uid, orthanc_study_id), report:radiology_reports(status, critical_finding), followups:report_follow_ups(status), assignee:profiles(full_name)";
 
 const mapAppointment = (row: AppointmentRow): Appointment => ({
   id: row.id,
@@ -34,6 +34,7 @@ const mapAppointment = (row: AppointmentRow): Appointment => ({
   reason: row.reason,
   modality: row.modality,
   studyInstanceUid: row.study?.study_instance_uid ?? undefined,
+  orthancStudyId: row.study?.orthanc_study_id ?? undefined,
   branch: row.branch ?? "",
   service: row.service ?? "",
   specialty: row.specialty ?? "",

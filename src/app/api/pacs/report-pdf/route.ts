@@ -22,11 +22,13 @@ export async function POST(request: NextRequest) {
   const { appointmentId } = (await request.json().catch(() => ({}))) ?? {};
   if (!appointmentId) return NextResponse.json({ error: "Falta appointmentId." }, { status: 400 });
 
-  const [report, appointment, tenant] = await Promise.all([
+  const [report, appointment, tenant, keyImagesResult] = await Promise.all([
     db.from("radiology_reports").select("clinical_indication, technique, comparison, findings, impression, status, critical_finding, critical_finding_type, signed_at, signer_name, signer_registration").eq("appointment_id", appointmentId).maybeSingle(),
     db.from("appointments").select("appointment_date, modality, reason, treating_physician, requester_name, patient:patients(full_name, identifier), study:imaging_studies(orthanc_study_id)").eq("id", appointmentId).maybeSingle(),
     db.from("tenants").select("name, rut, address, phone, report_header").maybeSingle(),
+    db.from("report_key_images").select("instance_id, caption").eq("appointment_id", appointmentId).order("created_at"),
   ]);
+  const keyImages = (keyImagesResult.data ?? []) as { instance_id: string; caption: string }[];
   const reportRow = report.data;
   const appointmentRow = appointment.data as unknown as { appointment_date: string; modality: string; reason: string; treating_physician: string; requester_name: string; patient: { full_name: string; identifier: string } | null; study: { orthanc_study_id: string | null } | null } | null;
   if (!reportRow || reportRow.status !== "final" || !appointmentRow) return NextResponse.json({ error: "No hay informe definitivo para archivar." }, { status: 409 });
@@ -89,6 +91,40 @@ export async function POST(request: NextRequest) {
   writeBlock("Comparación", reportRow.comparison);
   writeBlock("Hallazgos", reportRow.findings);
   writeBlock("Impresión", reportRow.impression);
+
+  if (keyImages.length) {
+    y -= 6;
+    writeLine("IMÁGENES CLAVE", { bold: true, size: 10 });
+    const basicAuth = `Basic ${Buffer.from(orthancCreds).toString("base64")}`;
+    const cellWidth = (width - 10) / 2;
+    for (let index = 0; index < keyImages.length; index += 2) {
+      const pair = keyImages.slice(index, index + 2);
+      const embedded = await Promise.all(pair.map(async (item) => {
+        try {
+          const preview = await fetch(`${orthancUrl}/instances/${item.instance_id}/preview`, { headers: { Authorization: basicAuth, Accept: "image/png" } });
+          if (!preview.ok) return null;
+          return await pdf.embedPng(await preview.arrayBuffer());
+        } catch { return null; }
+      }));
+      const sizes = embedded.map((image) => {
+        if (!image) return { width: 0, height: 0 };
+        const scale = Math.min(cellWidth / image.width, 220 / image.height);
+        return { width: image.width * scale, height: image.height * scale };
+      });
+      const rowHeight = Math.max(...sizes.map((size) => size.height), 0);
+      if (!rowHeight) continue;
+      if (y - rowHeight - 24 < 60) { page = pdf.addPage([595, 842]); y = 800; }
+      embedded.forEach((image, position) => {
+        if (!image) return;
+        const size = sizes[position];
+        const x = margin + position * (cellWidth + 10);
+        page.drawImage(image, { x, y: y - size.height, width: size.width, height: size.height });
+        const caption = pair[position].caption;
+        if (caption) page.drawText(caption.slice(0, 70), { x, y: y - size.height - 10, size: 8, font, color: rgb(0.2, 0.2, 0.2) });
+      });
+      y -= rowHeight + 24;
+    }
+  }
   y -= 10;
   writeLine([reportRow.signer_name, reportRow.signer_registration].filter(Boolean).join(" · "), { bold: true });
   writeLine(`Firmado electrónicamente · ${reportRow.signed_at ? new Date(reportRow.signed_at).toLocaleString("es-CL", { timeZone: "America/Santiago" }) : ""}`, { size: 8 });

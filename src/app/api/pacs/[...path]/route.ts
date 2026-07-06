@@ -31,7 +31,7 @@ async function proxy(request: NextRequest, { params }: { params: Promise<{ path:
   responseHeaders.delete("content-length");
   responseHeaders.delete("www-authenticate"); // nunca mostrar el diálogo de login del navegador
   // Los bundles de OHIF llevan hash en el nombre: cachearlos fuerte evita repetir el viaje Render→Orthanc.
-  if (upstream.ok && /\.(js|css|woff2?|ttf|png|svg|ico|wasm|json)$/.test(path[path.length - 1] ?? "")) {
+  if (upstream.ok && (/\.(js|css|woff2?|ttf|png|svg|ico|wasm|json)$/.test(path[path.length - 1] ?? "") || path[path.length - 1] === "preview")) {
     responseHeaders.set("cache-control", "public, max-age=86400, immutable");
   }
   const location = upstream.headers.get("location");
