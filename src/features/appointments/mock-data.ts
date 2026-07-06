@@ -40,6 +40,9 @@ export type Appointment = {
   orderFile: string;
   reportStatus?: "draft" | "final";
   criticalFinding?: boolean;
+  actionablePending?: boolean;
+  assignedTo?: string;
+  assigneeName?: string;
   patientIdentifier?: string;
   patientPrevision?: string;
 };

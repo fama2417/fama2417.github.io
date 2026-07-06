@@ -3,7 +3,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase-client";
 
-type ManagedUser = { id: string; email: string; full_name: string; role: string };
+type ManagedUser = { id: string; email: string; full_name: string; role: string; professional_registration: string };
 
 export const roleLabels: Record<string, string> = { admin: "Administrador", operator: "Operador / admisión", radiologist: "Radiólogo" };
 const sectionsByRole: Record<string, string> = {
@@ -48,7 +48,7 @@ export function UsersManager() {
     setError("");
     setNotice("");
     try {
-      await api("POST", { email: String(form.get("email")).trim(), password: String(form.get("password")), fullName: String(form.get("fullName")).trim(), role: String(form.get("role")) });
+      await api("POST", { email: String(form.get("email")).trim(), password: String(form.get("password")), fullName: String(form.get("fullName")).trim(), role: String(form.get("role")), professionalRegistration: String(form.get("professionalRegistration")).trim() });
       formElement.reset();
       setShowForm(false);
       setNotice("Usuario creado. Puede ingresar de inmediato con su correo y contraseña.");
@@ -58,11 +58,10 @@ export function UsersManager() {
     }
   }
 
-  async function changeRole(userId: string, role: string) {
+  async function updateProfile(userId: string, role: string, professionalRegistration: string) {
     setError("");
     try {
-      await api("PATCH", { userId, role });
-      setUsers((current) => current.map((user) => user.id === userId ? { ...user, role } : user));
+      await api("PATCH", { userId, role, professionalRegistration });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "No fue posible cambiar el rol.");
     }
@@ -84,16 +83,18 @@ export function UsersManager() {
           <label>Correo electrónico<input name="email" type="email" required /></label>
           <label>Contraseña inicial<input name="password" type="password" minLength={12} required placeholder="Mínimo 12 caracteres" /></label>
           <label>Rol<select name="role" defaultValue="operator">{Object.entries(roleLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          <label>Registro profesional<input name="professionalRegistration" placeholder="Ej.: RNPI 123456" /></label>
           <button className="button primary" type="submit">Crear usuario</button>
         </form>
       )}
 
       <div className="table-card" style={{ border: 0 }}>
-        <table><thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Acceso</th></tr></thead><tbody>
+        <table><thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Registro profesional</th><th>Acceso</th></tr></thead><tbody>
           {users.map((user) => <tr key={user.id}>
             <td>{user.full_name}</td>
             <td>{user.email}</td>
-            <td><select value={user.role} onChange={(event) => changeRole(user.id, event.target.value)} aria-label={`Rol de ${user.full_name}`}>{Object.entries(roleLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></td>
+            <td><select value={user.role} onChange={(event) => { const role = event.target.value; setUsers((current) => current.map((item) => item.id === user.id ? { ...item, role } : item)); updateProfile(user.id, role, user.professional_registration); }} aria-label={`Rol de ${user.full_name}`}>{Object.entries(roleLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></td>
+            <td><input value={user.professional_registration} onChange={(event) => setUsers((current) => current.map((item) => item.id === user.id ? { ...item, professional_registration: event.target.value } : item))} onBlur={() => updateProfile(user.id, user.role, user.professional_registration)} aria-label={`Registro profesional de ${user.full_name}`} /></td>
             <td>{sectionsByRole[user.role] ?? "—"}</td>
           </tr>)}
         </tbody></table>

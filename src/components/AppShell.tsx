@@ -10,7 +10,7 @@ type Role = "admin" | "operator" | "radiologist";
 const navigation: { href: string; label: string; roles: Role[] }[] = [
   { href: "/", label: "Inicio", roles: ["admin", "operator", "radiologist"] },
   { href: "/agenda", label: "Agenda", roles: ["admin", "operator"] },
-  { href: "/pacientes", label: "Pacientes", roles: ["admin", "operator"] },
+  { href: "/pacientes", label: "Pacientes", roles: ["admin"] },
   { href: "/worklist", label: "Lista de trabajo", roles: ["admin", "operator", "radiologist"] },
   { href: "/privacidad", label: "Privacidad", roles: ["admin", "operator", "radiologist"] },
   { href: "/configuracion", label: "Configuración", roles: ["admin", "operator"] },

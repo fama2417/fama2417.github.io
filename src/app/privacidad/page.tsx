@@ -32,7 +32,7 @@ export default function PrivacyPage() {
         <li>Acceso exclusivamente autenticado, con roles diferenciados (administración, operación, radiología) y política de mínimo privilegio aplicada en la base de datos (Row Level Security).</li>
         <li>Cifrado del tránsito extremo a extremo (HTTPS/TLS) en la aplicación, la base de datos y el PACS.</li>
         <li>Registro de auditoría inalterable de toda creación, modificación o eliminación de pacientes, citas, estudios e informes, con identificación del usuario actor.</li>
-        <li>Los informes firmados como definitivos solo pueden reabrirse dejando rastro de auditoría.</li>
+        <li>Los informes firmados son inmutables; toda corrección se incorpora como una adenda firmada y auditada.</li>
         <li>Retención limitada: las imágenes DICOM se eliminan automáticamente cumplido el período de retención configurado; los datos administrativos se conservan mientras exista relación asistencial.</li>
       </ul>
 
