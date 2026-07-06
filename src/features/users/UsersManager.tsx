@@ -29,6 +29,7 @@ export function UsersManager() {
   const [available, setAvailable] = useState(true);
   const [allowed, setAllowed] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState<ManagedUser | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -58,14 +59,28 @@ export function UsersManager() {
     }
   }
 
-  async function updateProfile(user: ManagedUser) {
-    setError("");
-    setNotice("");
+  async function saveEditing() {
+    if (!editing) return;
+    setError(""); setNotice("");
     try {
-      await api("PATCH", { userId: user.id, role: user.role, professionalRegistration: user.professional_registration, fullName: user.full_name });
+      await api("PATCH", { userId: editing.id, role: editing.role, professionalRegistration: editing.professional_registration, fullName: editing.full_name });
+      setUsers((current) => current.map((item) => item.id === editing.id ? editing : item));
+      setEditing(null);
       setNotice("Cambios guardados (quedan en el registro de auditoría).");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "No fue posible actualizar el usuario.");
+    }
+  }
+
+  async function resetPassword(user: ManagedUser) {
+    const password = window.prompt(`Nueva contraseña para ${user.email} (mínimo 12 caracteres):`)?.trim();
+    if (!password) return;
+    setError(""); setNotice("");
+    try {
+      await api("PATCH", { userId: user.id, role: user.role, professionalRegistration: user.professional_registration, password });
+      setNotice(`Contraseña actualizada para ${user.email}. Ya puede ingresar con ella.`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "No fue posible cambiar la contraseña.");
     }
   }
 
@@ -106,15 +121,19 @@ export function UsersManager() {
       )}
 
       <div className="table-card" style={{ border: 0 }}>
-        <table><thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Registro profesional</th><th>Firma</th><th>Acceso</th></tr></thead><tbody>
-          {users.map((user) => <tr key={user.id}>
-            <td><input value={user.full_name} onChange={(event) => setUsers((current) => current.map((item) => item.id === user.id ? { ...item, full_name: event.target.value } : item))} onBlur={() => updateProfile(user)} aria-label={`Nombre de ${user.email}`} /></td>
+        <table><thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Registro profesional</th><th>Firma</th><th>Contraseña</th><th>Acceso</th><th></th></tr></thead><tbody>
+          {users.map((user) => { const row = editing?.id === user.id ? editing : user; const isEditing = editing?.id === user.id; return <tr key={user.id}>
+            <td>{isEditing ? <input value={row.full_name} onChange={(event) => setEditing({ ...row, full_name: event.target.value })} aria-label="Nombre" /> : user.full_name}</td>
             <td>{user.email}</td>
-            <td><select value={user.role} onChange={(event) => { const next = { ...user, role: event.target.value }; setUsers((current) => current.map((item) => item.id === user.id ? next : item)); updateProfile(next); }} aria-label={`Rol de ${user.full_name}`}>{Object.entries(roleLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></td>
-            <td><input value={user.professional_registration} onChange={(event) => setUsers((current) => current.map((item) => item.id === user.id ? { ...item, professional_registration: event.target.value } : item))} onBlur={() => updateProfile(user)} aria-label={`Registro profesional de ${user.full_name}`} /></td>
+            <td>{isEditing ? <select value={row.role} onChange={(event) => setEditing({ ...row, role: event.target.value })} aria-label="Rol">{Object.entries(roleLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select> : roleLabels[user.role] ?? user.role}</td>
+            <td>{isEditing ? <input value={row.professional_registration} onChange={(event) => setEditing({ ...row, professional_registration: event.target.value })} placeholder="Ej.: RNPI 123456" aria-label="Registro profesional" /> : (user.professional_registration || "—")}</td>
             <td className="signature-cell">{user.signature_url && <span title="Firma cargada">✒️</span>}<label className="text-button">{user.signature_url ? "Cambiar" : "Subir"}<input type="file" accept="image/png,image/jpeg" hidden onChange={(event) => uploadSignature(user, event.target.files?.[0])} /></label></td>
+            <td><button className="text-button" type="button" onClick={() => resetPassword(user)}>Restablecer</button></td>
             <td>{sectionsByRole[user.role] ?? "—"}</td>
-          </tr>)}
+            <td>{isEditing
+              ? <><button className="text-button" type="button" onClick={saveEditing}>Guardar</button><button className="text-button" type="button" onClick={() => setEditing(null)}>Cancelar</button></>
+              : <button className="text-button" type="button" onClick={() => setEditing(user)}>Editar</button>}</td>
+          </tr>; })}
         </tbody></table>
         {!users.length && available && <p className="empty-state">Cargando usuarios…</p>}
       </div>
