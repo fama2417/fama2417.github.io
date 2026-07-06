@@ -138,6 +138,34 @@ export async function addFollowUp(appointmentId: string, input: Pick<ReportFollo
   return mapFollowUp(data as FollowUpRow);
 }
 
+export type ReportKeyImage = { id: string; instanceId: string; caption: string };
+
+type KeyImageRow = { id: string; instance_id: string; caption: string };
+const keyImageColumns = "id, instance_id, caption";
+const mapKeyImage = (row: KeyImageRow): ReportKeyImage => ({ id: row.id, instanceId: row.instance_id, caption: row.caption });
+
+export async function fetchKeyImages(appointmentId: string) {
+  const { data, error } = await supabase.from("report_key_images").select(keyImageColumns).eq("appointment_id", appointmentId).order("created_at");
+  if (error) throw error;
+  return (data as KeyImageRow[]).map(mapKeyImage);
+}
+
+export async function addKeyImage(appointmentId: string, instanceId: string) {
+  const { data, error } = await supabase.from("report_key_images").insert({ appointment_id: appointmentId, instance_id: instanceId }).select(keyImageColumns).single();
+  if (error) throw error;
+  return mapKeyImage(data as KeyImageRow);
+}
+
+export async function updateKeyImageCaption(id: string, caption: string) {
+  const { error } = await supabase.from("report_key_images").update({ caption }).eq("id", id);
+  if (error) throw error;
+}
+
+export async function removeKeyImage(id: string) {
+  const { error } = await supabase.from("report_key_images").delete().eq("id", id);
+  if (error) throw error;
+}
+
 /** URL temporal de la imagen de firma del firmante (bucket privado; visible según RLS de profiles). */
 export async function fetchSignatureUrl(profileId: string) {
   const { data } = await supabase.from("profiles").select("signature_url").eq("id", profileId).maybeSingle();

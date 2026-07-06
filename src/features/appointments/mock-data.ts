@@ -13,6 +13,7 @@ export type Appointment = {
   reason: string;
   modality: "US" | "DX" | "CT" | "MR" | "MG";
   studyInstanceUid?: string;
+  orthancStudyId?: string;
   branch: string;
   service: string;
   specialty: string;

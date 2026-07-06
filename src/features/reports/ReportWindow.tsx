@@ -7,9 +7,10 @@ import { appointmentStatusLabels } from "@/features/appointments/status";
 import { fetchMyTenant, renderHeader, type Tenant } from "@/features/tenant/repository";
 import { supabase } from "@/lib/supabase-client";
 import {
-  addAddendum, addCommunication, addFollowUp, fetchAddenda, fetchCommunications, fetchFollowUps, fetchReport,
-  fetchSignatureUrl, saveReport, updateFollowUpStatus, type FollowUpStatus, type RadiologyReport, type ReportAddendum,
-  type ReportCommunication, type ReportFollowUp,
+  addAddendum, addCommunication, addFollowUp, addKeyImage, fetchAddenda, fetchCommunications, fetchFollowUps,
+  fetchKeyImages, fetchReport, fetchSignatureUrl, removeKeyImage, saveReport, updateFollowUpStatus,
+  updateKeyImageCaption, type FollowUpStatus, type RadiologyReport, type ReportAddendum,
+  type ReportCommunication, type ReportFollowUp, type ReportKeyImage,
 } from "./repository";
 import { fetchTemplates, type ReportTemplate } from "./templates";
 import { validateFinalReport } from "./validation";
@@ -68,6 +69,9 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [signatureImage, setSignatureImage] = useState<string | null>(null);
+  const [keyImages, setKeyImages] = useState<ReportKeyImage[]>([]);
+  const [pickerInstances, setPickerInstances] = useState<string[] | null>(null);
+  const [pickerLoading, setPickerLoading] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession()
@@ -91,6 +95,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
       .finally(() => setLoading(false));
     fetchTemplates().then(setTemplates).catch(() => undefined);
     fetchMyTenant().then(setTenant).catch(() => undefined);
+    fetchKeyImages(appointmentId).then(setKeyImages).catch(() => undefined);
   }, [appointmentId]);
 
   useEffect(() => {
@@ -166,6 +171,39 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
     } catch { setError("No fue posible actualizar el seguimiento."); }
   }
 
+  async function loadPicker() {
+    if (!appointment?.orthancStudyId) return;
+    setPickerLoading(true); setError("");
+    try {
+      const response = await fetch(`/api/pacs/studies/${appointment.orthancStudyId}/instances`);
+      if (!response.ok) throw new Error();
+      const list = (await response.json()) as { ID: string; MainDicomTags?: { InstanceNumber?: string } }[];
+      // ponytail: primeras 120 instancias del estudio; si aparecen series muy largas, el paso siguiente es marcar KOS desde el visor
+      setPickerInstances(list
+        .sort((a, b) => Number(a.MainDicomTags?.InstanceNumber ?? 0) - Number(b.MainDicomTags?.InstanceNumber ?? 0))
+        .slice(0, 120).map((item) => item.ID));
+    } catch { setError("No fue posible cargar las imágenes del estudio."); }
+    finally { setPickerLoading(false); }
+  }
+
+  async function toggleKeyImage(instanceId: string) {
+    setError("");
+    const existing = keyImages.find((item) => item.instanceId === instanceId);
+    try {
+      if (existing) {
+        await removeKeyImage(existing.id);
+        setKeyImages((current) => current.filter((item) => item.id !== existing.id));
+      } else {
+        const created = await addKeyImage(appointmentId, instanceId);
+        setKeyImages((current) => [...current, created]);
+      }
+    } catch { setError("No fue posible actualizar las imágenes clave (requiere informe en borrador y perfil de radiología/admin)."); }
+  }
+
+  async function persistCaption(item: ReportKeyImage) {
+    try { await updateKeyImageCaption(item.id, item.caption); } catch { setError("No fue posible guardar la leyenda."); }
+  }
+
   async function signAddendum(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setSaving(true); setError("");
     try {
@@ -239,6 +277,32 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
           </details>}
 
           <details className="report-clinical-panel collapsible">
+            <summary><span className="collapsible-icon">🩻</span>Imágenes clave (KIN){keyImages.length > 0 && <span className="collapsible-count">{keyImages.length}</span>}</summary>
+            {keyImages.length > 0 && <div className="key-images-grid">
+              {keyImages.map((item) => <figure key={item.id} className="key-image">
+                <img src={`/api/pacs/instances/${item.instanceId}/preview`} alt="Imagen clave" loading="lazy" />
+                {report.status === "final"
+                  ? (item.caption && <figcaption>{item.caption}</figcaption>)
+                  : <input value={item.caption} placeholder="Leyenda…" onChange={(event) => setKeyImages((current) => current.map((entry) => entry.id === item.id ? { ...entry, caption: event.target.value } : entry))} onBlur={() => persistCaption(keyImages.find((entry) => entry.id === item.id) ?? item)} />}
+                {report.status !== "final" && <button className="text-button" type="button" onClick={() => toggleKeyImage(item.instanceId)}>Quitar</button>}
+              </figure>)}
+            </div>}
+            {report.status !== "final" && (appointment.orthancStudyId
+              ? <>
+                  {!pickerInstances && <button className="button secondary" type="button" disabled={pickerLoading} onClick={loadPicker}>{pickerLoading ? "Cargando imágenes…" : "Elegir imágenes del estudio"}</button>}
+                  {pickerInstances && <div className="key-images-grid picker">
+                    {pickerInstances.map((instanceId) => {
+                      const selected = keyImages.some((item) => item.instanceId === instanceId);
+                      return <button key={instanceId} type="button" className={selected ? "selected" : ""} title={selected ? "Quitar de imágenes clave" : "Marcar como imagen clave"} onClick={() => toggleKeyImage(instanceId)}>
+                        <img src={`/api/pacs/instances/${instanceId}/preview`} alt="" loading="lazy" />
+                      </button>;
+                    })}
+                  </div>}
+                </>
+              : <p className="empty-inline">Sin estudio vinculado en el PACS: no hay imágenes para seleccionar.</p>)}
+          </details>
+
+          <details className="report-clinical-panel collapsible">
             <summary><span className="collapsible-icon">📌</span>Seguimientos accionables{followUps.length > 0 && <span className="collapsible-count">{followUps.length}</span>}</summary>
             {followUps.map((item) => <div className="workflow-entry" key={item.id}><strong>{item.recommendation}</strong><span>Plazo: {new Date(`${item.dueDate}T00:00:00`).toLocaleDateString("es-CL")} · Responsable: {item.responsible}</span><label>Estado<select value={item.status} onChange={(event) => changeFollowUpStatus(item.id, event.target.value as FollowUpStatus)}>{Object.entries(followUpLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div>)}
             <form className="report-inline-form" onSubmit={createFollowUp}>
@@ -280,6 +344,9 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
         : <><p><strong>Paciente:</strong> {appointment.patientName} · <strong>ID:</strong> {appointment.patientIdentifier || "—"}</p><p><strong>Examen:</strong> {appointment.modality} · {appointment.reason} · <strong>Fecha:</strong> {appointment.date}</p></>}
       {report.criticalFinding && <p><strong>⚠ HALLAZGO CRÍTICO{report.criticalFindingType && `: ${report.criticalFindingType}`}</strong>{acknowledgedCommunication && <> · Comunicado a {acknowledgedCommunication.recipient} por {channelLabels[acknowledgedCommunication.channel]}, {new Date(acknowledgedCommunication.communicatedAt).toLocaleString("es-CL")}.</>}</p>}
       {sections.map((section) => report[section.name] && <section key={section.name}><h3>{section.label}</h3><p>{report[section.name]}</p></section>)}
+      {keyImages.length > 0 && <section className="key-images-print"><h3>Imágenes clave</h3><div>
+        {keyImages.map((item) => <figure key={item.id}><img src={`/api/pacs/instances/${item.instanceId}/preview`} alt="Imagen clave" />{item.caption && <figcaption>{item.caption}</figcaption>}</figure>)}
+      </div></section>}
       {followUps.length > 0 && <section><h3>Recomendaciones y seguimiento</h3>{followUps.map((item) => <p key={item.id}>{item.recommendation} · Plazo {new Date(`${item.dueDate}T00:00:00`).toLocaleDateString("es-CL")} · {followUpLabels[item.status]}</p>)}</section>}
       {addenda.map((item, index) => <section key={item.id}><h3>Adenda {index + 1}</h3><p>{item.text}</p><p>{signerLabel(item.signer.name, item.signer.registration)} · {new Date(item.signedAt).toLocaleString("es-CL")}</p></section>)}
       <footer>{signatureImage && <img className="signature-image" src={signatureImage} alt="Firma" />}<p>{report.signer ? signerLabel(report.signer.name, report.signer.registration) : "Informe sin firma"}</p><p>Firmado electrónicamente · {report.signedAt ? new Date(report.signedAt).toLocaleString("es-CL") : ""}</p></footer>
