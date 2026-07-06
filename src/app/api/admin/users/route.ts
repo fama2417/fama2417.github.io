@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
   const context = await requireAdmin(request);
   if ("error" in context) return context.error;
   const { admin, tenantId } = context;
-  const { data: profiles, error } = await admin.from("profiles").select("id, full_name, role, professional_registration").eq("tenant_id", tenantId);
+  const { data: profiles, error } = await admin.from("profiles").select("id, full_name, role, professional_registration, signature_url").eq("tenant_id", tenantId);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   const { data: authUsers } = await admin.auth.admin.listUsers({ perPage: 1000 });
   const emails = new Map(authUsers.users.map((user) => [user.id, user.email]));
@@ -51,9 +51,12 @@ export async function PATCH(request: NextRequest) {
   const context = await requireAdmin(request);
   if ("error" in context) return context.error;
   const { admin, tenantId } = context;
-  const { userId, role, professionalRegistration } = (await request.json()) ?? {};
+  const { userId, role, professionalRegistration, fullName, signaturePath } = (await request.json()) ?? {};
   if (!userId || !ROLES.includes(role)) return NextResponse.json({ error: "Datos incompletos." }, { status: 400 });
-  const { error } = await admin.from("profiles").update({ role, professional_registration: String(professionalRegistration ?? "").trim() }).eq("id", userId).eq("tenant_id", tenantId);
+  const update: Record<string, string> = { role, professional_registration: String(professionalRegistration ?? "").trim() };
+  if (typeof fullName === "string" && fullName.trim()) update.full_name = fullName.trim();
+  if (typeof signaturePath === "string") update.signature_url = signaturePath;
+  const { error } = await admin.from("profiles").update(update).eq("id", userId).eq("tenant_id", tenantId);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   return NextResponse.json({ ok: true });
 }

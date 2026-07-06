@@ -6,6 +6,7 @@ import { CATALOG_CATEGORIES, createCatalogItem, fetchCatalog, updateCatalogItem,
 export function CatalogManager() {
   const [catalog, setCatalog] = useState<CatalogItem[]>([]);
   const [category, setCategory] = useState<CatalogCategory>("sucursal");
+  const [editing, setEditing] = useState<CatalogItem | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
@@ -26,6 +27,19 @@ export function CatalogManager() {
       setError("");
     } catch {
       setError("No fue posible guardar. Revisa que el valor no exista y que tu perfil tenga permisos.");
+    }
+  }
+
+  async function saveEdit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editing || !editing.label.trim()) return;
+    try {
+      await updateCatalogItem(editing);
+      setCatalog((current) => current.map((entry) => entry.id === editing.id ? editing : entry));
+      setEditing(null);
+      setError("");
+    } catch {
+      setError("No fue posible guardar la corrección.");
     }
   }
 
@@ -59,8 +73,20 @@ export function CatalogManager() {
           <ul className="catalog-list">
             {items.map((item) => (
               <li key={item.id} className={item.active ? "" : "inactive"}>
-                <span>{item.code && <code>{item.code}</code>} {item.label}</span>
-                <button className="text-button" type="button" onClick={() => toggleItem(item)}>{item.active ? "Desactivar" : "Activar"}</button>
+                {editing?.id === item.id
+                  ? <form className="catalog-form" onSubmit={saveEdit}>
+                      <label>Código<input value={editing.code} onChange={(event) => setEditing({ ...editing, code: event.target.value })} /></label>
+                      <label>Nombre<input value={editing.label} onChange={(event) => setEditing({ ...editing, label: event.target.value })} required /></label>
+                      <button className="button primary" type="submit">Guardar</button>
+                      <button className="text-button" type="button" onClick={() => setEditing(null)}>Cancelar</button>
+                    </form>
+                  : <>
+                      <span>{item.code && <code>{item.code}</code>} {item.label}</span>
+                      <span>
+                        <button className="text-button" type="button" onClick={() => setEditing(item)}>Editar</button>
+                        <button className="text-button" type="button" onClick={() => toggleItem(item)}>{item.active ? "Desactivar" : "Activar"}</button>
+                      </span>
+                    </>}
               </li>
             ))}
             {!loading && !items.length && <li className="inactive"><span>Sin valores. Agrega el primero.</span></li>}

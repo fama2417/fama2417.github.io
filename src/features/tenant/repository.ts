@@ -1,20 +1,27 @@
 import { supabase } from "@/lib/supabase-client";
 
-export type Tenant = { id: string; name: string; rut: string; address: string; phone: string; logoUrl: string };
+export type Tenant = { id: string; name: string; rut: string; address: string; phone: string; logoUrl: string; reportHeader: string };
 
-type TenantRow = { id: string; name: string; rut: string; address: string; phone: string; logo_url: string };
+type TenantRow = { id: string; name: string; rut: string; address: string; phone: string; logo_url: string; report_header: string };
 
-const mapTenant = (row: TenantRow): Tenant => ({ id: row.id, name: row.name, rut: row.rut, address: row.address, phone: row.phone, logoUrl: row.logo_url });
+const mapTenant = (row: TenantRow): Tenant => ({ id: row.id, name: row.name, rut: row.rut, address: row.address, phone: row.phone, logoUrl: row.logo_url, reportHeader: row.report_header ?? "" });
 
 export async function fetchMyTenant() {
-  const { data, error } = await supabase.from("tenants").select("id, name, rut, address, phone, logo_url").single();
+  const { data, error } = await supabase.from("tenants").select("id, name, rut, address, phone, logo_url, report_header").single();
   if (error) throw error;
   return mapTenant(data as TenantRow);
 }
 
 export async function updateTenant(tenant: Tenant) {
-  const { error } = await supabase.from("tenants").update({ name: tenant.name, rut: tenant.rut, address: tenant.address, phone: tenant.phone, logo_url: tenant.logoUrl }).eq("id", tenant.id);
+  const { error } = await supabase.from("tenants").update({ name: tenant.name, rut: tenant.rut, address: tenant.address, phone: tenant.phone, logo_url: tenant.logoUrl, report_header: tenant.reportHeader }).eq("id", tenant.id);
   if (error) throw error;
+}
+
+/** Variables disponibles en el encabezado del informe. */
+export const HEADER_VARIABLES = ["paciente", "id", "medico", "examen", "fecha", "institucion"] as const;
+
+export function renderHeader(template: string, values: Record<string, string>) {
+  return template.replace(/{{\s*(\w+)\s*}}/g, (_, key: string) => values[key] ?? "");
 }
 
 export async function uploadLogo(tenantId: string, file: File) {
