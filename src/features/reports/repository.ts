@@ -16,6 +16,7 @@ export type RadiologyReport = {
   clinicalQuestionAnswered: boolean;
   signedAt?: string;
   signer?: Signer;
+  signerId?: string;
   updatedAt?: string;
 };
 
@@ -44,10 +45,10 @@ export type ReportFollowUp = {
 type ReportRow = {
   appointment_id: string; clinical_indication: string; technique: string; comparison: string; findings: string; impression: string;
   status: RadiologyReport["status"]; critical_finding: boolean; critical_finding_type: string; identity_confirmed: boolean;
-  clinical_question_answered: boolean; signed_at: string | null; signer_name: string; signer_registration: string; updated_at: string;
+  clinical_question_answered: boolean; signed_at: string | null; signed_by: string | null; signer_name: string; signer_registration: string; updated_at: string;
 };
 
-const reportColumns = "appointment_id, clinical_indication, technique, comparison, findings, impression, status, critical_finding, critical_finding_type, identity_confirmed, clinical_question_answered, signed_at, signer_name, signer_registration, updated_at";
+const reportColumns = "appointment_id, clinical_indication, technique, comparison, findings, impression, status, critical_finding, critical_finding_type, identity_confirmed, clinical_question_answered, signed_at, signed_by, signer_name, signer_registration, updated_at";
 const mapReport = (row: ReportRow): RadiologyReport => ({
   appointmentId: row.appointment_id,
   clinicalIndication: row.clinical_indication,
@@ -61,6 +62,7 @@ const mapReport = (row: ReportRow): RadiologyReport => ({
   identityConfirmed: row.identity_confirmed,
   clinicalQuestionAnswered: row.clinical_question_answered,
   signedAt: row.signed_at ?? undefined,
+  signerId: row.signed_by ?? undefined,
   signer: row.signer_name ? { name: row.signer_name, registration: row.signer_registration } : undefined,
   updatedAt: row.updated_at,
 });
@@ -134,6 +136,15 @@ export async function addFollowUp(appointmentId: string, input: Pick<ReportFollo
   const { data, error } = await supabase.from("report_follow_ups").insert({ appointment_id: appointmentId, recommendation: input.recommendation, due_date: input.dueDate, responsible: input.responsible }).select("id, recommendation, due_date, responsible, status, acknowledged_at, completed_at").single();
   if (error) throw error;
   return mapFollowUp(data as FollowUpRow);
+}
+
+/** URL temporal de la imagen de firma del firmante (bucket privado; visible según RLS de profiles). */
+export async function fetchSignatureUrl(profileId: string) {
+  const { data } = await supabase.from("profiles").select("signature_url").eq("id", profileId).maybeSingle();
+  const path = (data as { signature_url?: string } | null)?.signature_url;
+  if (!path) return null;
+  const { data: signed } = await supabase.storage.from("firmas").createSignedUrl(path, 3600);
+  return signed?.signedUrl ?? null;
 }
 
 export async function updateFollowUpStatus(id: string, status: FollowUpStatus) {

@@ -4,11 +4,11 @@ import { FormEvent, useEffect, useState } from "react";
 import type { Appointment } from "@/features/appointments/mock-data";
 import { fetchAppointments, orderFileUrl } from "@/features/appointments/repository";
 import { appointmentStatusLabels } from "@/features/appointments/status";
-import { fetchMyTenant, type Tenant } from "@/features/tenant/repository";
+import { fetchMyTenant, renderHeader, type Tenant } from "@/features/tenant/repository";
 import { supabase } from "@/lib/supabase-client";
 import {
   addAddendum, addCommunication, addFollowUp, fetchAddenda, fetchCommunications, fetchFollowUps, fetchReport,
-  saveReport, updateFollowUpStatus, type FollowUpStatus, type RadiologyReport, type ReportAddendum,
+  fetchSignatureUrl, saveReport, updateFollowUpStatus, type FollowUpStatus, type RadiologyReport, type ReportAddendum,
   type ReportCommunication, type ReportFollowUp,
 } from "./repository";
 import { fetchTemplates, type ReportTemplate } from "./templates";
@@ -67,6 +67,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [signatureImage, setSignatureImage] = useState<string | null>(null);
 
   useEffect(() => {
     supabase.auth.getSession()
@@ -92,6 +93,26 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
     fetchMyTenant().then(setTenant).catch(() => undefined);
   }, [appointmentId]);
 
+  useEffect(() => {
+    if (report.signerId) fetchSignatureUrl(report.signerId).then(setSignatureImage).catch(() => undefined);
+  }, [report.signerId]);
+
+  /** Genera el PDF del informe firmado y lo archiva como serie DICOM junto a las imágenes del estudio. */
+  async function archivePdfInPacs() {
+    try {
+      const { data } = await supabase.auth.getSession();
+      const response = await fetch("/api/pacs/report-pdf", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${data.session?.access_token ?? ""}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ appointmentId }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      setNotice(response.ok ? "Informe firmado; PDF archivado en el PACS." : `Informe firmado. ${payload.error ?? "No fue posible archivar el PDF en el PACS."}`);
+    } catch {
+      setNotice("Informe firmado. No fue posible archivar el PDF en el PACS.");
+    }
+  }
+
   function applyTemplate(id: string) {
     const template = templates.find((item) => item.id === id);
     if (!template) return;
@@ -109,6 +130,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
       const saved = await saveReport({ ...report, status });
       setReport(saved);
       setNotice(status === "final" ? "Informe firmado y bloqueado como definitivo." : "Borrador guardado.");
+      if (status === "final") await archivePdfInPacs();
     } catch {
       setError(status === "final" ? "No fue posible firmar. Verifica tu perfil de administración/radiología y el registro profesional." : "No fue posible guardar el borrador.");
     } finally { setSaving(false); }
@@ -186,8 +208,12 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
     <div className="report-layout">
       <section className="report-editor" aria-label="Editor de informe">
         <div className="report-fields">
-          <div className="card-heading"><h3>Informe estructurado (ACR)</h3>{report.status !== "final" && templates.some((template) => template.active && template.modality === appointment.modality) &&
-            <select defaultValue="" onChange={(event) => { applyTemplate(event.target.value); event.target.value = ""; }} aria-label="Aplicar plantilla"><option value="" disabled>Aplicar plantilla…</option>{templates.filter((template) => template.active && template.modality === appointment.modality).map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}</select>}
+          <div className="card-heading"><h3>Informe estructurado (ACR)</h3>{report.status !== "final" && templates.some((template) => template.active) &&
+            <select defaultValue="" onChange={(event) => { applyTemplate(event.target.value); event.target.value = ""; }} aria-label="Aplicar plantilla">
+              <option value="" disabled>Aplicar plantilla…</option>
+              <optgroup label={`Modalidad ${appointment.modality}`}>{templates.filter((template) => template.active && template.modality === appointment.modality).map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}</optgroup>
+              <optgroup label="Otras modalidades">{templates.filter((template) => template.active && template.modality !== appointment.modality).map((template) => <option key={template.id} value={template.id}>{template.modality} · {template.name}</option>)}</optgroup>
+            </select>}
           </div>
           {sections.map((section) => <label key={section.name}>{section.label}<textarea name={section.name} value={report[section.name]} placeholder={section.hint} onChange={(event) => setSection(section.name, event.target.value)} disabled={report.status === "final"} /></label>)}
 
@@ -197,7 +223,8 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
           </div>
 
           <label className="consent-field critical-field"><input type="checkbox" checked={report.criticalFinding} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, criticalFinding: event.target.checked, criticalFindingType: event.target.checked ? current.criticalFindingType : "" }))} />Hallazgo crítico: requiere comunicación inmediata y confirmada.</label>
-          {report.criticalFinding && <section className="report-clinical-panel critical-panel">
+          {report.criticalFinding && <details className="report-clinical-panel collapsible critical-panel" open>
+            <summary><span className="collapsible-icon">❤️‍🔥</span>Hallazgo crítico{report.criticalFindingType && <span className="collapsible-hint">{report.criticalFindingType}</span>}{communications.length > 0 && <span className="collapsible-count">{communications.length}</span>}</summary>
             <label>Tipo de hallazgo crítico<select value={report.criticalFindingType} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, criticalFindingType: event.target.value }))}><option value="">Seleccionar…</option>{criticalFindingTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
             <h4>Registro de comunicación</h4>
             {communications.map((item) => <div className="workflow-entry" key={item.id}><strong>{item.acknowledged ? "Confirmada" : "Sin confirmación"}</strong><span>{new Date(item.communicatedAt).toLocaleString("es-CL")} · {item.recipient} · {channelLabels[item.channel]}</span>{item.notes && <span>{item.notes}</span>}</div>)}
@@ -209,10 +236,10 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
               <label className="span-2">Notas / intento fallido<textarea value={communicationDraft.notes} onChange={(event) => setCommunicationDraft({ ...communicationDraft, notes: event.target.value })} /></label>
               <button className="button secondary" disabled={saving} type="submit">Registrar intento</button>
             </form>
-          </section>}
+          </details>}
 
-          <section className="report-clinical-panel">
-            <h4>Seguimientos accionables</h4>
+          <details className="report-clinical-panel collapsible">
+            <summary><span className="collapsible-icon">📌</span>Seguimientos accionables{followUps.length > 0 && <span className="collapsible-count">{followUps.length}</span>}</summary>
             {followUps.map((item) => <div className="workflow-entry" key={item.id}><strong>{item.recommendation}</strong><span>Plazo: {new Date(`${item.dueDate}T00:00:00`).toLocaleDateString("es-CL")} · Responsable: {item.responsible}</span><label>Estado<select value={item.status} onChange={(event) => changeFollowUpStatus(item.id, event.target.value as FollowUpStatus)}>{Object.entries(followUpLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div>)}
             <form className="report-inline-form" onSubmit={createFollowUp}>
               <label className="span-2">Recomendación<textarea required value={followUpDraft.recommendation} onChange={(event) => setFollowUpDraft({ ...followUpDraft, recommendation: event.target.value })} placeholder="Ej.: TC de tórax de control" /></label>
@@ -220,16 +247,19 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
               <label>Responsable<input required value={followUpDraft.responsible} onChange={(event) => setFollowUpDraft({ ...followUpDraft, responsible: event.target.value })} placeholder="Médico tratante / unidad" /></label>
               <button className="button secondary" disabled={saving} type="submit">Agregar seguimiento</button>
             </form>
-          </section>
+          </details>
 
-          {priorReports.length > 0 && <div className="prior-reports"><h4>Informes anteriores del paciente</h4>{priorReports.map((prior) => <a key={prior.id} href={`/informe/${prior.id}`} target="_blank" rel="noreferrer"><span>{prior.date}</span><span className="prior-reason">{prior.modality} · {prior.reason}</span><span className={`report-status ${prior.reportStatus}`}>{prior.reportStatus === "final" ? "Definitivo" : "Borrador"}</span></a>)}</div>}
+          {priorReports.length > 0 && <details className="report-clinical-panel collapsible">
+            <summary><span className="collapsible-icon">🗂️</span>Informes anteriores del paciente<span className="collapsible-count">{priorReports.length}</span></summary>
+            <div className="prior-reports">{priorReports.map((prior) => <a key={prior.id} href={`/informe/${prior.id}`} target="_blank" rel="noreferrer"><span>{prior.date}</span><span className="prior-reason">{prior.modality} · {prior.reason}</span><span className={`report-status ${prior.reportStatus}`}>{prior.reportStatus === "final" ? "Definitivo" : "Borrador"}</span></a>)}</div>
+          </details>}
 
-          {report.status === "final" && <section className="report-clinical-panel">
-            <h4>Versiones y adendas</h4>
+          {report.status === "final" && <details className="report-clinical-panel collapsible">
+            <summary><span className="collapsible-icon">✍️</span>Versiones y adendas{addenda.length > 0 && <span className="collapsible-count">{addenda.length + 1}</span>}</summary>
             <div className="workflow-entry"><strong>Versión 1 · Informe definitivo</strong><span>{report.signedAt && new Date(report.signedAt).toLocaleString("es-CL")} · {report.signer && signerLabel(report.signer.name, report.signer.registration)}</span></div>
             {addenda.map((item, index) => <div className="workflow-entry" key={item.id}><strong>Adenda {index + 1}</strong><span>{item.text}</span><span>{new Date(item.signedAt).toLocaleString("es-CL")} · {signerLabel(item.signer.name, item.signer.registration)}</span></div>)}
             <form className="report-inline-form" onSubmit={signAddendum}><label className="span-2">Nueva adenda<textarea required value={addendumText} onChange={(event) => setAddendumText(event.target.value)} placeholder="Corrección o información adicional; no reemplaza el informe original." /></label><button className="button secondary" disabled={saving} type="submit">Firmar adenda</button></form>
-          </section>}
+          </details>}
         </div>
 
         <footer className="report-actions">
@@ -244,12 +274,15 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
 
     <div className="print-sheet" aria-hidden="true">
       <header>{tenant?.logoUrl && <img src={tenant.logoUrl} alt="" />}<div><h1>{tenant?.name ?? "Informe radiológico"}</h1><p>{[tenant?.rut && `RUT ${tenant.rut}`, tenant?.address, tenant?.phone].filter(Boolean).join(" · ")}</p></div></header>
-      <h2>Informe radiológico</h2><p><strong>Paciente:</strong> {appointment.patientName} · <strong>ID:</strong> {appointment.patientIdentifier || "—"}</p><p><strong>Examen:</strong> {appointment.modality} · {appointment.reason} · <strong>Fecha:</strong> {appointment.date}</p>
+      <h2>Informe radiológico</h2>
+      {tenant?.reportHeader
+        ? renderHeader(tenant.reportHeader, { paciente: appointment.patientName, id: appointment.patientIdentifier || "—", medico: appointment.treatingPhysician || appointment.requesterName || "—", examen: `${appointment.modality} · ${appointment.reason}`, fecha: appointment.date, institucion: tenant.name }).split("\n").map((line, index) => <p key={index}>{line}</p>)
+        : <><p><strong>Paciente:</strong> {appointment.patientName} · <strong>ID:</strong> {appointment.patientIdentifier || "—"}</p><p><strong>Examen:</strong> {appointment.modality} · {appointment.reason} · <strong>Fecha:</strong> {appointment.date}</p></>}
       {report.criticalFinding && <p><strong>⚠ HALLAZGO CRÍTICO{report.criticalFindingType && `: ${report.criticalFindingType}`}</strong>{acknowledgedCommunication && <> · Comunicado a {acknowledgedCommunication.recipient} por {channelLabels[acknowledgedCommunication.channel]}, {new Date(acknowledgedCommunication.communicatedAt).toLocaleString("es-CL")}.</>}</p>}
       {sections.map((section) => report[section.name] && <section key={section.name}><h3>{section.label}</h3><p>{report[section.name]}</p></section>)}
       {followUps.length > 0 && <section><h3>Recomendaciones y seguimiento</h3>{followUps.map((item) => <p key={item.id}>{item.recommendation} · Plazo {new Date(`${item.dueDate}T00:00:00`).toLocaleDateString("es-CL")} · {followUpLabels[item.status]}</p>)}</section>}
       {addenda.map((item, index) => <section key={item.id}><h3>Adenda {index + 1}</h3><p>{item.text}</p><p>{signerLabel(item.signer.name, item.signer.registration)} · {new Date(item.signedAt).toLocaleString("es-CL")}</p></section>)}
-      <footer><p>{report.signer ? signerLabel(report.signer.name, report.signer.registration) : "Informe sin firma"}</p><p>Firmado electrónicamente · {report.signedAt ? new Date(report.signedAt).toLocaleString("es-CL") : ""}</p></footer>
+      <footer>{signatureImage && <img className="signature-image" src={signatureImage} alt="Firma" />}<p>{report.signer ? signerLabel(report.signer.name, report.signer.registration) : "Informe sin firma"}</p><p>Firmado electrónicamente · {report.signedAt ? new Date(report.signedAt).toLocaleString("es-CL") : ""}</p></footer>
     </div>
   </div>;
 }

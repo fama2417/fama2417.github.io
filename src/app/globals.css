@@ -358,6 +358,29 @@ body:has(.report-workstation) .app-shell { flex: 1; min-height: 0; }
 .prior-reports a:hover { border-color: var(--report-accent); }
 .prior-reports .prior-reason { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* Paneles clínicos colapsables del informe */
+.collapsible > summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  font-weight: 700;
+  gap: 8px;
+  list-style: none;
+  user-select: none;
+}
+.collapsible > summary::-webkit-details-marker { display: none; }
+.collapsible > summary::after { color: var(--muted); content: "▸"; margin-left: auto; transition: transform 0.15s; }
+.collapsible[open] > summary::after { transform: rotate(90deg); }
+.collapsible-icon { font-size: 1rem; }
+.collapsible-count { background: var(--surface); border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font-size: 0.72rem; font-weight: 700; padding: 1px 8px; }
+.collapsible-hint { color: var(--danger); font-size: 0.8rem; font-weight: 600; }
+.collapsible > :not(summary) { margin-top: 10px; }
+
+/* Firmas de usuarios */
+.signature-cell { white-space: nowrap; }
+.signature-cell .text-button { cursor: pointer; margin-left: 6px; }
+.print-sheet .signature-image { display: block; height: 60px; margin-left: auto; }
+
 /* Página de privacidad */
 .legal-content { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; display: grid; gap: 14px; line-height: 1.7; max-width: 900px; padding: 28px; }
 .legal-content h3 { color: var(--primary); margin: 12px 0 0; }

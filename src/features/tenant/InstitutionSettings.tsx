@@ -35,7 +35,7 @@ export function InstitutionSettings() {
     }
   }
 
-  if (!tenant) return null;
+  if (!tenant) return error ? <section className="card"><p className="form-error" role="alert">{error}</p></section> : null;
 
   return (
     <section className="card" aria-label="Datos de la institución">
@@ -49,6 +49,10 @@ export function InstitutionSettings() {
         <label>Dirección<input value={tenant.address} onChange={(event) => setTenant({ ...tenant, address: event.target.value })} /></label>
         <label>Teléfono<input value={tenant.phone} onChange={(event) => setTenant({ ...tenant, phone: event.target.value })} /></label>
         <label>Logo (PNG/JPG)<input type="file" accept="image/*" onChange={(event) => pickLogo(event.target.files?.[0])} /></label>
+        <label className="span-2">Encabezado del informe (opcional)
+          <textarea value={tenant.reportHeader} onChange={(event) => setTenant({ ...tenant, reportHeader: event.target.value })} placeholder={"Ej.: Estimado Dr. {{medico}}:\nSu paciente {{paciente}} ({{id}}) se realizó {{examen}} el {{fecha}}."} />
+          <span className="empty-inline">Variables: {"{{paciente}}, {{id}}, {{medico}}, {{examen}}, {{fecha}}, {{institucion}}"} — se reemplazan al imprimir cada informe.</span>
+        </label>
         <button className="button primary" type="submit">Guardar institución</button>
       </form>
     </section>

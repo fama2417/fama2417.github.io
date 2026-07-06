@@ -3,7 +3,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase-client";
 
-type ManagedUser = { id: string; email: string; full_name: string; role: string; professional_registration: string };
+type ManagedUser = { id: string; email: string; full_name: string; role: string; professional_registration: string; signature_url: string };
 
 export const roleLabels: Record<string, string> = { admin: "Administrador", operator: "Operador / admisión", radiologist: "Radiólogo" };
 const sectionsByRole: Record<string, string> = {
@@ -58,12 +58,29 @@ export function UsersManager() {
     }
   }
 
-  async function updateProfile(userId: string, role: string, professionalRegistration: string) {
+  async function updateProfile(user: ManagedUser) {
+    setError("");
+    setNotice("");
+    try {
+      await api("PATCH", { userId: user.id, role: user.role, professionalRegistration: user.professional_registration, fullName: user.full_name });
+      setNotice("Cambios guardados (quedan en el registro de auditoría).");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "No fue posible actualizar el usuario.");
+    }
+  }
+
+  async function uploadSignature(user: ManagedUser, file: File | undefined) {
+    if (!file) return;
     setError("");
     try {
-      await api("PATCH", { userId, role, professionalRegistration });
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "No fue posible cambiar el rol.");
+      const path = `${user.id}/firma-${Date.now()}.${file.name.split(".").pop()}`;
+      const { error: uploadError } = await supabase.storage.from("firmas").upload(path, file, { upsert: true });
+      if (uploadError) throw uploadError;
+      await api("PATCH", { userId: user.id, role: user.role, professionalRegistration: user.professional_registration, signaturePath: path });
+      setUsers((current) => current.map((item) => item.id === user.id ? { ...item, signature_url: path } : item));
+      setNotice("Firma cargada. Aparecerá en los informes que firme este usuario.");
+    } catch {
+      setError("No fue posible subir la firma (JPG/PNG, requiere rol administrador).");
     }
   }
 
@@ -89,12 +106,13 @@ export function UsersManager() {
       )}
 
       <div className="table-card" style={{ border: 0 }}>
-        <table><thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Registro profesional</th><th>Acceso</th></tr></thead><tbody>
+        <table><thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Registro profesional</th><th>Firma</th><th>Acceso</th></tr></thead><tbody>
           {users.map((user) => <tr key={user.id}>
-            <td>{user.full_name}</td>
+            <td><input value={user.full_name} onChange={(event) => setUsers((current) => current.map((item) => item.id === user.id ? { ...item, full_name: event.target.value } : item))} onBlur={() => updateProfile(user)} aria-label={`Nombre de ${user.email}`} /></td>
             <td>{user.email}</td>
-            <td><select value={user.role} onChange={(event) => { const role = event.target.value; setUsers((current) => current.map((item) => item.id === user.id ? { ...item, role } : item)); updateProfile(user.id, role, user.professional_registration); }} aria-label={`Rol de ${user.full_name}`}>{Object.entries(roleLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></td>
-            <td><input value={user.professional_registration} onChange={(event) => setUsers((current) => current.map((item) => item.id === user.id ? { ...item, professional_registration: event.target.value } : item))} onBlur={() => updateProfile(user.id, user.role, user.professional_registration)} aria-label={`Registro profesional de ${user.full_name}`} /></td>
+            <td><select value={user.role} onChange={(event) => { const next = { ...user, role: event.target.value }; setUsers((current) => current.map((item) => item.id === user.id ? next : item)); updateProfile(next); }} aria-label={`Rol de ${user.full_name}`}>{Object.entries(roleLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></td>
+            <td><input value={user.professional_registration} onChange={(event) => setUsers((current) => current.map((item) => item.id === user.id ? { ...item, professional_registration: event.target.value } : item))} onBlur={() => updateProfile(user)} aria-label={`Registro profesional de ${user.full_name}`} /></td>
+            <td className="signature-cell">{user.signature_url && <span title="Firma cargada">✒️</span>}<label className="text-button">{user.signature_url ? "Cambiar" : "Subir"}<input type="file" accept="image/png,image/jpeg" hidden onChange={(event) => uploadSignature(user, event.target.files?.[0])} /></label></td>
             <td>{sectionsByRole[user.role] ?? "—"}</td>
           </tr>)}
         </tbody></table>
