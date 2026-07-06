@@ -127,7 +127,8 @@ section.card { margin-bottom: 20px; }
 /* Panel de inicio (dashboard) */
 .home-hero { margin-bottom: 20px; }
 .stat-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); margin-bottom: 20px; }
-.stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; display: grid; gap: 4px; padding: 18px 20px; }
+.stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; color: var(--text); display: grid; gap: 4px; padding: 18px 20px; text-decoration: none; transition: border-color 0.15s, transform 0.15s; }
+.stat-card:hover { border-color: var(--primary); transform: translateY(-2px); }
 .stat-card.warning { border-color: rgba(251, 191, 36, 0.5); }
 .stat-card.danger { border-color: rgba(248, 113, 113, 0.55); }
 .stat-value { font-size: 2rem; font-weight: 800; line-height: 1; }
@@ -186,6 +187,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--primary); outlin
 .appointment-card p, .appointment-card span { color: var(--muted); margin: 0; }
 .appointment-actions { align-items: flex-end; display: grid; gap: 8px; justify-items: end; }
 .text-button { background: transparent; border: 0; color: var(--primary); cursor: pointer; font-weight: 700; padding: 4px; }
+.text-button.danger { color: var(--danger); }
 
 .time-block {
   background: var(--surface-muted);
