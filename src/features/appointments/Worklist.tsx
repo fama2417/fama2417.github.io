@@ -2,14 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase-client";
 import type { Appointment } from "./mock-data";
-import { fetchAppointments, orderFileUrl, setAppointmentStatus } from "./repository";
+import { assignAppointment, fetchAppointments, fetchRadiologists, orderFileUrl, setAppointmentStatus } from "./repository";
 import { APPOINTMENT_STATUSES, appointmentStatusLabels, type AppointmentStatus } from "./status";
 
 const today = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Santiago" });
 const shiftDays = (days: number) => { const date = new Date(); date.setDate(date.getDate() + days); return date.toLocaleDateString("en-CA", { timeZone: "America/Santiago" }); };
-const ohifUrl = (process.env.NEXT_PUBLIC_OHIF_URL ?? "http://localhost:8042/ohif").replace(/\/$/, "");
-const orthancUrl = (process.env.NEXT_PUBLIC_ORTHANC_URL ?? "http://localhost:8042").replace(/\/$/, "");
 const modalities = ["US", "DX", "CT", "MR", "MG"] as const;
 
 const reportLabels = { none: "Sin informe", draft: "Borrador", final: "Definitivo" } as const;
@@ -25,28 +24,43 @@ const presets = [
   { label: "30 días", range: () => [today(), shiftDays(29)] },
 ] as const;
 
-const COLUMNS = ["Fecha", "Hora", "Paciente", "ID Paciente", "Previsión", "Modalidad", "Prestación", "Sala", "Profesional", "Estado", "Informe", "Alertas"] as const;
+const COLUMNS = ["Fecha", "Hora", "Paciente", "ID Paciente", "Previsión", "Modalidad", "Prestación", "Sala", "Profesional", "Estado", "Informe", "Asignado", "Alertas"] as const;
 type Column = (typeof COLUMNS)[number];
-const DEFAULT_COLUMNS: Column[] = ["Hora", "Paciente", "ID Paciente", "Previsión", "Modalidad", "Prestación", "Estado", "Informe", "Alertas"];
+const DEFAULT_COLUMNS: Column[] = ["Hora", "Paciente", "ID Paciente", "Previsión", "Modalidad", "Prestación", "Estado", "Informe", "Asignado", "Alertas"];
+
+type Filters = { from: string; to: string; patient: string; modality: string; status: string; report: string; professional: string; room: string; priority: string; assignment: string };
+const emptyFilters = (): Filters => ({ from: today(), to: today(), patient: "", modality: "", status: "", report: "", professional: "", room: "", priority: "", assignment: "" });
+
+// ponytail: filtros guardados en localStorage (mismo patrón que las columnas); mover a tabla si se necesitan entre dispositivos
+type SavedFilter = { name: string; isDefault: boolean; filters: Filters };
+const loadSaved = (): SavedFilter[] => { try { return JSON.parse(localStorage.getItem("worklist-saved-filters") ?? "[]"); } catch { return []; } };
+const storeSaved = (items: SavedFilter[]) => localStorage.setItem("worklist-saved-filters", JSON.stringify(items));
 
 export function Worklist() {
   const router = useRouter();
   const [appointments, setAppointments] = useState<Appointment[]>([]);
-  const [from, setFrom] = useState(today);
-  const [to, setTo] = useState(today);
-  const [patientQuery, setPatientQuery] = useState("");
-  const [modality, setModality] = useState("");
-  const [status, setStatus] = useState("");
-  const [report, setReport] = useState("");
+  const [filters, setFilters] = useState<Filters>(emptyFilters);
+  const [saved, setSaved] = useState<SavedFilter[]>([]);
+  const [selectedSaved, setSelectedSaved] = useState("");
+  const [radiologists, setRadiologists] = useState<{ id: string; full_name: string }[]>([]);
+  const [uid, setUid] = useState("");
   const [columns, setColumns] = useState<Column[]>(DEFAULT_COLUMNS);
   const [showColumns, setShowColumns] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
+  const set = (key: keyof Filters, value: string) => setFilters((current) => ({ ...current, [key]: value }));
+
   useEffect(() => { fetchAppointments().then(setAppointments).catch(() => setError("No fue posible cargar la worklist.")).finally(() => setLoading(false)); }, []);
   useEffect(() => {
+    fetchRadiologists().then(setRadiologists);
+    supabase.auth.getUser().then(({ data }) => setUid(data.user?.id ?? ""));
     const stored = localStorage.getItem("worklist-columns");
     if (stored) setColumns((JSON.parse(stored) as Column[]).filter((column) => COLUMNS.includes(column)));
+    const savedFilters = loadSaved();
+    setSaved(savedFilters);
+    const preset = savedFilters.find((item) => item.isDefault);
+    if (preset) { setFilters(preset.filters); setSelectedSaved(preset.name); }
   }, []);
 
   function toggleColumn(column: Column) {
@@ -57,11 +71,41 @@ export function Worklist() {
     });
   }
 
+  function saveCurrentFilters() {
+    const name = window.prompt("Nombre del filtro:")?.trim();
+    if (!name) return;
+    const next = [...saved.filter((item) => item.name !== name), { name, isDefault: false, filters }];
+    setSaved(next); storeSaved(next); setSelectedSaved(name);
+  }
+
+  function applySaved(name: string) {
+    setSelectedSaved(name);
+    const preset = saved.find((item) => item.name === name);
+    if (preset) setFilters(preset.filters);
+  }
+
+  function toggleDefault() {
+    if (!selectedSaved) return;
+    const next = saved.map((item) => ({ ...item, isDefault: item.name === selectedSaved ? !item.isDefault : false }));
+    setSaved(next); storeSaved(next);
+  }
+
+  function deleteSaved() {
+    if (!selectedSaved) return;
+    const next = saved.filter((item) => item.name !== selectedSaved);
+    setSaved(next); storeSaved(next); setSelectedSaved("");
+  }
+
+  const professionals = useMemo(() => [...new Set(appointments.map((item) => item.practitionerName).filter(Boolean))].sort(), [appointments]);
+  const rooms = useMemo(() => [...new Set(appointments.map((item) => item.locationName).filter(Boolean))].sort(), [appointments]);
+
   const worklist = useMemo(() => appointments
-    .filter((item) => (!from || item.date >= from) && (!to || item.date <= to))
-    .filter((item) => item.patientName.toLowerCase().includes(patientQuery.toLowerCase()))
-    .filter((item) => (!modality || item.modality === modality) && (!status || item.status === status) && (!report || reportKey(item) === report))
-    .sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`)), [appointments, from, to, patientQuery, modality, status, report]);
+    .filter((item) => (!filters.from || item.date >= filters.from) && (!filters.to || item.date <= filters.to))
+    .filter((item) => `${item.patientName} ${item.patientIdentifier ?? ""}`.toLowerCase().includes(filters.patient.toLowerCase()))
+    .filter((item) => (!filters.modality || item.modality === filters.modality) && (!filters.status || item.status === filters.status) && (!filters.report || reportKey(item) === filters.report))
+    .filter((item) => (!filters.professional || item.practitionerName === filters.professional) && (!filters.room || item.locationName === filters.room) && (!filters.priority || item.priority === filters.priority))
+    .filter((item) => !filters.assignment || (filters.assignment === "mias" ? item.assignedTo === uid : !item.assignedTo))
+    .sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`)), [appointments, filters, uid]);
 
   async function changeStatus(item: Appointment, status: AppointmentStatus) {
     const reason = ["cancelled", "no_show"].includes(status) ? window.prompt("Motivo del cambio de estado:") ?? "" : "";
@@ -70,6 +114,16 @@ export function Worklist() {
       setAppointments((current) => current.map((entry) => entry.id === item.id ? { ...entry, status, statusReason: reason } : entry));
     } catch {
       setError("No fue posible actualizar el estado.");
+    }
+  }
+
+  async function assign(item: Appointment, profileId: string) {
+    try {
+      await assignAppointment(item.id, profileId || null);
+      const name = radiologists.find((entry) => entry.id === profileId)?.full_name;
+      setAppointments((current) => current.map((entry) => entry.id === item.id ? { ...entry, assignedTo: profileId || undefined, assigneeName: name } : entry));
+    } catch {
+      setError("No fue posible asignar la cita.");
     }
   }
 
@@ -82,13 +136,13 @@ export function Worklist() {
   }
 
   function exportCsv() {
-    const header = ["Fecha", "Hora", "Paciente", "ID Paciente", "Previsión", "Modalidad", "Prestación", "Código", "Sala", "Profesional", "Estado", "Motivo", "Informe", "Prioridad"];
-    const lines = worklist.map((item) => [item.date, item.startTime, item.patientName, item.patientIdentifier ?? "", item.patientPrevision ?? "", item.modality, item.reason, item.procedureCode, item.locationName, item.practitionerName, appointmentStatusLabels[item.status], item.statusReason, reportLabels[reportKey(item)], item.priority]
+    const header = ["Fecha", "Hora", "Paciente", "ID Paciente", "Previsión", "Modalidad", "Prestación", "Código", "Sala", "Profesional", "Estado", "Motivo", "Informe", "Asignado", "Prioridad"];
+    const lines = worklist.map((item) => [item.date, item.startTime, item.patientName, item.patientIdentifier ?? "", item.patientPrevision ?? "", item.modality, item.reason, item.procedureCode, item.locationName, item.practitionerName, appointmentStatusLabels[item.status], item.statusReason, reportLabels[reportKey(item)], item.assigneeName ?? "", item.priority]
       .map((value) => `"${String(value).replaceAll('"', '""')}"`).join(";"));
     const blob = new Blob(["﻿" + [header.join(";"), ...lines].join("\n")], { type: "text/csv;charset=utf-8" });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = `worklist_${from}_${to}.csv`;
+    link.download = `worklist_${filters.from}_${filters.to}.csv`;
     link.click();
     URL.revokeObjectURL(link.href);
   }
@@ -106,10 +160,17 @@ export function Worklist() {
       case "Profesional": return item.practitionerName;
       case "Estado": return <select className={`status status-${item.status}`} value={item.status} title={item.statusReason || undefined} onClick={(event) => event.stopPropagation()} onChange={(event) => changeStatus(item, event.target.value as AppointmentStatus)} aria-label={`Estado de ${item.patientName}`}>{APPOINTMENT_STATUSES.map((value) => <option key={value} value={value}>{appointmentStatusLabels[value]}</option>)}</select>;
       case "Informe": return <span className={`status ${reportClass[reportKey(item)]}`}>{reportLabels[reportKey(item)]}</span>;
+      case "Asignado": return radiologists.length
+        ? <select className="assign-select" value={item.assignedTo ?? ""} onClick={(event) => event.stopPropagation()} onChange={(event) => assign(item, event.target.value)} aria-label={`Asignar informe de ${item.patientName}`}>
+            <option value="">Sin asignar</option>
+            {radiologists.map((entry) => <option key={entry.id} value={entry.id}>{entry.full_name}</option>)}
+          </select>
+        : <span>{item.assigneeName ?? (item.assignedTo === uid && uid ? "Yo" : item.assignedTo ? "Asignado" : "—")}</span>;
       case "Alertas": return <span className="alert-icons" onClick={(event) => event.stopPropagation()}>
         {item.criticalFinding && <span title="Hallazgo crítico">❤️‍🔥</span>}
+        {item.actionablePending && <span title="Seguimiento accionable pendiente">📅</span>}
         {item.orderFile && <button className="text-button" type="button" title="Ver orden médica adjunta" onClick={() => openOrder(item.orderFile)}>📎</button>}
-        {item.studyInstanceUid && <a className="text-button" title="Abrir imágenes en OHIF" href={`${ohifUrl}/viewer?StudyInstanceUIDs=${encodeURIComponent(item.studyInstanceUid)}`} target="_blank" rel="noreferrer">🖼️</a>}
+        {item.studyInstanceUid && <a className="text-button" title="Abrir imágenes" href={`/api/pacs/handoff?next=${encodeURIComponent(`/ohif/viewer?StudyInstanceUIDs=${item.studyInstanceUid}`)}`} target="_blank" rel="noreferrer">🖼️</a>}
       </span>;
     }
   };
@@ -122,21 +183,36 @@ export function Worklist() {
           <button className="text-button" type="button" onClick={() => setShowColumns((visible) => !visible)}>Columnas ▾</button>
           {showColumns && <span className="column-menu">{COLUMNS.map((column) => <label key={column}><input type="checkbox" checked={columns.includes(column)} onChange={() => toggleColumn(column)} />{column}</label>)}</span>}
         </span>
-        <a href={`${orthancUrl}/ui/app/`} target="_blank" rel="noreferrer">Orthanc ↗</a>
-        <a href={ohifUrl} target="_blank" rel="noreferrer">OHIF ↗</a>
       </div>
     </div>
     {error && <p className="notice" role="alert">{error}</p>}
     <div className="filter-layout">
       <aside className="filter-panel" aria-label="Filtros">
-        <label>Paciente<input value={patientQuery} onChange={(event) => setPatientQuery(event.target.value)} placeholder="Nombre" type="search" /></label>
-        <label>Desde<input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
-        <label>Hasta<input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
-        <div className="preset-row">{presets.map((preset) => <button key={preset.label} className="tag" type="button" onClick={() => { const [nextFrom, nextTo] = preset.range(); setFrom(nextFrom); setTo(nextTo); }}>{preset.label}</button>)}</div>
-        <label>Modalidad<select value={modality} onChange={(event) => setModality(event.target.value)}><option value="">Todas</option>{modalities.map((code) => <option key={code} value={code}>{code}</option>)}</select></label>
-        <label>Estado de la cita<select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">Todos</option>{Object.entries(appointmentStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-        <label>Estado del informe<select value={report} onChange={(event) => setReport(event.target.value)}><option value="">Todos</option>{Object.entries(reportLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-        <button className="text-button" type="button" onClick={() => { setPatientQuery(""); setModality(""); setStatus(""); setReport(""); setFrom(today()); setTo(today()); }}>Restablecer</button>
+        <div className="saved-filters">
+          <label>Filtros guardados
+            <select value={selectedSaved} onChange={(event) => applySaved(event.target.value)}>
+              <option value="">—</option>
+              {saved.map((item) => <option key={item.name} value={item.name}>{item.name}{item.isDefault ? " ★" : ""}</option>)}
+            </select>
+          </label>
+          <div className="preset-row">
+            <button className="tag" type="button" onClick={saveCurrentFilters}>Guardar actual</button>
+            {selectedSaved && <button className="tag" type="button" onClick={toggleDefault} title="Se aplica al abrir la worklist">{saved.find((item) => item.name === selectedSaved)?.isDefault ? "Quitar predet." : "Predeterminado"}</button>}
+            {selectedSaved && <button className="tag" type="button" onClick={deleteSaved}>Eliminar</button>}
+          </div>
+        </div>
+        <label>Paciente<input value={filters.patient} onChange={(event) => set("patient", event.target.value)} placeholder="Nombre o ID (RUN)" type="search" /></label>
+        <label>Desde<input type="date" value={filters.from} onChange={(event) => set("from", event.target.value)} /></label>
+        <label>Hasta<input type="date" value={filters.to} onChange={(event) => set("to", event.target.value)} /></label>
+        <div className="preset-row">{presets.map((preset) => <button key={preset.label} className="tag" type="button" onClick={() => { const [nextFrom, nextTo] = preset.range(); setFilters((current) => ({ ...current, from: nextFrom, to: nextTo })); }}>{preset.label}</button>)}</div>
+        <label>Modalidad<select value={filters.modality} onChange={(event) => set("modality", event.target.value)}><option value="">Todas</option>{modalities.map((code) => <option key={code} value={code}>{code}</option>)}</select></label>
+        <label>Estado de la cita<select value={filters.status} onChange={(event) => set("status", event.target.value)}><option value="">Todos</option>{Object.entries(appointmentStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+        <label>Estado del informe<select value={filters.report} onChange={(event) => set("report", event.target.value)}><option value="">Todos</option>{Object.entries(reportLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+        <label>Profesional<select value={filters.professional} onChange={(event) => set("professional", event.target.value)}><option value="">Todos</option>{professionals.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
+        <label>Sala<select value={filters.room} onChange={(event) => set("room", event.target.value)}><option value="">Todas</option>{rooms.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
+        <label>Prioridad<select value={filters.priority} onChange={(event) => set("priority", event.target.value)}><option value="">Todas</option><option value="normal">Normal</option><option value="urgente">Urgente</option></select></label>
+        <label>Asignación<select value={filters.assignment} onChange={(event) => set("assignment", event.target.value)}><option value="">Todas</option><option value="mias">Asignadas a mí</option><option value="sin">Sin asignar</option></select></label>
+        <button className="text-button" type="button" onClick={() => { setFilters(emptyFilters()); setSelectedSaved(""); }}>Restablecer</button>
       </aside>
       <section className="table-card">
         <table><thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>

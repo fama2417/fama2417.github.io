@@ -23,6 +23,25 @@ export async function fetchPatients() {
   return (data as PatientRow[]).map(mapPatient);
 }
 
+export type PatientAuditEntry = { id: number; action: string; changedAt: string; actorName: string; details: Record<string, unknown> | null };
+
+/** Trazabilidad del paciente (Ley 19.628/21.719): quién, cuándo y qué cambió. Solo admins (RLS de audit_log). */
+export async function fetchPatientAudit(patientId: string): Promise<PatientAuditEntry[]> {
+  const [audit, profiles] = await Promise.all([
+    supabase.from("audit_log").select("id, action, changed_at, actor_id, details").eq("table_name", "patients").eq("row_id", patientId).order("changed_at", { ascending: false }),
+    supabase.from("profiles").select("id, full_name"),
+  ]);
+  if (audit.error) throw audit.error;
+  const names = new Map((profiles.data ?? []).map((profile) => [profile.id as string, profile.full_name as string]));
+  return (audit.data ?? []).map((row) => ({
+    id: row.id as number,
+    action: row.action as string,
+    changedAt: row.changed_at as string,
+    actorName: names.get(row.actor_id as string) ?? "Sistema",
+    details: (row.details as Record<string, unknown> | null) ?? null,
+  }));
+}
+
 export async function createPatient(patient: Omit<Patient, "id">) {
   const { data, error } = await supabase.from("patients").insert({
     identifier: patient.identifier,

@@ -333,6 +333,19 @@ body:has(.report-workstation) .app-shell { flex: 1; min-height: 0; }
 }
 .report-workstation .critical-type { display: grid; gap: 6px; margin-top: -6px; }
 .report-workstation .critical-type select { border-color: rgba(248, 113, 113, 0.45); }
+.report-fields .critical-field { margin: 0; }
+.report-confirmations { display: grid; gap: 8px; }
+.report-clinical-panel { border: 1px solid var(--border); border-radius: 8px; display: grid; gap: 10px; padding: 14px; }
+.report-clinical-panel.critical-panel { background: rgba(248, 113, 113, 0.06); border-color: rgba(248, 113, 113, 0.45); }
+.report-clinical-panel h4 { margin: 0; }
+.report-inline-form { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.report-inline-form .span-2 { grid-column: 1 / -1; }
+.report-inline-form textarea { min-height: 64px; }
+.report-inline-form .button { justify-self: start; }
+.workflow-entry { background: rgba(255, 255, 255, 0.035); border-radius: 6px; display: grid; font-size: 0.82rem; gap: 4px; padding: 9px 11px; }
+.workflow-entry > span { color: var(--muted); }
+.workflow-entry label { align-items: center; display: flex; gap: 8px; }
+.workflow-entry select { padding: 5px 8px; }
 
 /* Informes anteriores del mismo paciente */
 .prior-reports { border-top: 1px solid var(--border); display: grid; gap: 6px; padding-top: 12px; }

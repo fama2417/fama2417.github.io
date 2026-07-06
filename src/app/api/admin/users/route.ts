@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
   const context = await requireAdmin(request);
   if ("error" in context) return context.error;
   const { admin, tenantId } = context;
-  const { data: profiles, error } = await admin.from("profiles").select("id, full_name, role").eq("tenant_id", tenantId);
+  const { data: profiles, error } = await admin.from("profiles").select("id, full_name, role, professional_registration").eq("tenant_id", tenantId);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   const { data: authUsers } = await admin.auth.admin.listUsers({ perPage: 1000 });
   const emails = new Map(authUsers.users.map((user) => [user.id, user.email]));
@@ -34,12 +34,12 @@ export async function POST(request: NextRequest) {
   if ("error" in context) return context.error;
   const { admin, tenantId } = context;
   const body = await request.json();
-  const { email, password, fullName, role } = body ?? {};
+  const { email, password, fullName, role, professionalRegistration } = body ?? {};
   if (!email || !password || !fullName || !ROLES.includes(role)) return NextResponse.json({ error: "Datos incompletos." }, { status: 400 });
   if (String(password).length < 12) return NextResponse.json({ error: "La contraseña debe tener al menos 12 caracteres." }, { status: 400 });
   const { data: created, error } = await admin.auth.admin.createUser({ email, password, email_confirm: true });
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-  const { error: profileError } = await admin.from("profiles").insert({ id: created.user.id, full_name: fullName, role, tenant_id: tenantId });
+  const { error: profileError } = await admin.from("profiles").insert({ id: created.user.id, full_name: fullName, role, professional_registration: String(professionalRegistration ?? "").trim(), tenant_id: tenantId });
   if (profileError) {
     await admin.auth.admin.deleteUser(created.user.id);
     return NextResponse.json({ error: profileError.message }, { status: 400 });
@@ -51,9 +51,9 @@ export async function PATCH(request: NextRequest) {
   const context = await requireAdmin(request);
   if ("error" in context) return context.error;
   const { admin, tenantId } = context;
-  const { userId, role } = (await request.json()) ?? {};
+  const { userId, role, professionalRegistration } = (await request.json()) ?? {};
   if (!userId || !ROLES.includes(role)) return NextResponse.json({ error: "Datos incompletos." }, { status: 400 });
-  const { error } = await admin.from("profiles").update({ role }).eq("id", userId).eq("tenant_id", tenantId);
+  const { error } = await admin.from("profiles").update({ role, professional_registration: String(professionalRegistration ?? "").trim() }).eq("id", userId).eq("tenant_id", tenantId);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   return NextResponse.json({ ok: true });
 }

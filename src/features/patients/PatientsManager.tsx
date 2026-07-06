@@ -1,11 +1,27 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { supabase } from "@/lib/supabase-client";
 import type { Patient } from "./mock-data";
-import { createPatient, fetchPatients } from "./repository";
+import { createPatient, fetchPatients, fetchPatientAudit, type PatientAuditEntry } from "./repository";
 
 const sexLabels = { female: "Femenino", male: "Masculino", other: "Otro", unknown: "No informado" };
 const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9áéíóúñ]/g, "");
+
+const actionLabels: Record<string, string> = { INSERT: "Creación", UPDATE: "Modificación", DELETE: "Eliminación" };
+const fieldLabels: Record<string, string> = {
+  identifier: "Identificador", full_name: "Nombre", birth_date: "Fecha de nacimiento", sex: "Sexo", phone: "Teléfono",
+  email: "Correo", address: "Dirección", comuna: "Comuna", prevision: "Previsión", allergies: "Alergias",
+  morbid_history: "Antecedentes mórbidos", privacy_consent_at: "Consentimiento",
+};
+
+function describeChange(entry: PatientAuditEntry) {
+  if (entry.action === "INSERT") return "Creación del registro del paciente.";
+  if (entry.action === "DELETE") return "Eliminación del registro.";
+  const changes = Object.entries(entry.details ?? {}).filter(([key]) => fieldLabels[key]);
+  if (!changes.length) return "Actualización sin cambios en datos personales.";
+  return changes.map(([key, value]) => `${fieldLabels[key]}: ${value === null || value === "" ? "—" : String(value)}`).join(" · ");
+}
 
 export function PatientsManager() {
   const [patients, setPatients] = useState<Patient[]>([]);
@@ -13,6 +29,10 @@ export function PatientsManager() {
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [role, setRole] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Patient | null>(null);
+  const [audit, setAudit] = useState<PatientAuditEntry[]>([]);
+  const [auditError, setAuditError] = useState("");
   const visiblePatients = useMemo(() => {
     const needle = normalize(query);
     return patients.filter((patient) => normalize(`${patient.identifier} ${patient.name}`).includes(needle));

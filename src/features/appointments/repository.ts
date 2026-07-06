@@ -13,12 +13,13 @@ type AppointmentRow = {
   patient: { full_name: string; identifier?: string; prevision?: string } | null;
   study: { study_instance_uid: string | null } | null;
   report?: { status: "draft" | "final"; critical_finding: boolean } | null;
+  followups?: { status: "pending" | "acknowledged" | "completed" }[] | null;
+  assigned_to?: string | null;
+  assignee?: { full_name: string } | null;
 };
 
 const baseColumns = "id, patient_id, practitioner_name, location_name, appointment_date, start_time, end_time, status, reason, modality, patient:patients(full_name, identifier, prevision), study:imaging_studies(study_instance_uid)";
-const columns = "id, patient_id, practitioner_name, location_name, appointment_date, start_time, end_time, status, reason, modality, branch, service, specialty, procedure_code, treating_physician, order_date, anesthesia, contrast, priority, payment_order, tags, anamnesis, diagnostic_hypothesis, comment, requester_type, requester_name, requester_run, requester_email, pickup_name, pickup_run, pickup_phone, origin_type, origin_desc, status_reason, order_file, patient:patients(full_name, identifier, prevision), study:imaging_studies(study_instance_uid), report:radiology_reports(status, critical_finding)";
-// ponytail: fallback mientras la migración de anamnesis no esté aplicada; quitar cuando esté en producción
-const columnsSinAnamnesis = columns.replace("anamnesis, ", "");
+const columns = "id, patient_id, practitioner_name, location_name, appointment_date, start_time, end_time, status, reason, modality, branch, service, specialty, procedure_code, treating_physician, order_date, anesthesia, contrast, priority, payment_order, tags, anamnesis, diagnostic_hypothesis, comment, requester_type, requester_name, requester_run, requester_email, pickup_name, pickup_run, pickup_phone, origin_type, origin_desc, status_reason, order_file, assigned_to, patient:patients(full_name, identifier, prevision), study:imaging_studies(study_instance_uid), report:radiology_reports(status, critical_finding), followups:report_follow_ups(status), assignee:profiles(full_name)";
 
 const mapAppointment = (row: AppointmentRow): Appointment => ({
   id: row.id,
@@ -60,6 +61,9 @@ const mapAppointment = (row: AppointmentRow): Appointment => ({
   orderFile: row.order_file ?? "",
   reportStatus: row.report?.status,
   criticalFinding: row.report?.critical_finding ?? false,
+  actionablePending: row.followups?.some((item) => item.status !== "completed") ?? false,
+  assignedTo: row.assigned_to ?? undefined,
+  assigneeName: row.assignee?.full_name,
   patientIdentifier: row.patient?.identifier ?? "",
   patientPrevision: row.patient?.prevision ?? "",
 });
@@ -100,16 +104,27 @@ const toRow = (appointment: Appointment) => ({
   origin_desc: appointment.originDesc,
   status_reason: appointment.statusReason,
   order_file: appointment.orderFile,
+  assigned_to: appointment.assignedTo ?? null,
 });
 
 export async function fetchAppointments() {
   const result = await supabase.from("appointments").select(columns).order("appointment_date").order("start_time");
   if (!result.error) return (result.data as unknown as AppointmentRow[]).map(mapAppointment);
-  const sinAnamnesis = await supabase.from("appointments").select(columnsSinAnamnesis).order("appointment_date").order("start_time");
-  if (!sinAnamnesis.error) return (sinAnamnesis.data as unknown as AppointmentRow[]).map(mapAppointment);
   const fallback = await supabase.from("appointments").select(baseColumns).order("appointment_date").order("start_time");
   if (fallback.error) throw fallback.error;
   return (fallback.data as unknown as AppointmentRow[]).map(mapAppointment);
+}
+
+export async function assignAppointment(id: string, profileId: string | null) {
+  const { error } = await supabase.from("appointments").update({ assigned_to: profileId }).eq("id", id);
+  if (error) throw error;
+}
+
+/** Solo devuelve resultados para admins (RLS de profiles); para el resto queda vacío y la UI oculta la asignación. */
+export async function fetchRadiologists() {
+  const { data, error } = await supabase.from("profiles").select("id, full_name").eq("role", "radiologist").order("full_name");
+  if (error) return [];
+  return (data ?? []) as { id: string; full_name: string }[];
 }
 
 export async function saveAppointment(appointment: Appointment, exists: boolean) {
