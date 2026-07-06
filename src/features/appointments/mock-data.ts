@@ -24,6 +24,7 @@ export type Appointment = {
   priority: "normal" | "urgente";
   paymentOrder: string;
   tags: string;
+  anamnesis: string;
   diagnosticHypothesis: string;
   comment: string;
   requesterType: "interno" | "externo";
@@ -46,7 +47,7 @@ export type Appointment = {
 export const emptyClinicalDetail = {
   branch: "",
   service: "", specialty: "", procedureCode: "", treatingPhysician: "", orderDate: "",
-  anesthesia: false, contrast: false, priority: "normal" as const, paymentOrder: "", tags: "", diagnosticHypothesis: "", comment: "",
+  anesthesia: false, contrast: false, priority: "normal" as const, paymentOrder: "", tags: "", anamnesis: "", diagnosticHypothesis: "", comment: "",
   requesterType: "interno" as const, requesterName: "", requesterRun: "", requesterEmail: "",
   pickupName: "", pickupRun: "", pickupPhone: "",
   originType: "interna" as const, originDesc: "", statusReason: "", orderFile: "",
