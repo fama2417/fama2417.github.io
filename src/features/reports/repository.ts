@@ -1,3 +1,4 @@
+import { compressOrderFile } from "@/lib/compress-image";
 import { supabase } from "@/lib/supabase-client";
 
 export type Signer = { name: string; registration: string };
@@ -154,6 +155,24 @@ export async function addKeyImage(appointmentId: string, instanceId: string) {
   const { data, error } = await supabase.from("report_key_images").insert({ appointment_id: appointmentId, instance_id: instanceId }).select(keyImageColumns).single();
   if (error) throw error;
   return mapKeyImage(data as KeyImageRow);
+}
+
+/** Una imagen clave es captura (ruta en storage, contiene "/") o instancia Orthanc (ID sin "/"). */
+export const isCaptureKeyImage = (instanceId: string) => instanceId.includes("/");
+
+/** Sube una captura del visor (JPG/PNG, se comprime bajo 1 MB) y la registra como imagen clave. */
+export async function uploadKeyImageCapture(appointmentId: string, file: File) {
+  const compressed = await compressOrderFile(file);
+  const path = `${appointmentId}/captura-${Date.now()}.${compressed.name.split(".").pop() || "jpg"}`;
+  const { error } = await supabase.storage.from("capturas").upload(path, compressed, { upsert: true });
+  if (error) throw error;
+  return addKeyImage(appointmentId, path);
+}
+
+export async function captureUrl(path: string) {
+  const { data, error } = await supabase.storage.from("capturas").createSignedUrl(path, 3600);
+  if (error) throw error;
+  return data.signedUrl;
 }
 
 export async function updateKeyImageCaption(id: string, caption: string) {

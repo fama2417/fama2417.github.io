@@ -7,10 +7,10 @@ import { appointmentStatusLabels } from "@/features/appointments/status";
 import { fetchMyTenant, renderHeader, type Tenant } from "@/features/tenant/repository";
 import { supabase } from "@/lib/supabase-client";
 import {
-  addAddendum, addCommunication, addFollowUp, addKeyImage, fetchAddenda, fetchCommunications, fetchFollowUps,
-  fetchKeyImages, fetchReport, fetchSignatureUrl, removeKeyImage, saveReport, updateFollowUpStatus,
-  updateKeyImageCaption, type FollowUpStatus, type RadiologyReport, type ReportAddendum,
-  type ReportCommunication, type ReportFollowUp, type ReportKeyImage,
+  addAddendum, addCommunication, addFollowUp, addKeyImage, captureUrl, fetchAddenda, fetchCommunications,
+  fetchFollowUps, fetchKeyImages, fetchReport, fetchSignatureUrl, isCaptureKeyImage, removeKeyImage, saveReport,
+  updateFollowUpStatus, updateKeyImageCaption, uploadKeyImageCapture, type FollowUpStatus, type RadiologyReport,
+  type ReportAddendum, type ReportCommunication, type ReportFollowUp, type ReportKeyImage,
 } from "./repository";
 import { fetchTemplates, type ReportTemplate } from "./templates";
 import { validateFinalReport } from "./validation";
@@ -72,6 +72,17 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
   const [keyImages, setKeyImages] = useState<ReportKeyImage[]>([]);
   const [pickerInstances, setPickerInstances] = useState<string[] | null>(null);
   const [pickerLoading, setPickerLoading] = useState(false);
+  const [captureUrls, setCaptureUrls] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    keyImages.filter((item) => isCaptureKeyImage(item.instanceId)).forEach((item) => {
+      setCaptureUrls((current) => {
+        if (current[item.id]) return current;
+        captureUrl(item.instanceId).then((url) => setCaptureUrls((next) => ({ ...next, [item.id]: url }))).catch(() => undefined);
+        return current;
+      });
+    });
+  }, [keyImages]);
 
   useEffect(() => {
     supabase.auth.getSession()
@@ -204,6 +215,26 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
     try { await updateKeyImageCaption(item.id, item.caption); } catch { setError("No fue posible guardar la leyenda."); }
   }
 
+  const keyImageSrc = (item: ReportKeyImage) => isCaptureKeyImage(item.instanceId) ? captureUrls[item.id] : `/api/pacs/instances/${item.instanceId}/preview`;
+
+  async function uploadCapture(file: File | undefined) {
+    if (!file || report.status === "final") return;
+    setSaving(true); setError("");
+    try {
+      const created = await uploadKeyImageCapture(appointmentId, file);
+      setKeyImages((current) => [...current, created]);
+      setNotice("Captura agregada como imagen clave.");
+    } catch (cause) {
+      setError(cause instanceof Error && cause.message.includes("1 MB") ? cause.message : "No fue posible subir la captura (JPG/PNG, requiere perfil de radiología/admin).");
+    } finally { setSaving(false); }
+  }
+
+  /** Pegar (Ctrl+V) una captura del visor en cualquier parte del editor la agrega como imagen clave. */
+  function handlePaste(event: React.ClipboardEvent) {
+    const file = Array.from(event.clipboardData.files).find((entry) => entry.type.startsWith("image/"));
+    if (file && report.status !== "final") { event.preventDefault(); uploadCapture(file); }
+  }
+
   async function signAddendum(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setSaving(true); setError("");
     try {
@@ -244,7 +275,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
     </div>}
 
     <div className="report-layout">
-      <section className="report-editor" aria-label="Editor de informe">
+      <section className="report-editor" aria-label="Editor de informe" onPaste={handlePaste}>
         <div className="report-fields">
           <div className="card-heading"><h3>Informe estructurado (ACR)</h3>{report.status !== "final" && templates.some((template) => template.active) &&
             <select defaultValue="" onChange={(event) => { applyTemplate(event.target.value); event.target.value = ""; }} aria-label="Aplicar plantilla">
@@ -280,16 +311,20 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
             <summary><span className="collapsible-icon">🩻</span>Imágenes clave (KIN){keyImages.length > 0 && <span className="collapsible-count">{keyImages.length}</span>}</summary>
             {keyImages.length > 0 && <div className="key-images-grid">
               {keyImages.map((item) => <figure key={item.id} className="key-image">
-                <img src={`/api/pacs/instances/${item.instanceId}/preview`} alt="Imagen clave" loading="lazy" />
+                {keyImageSrc(item) && <img src={keyImageSrc(item)} alt="Imagen clave" loading="lazy" />}
                 {report.status === "final"
                   ? (item.caption && <figcaption>{item.caption}</figcaption>)
                   : <input value={item.caption} placeholder="Leyenda…" onChange={(event) => setKeyImages((current) => current.map((entry) => entry.id === item.id ? { ...entry, caption: event.target.value } : entry))} onBlur={() => persistCaption(keyImages.find((entry) => entry.id === item.id) ?? item)} />}
                 {report.status !== "final" && <button className="text-button" type="button" onClick={() => toggleKeyImage(item.instanceId)}>Quitar</button>}
               </figure>)}
             </div>}
+            {report.status !== "final" && <div className="capture-upload">
+              <label className="button secondary">Subir captura del visor<input type="file" accept="image/png,image/jpeg" hidden onChange={(event) => { uploadCapture(event.target.files?.[0]); event.target.value = ""; }} /></label>
+              <span className="empty-inline">Para CT/MR/PET-CT: usa la cámara 📷 de OHIF para exportar el corte con sus anotaciones y súbelo aquí, o pégalo directo con Ctrl+V.</span>
+            </div>}
             {report.status !== "final" && (appointment.orthancStudyId
               ? <>
-                  {!pickerInstances && <button className="button secondary" type="button" disabled={pickerLoading} onClick={loadPicker}>{pickerLoading ? "Cargando imágenes…" : "Elegir imágenes del estudio"}</button>}
+                  {!pickerInstances && <button className="text-button" type="button" disabled={pickerLoading} onClick={loadPicker}>{pickerLoading ? "Cargando imágenes…" : "…o elegir cortes del estudio (series pequeñas)"}</button>}
                   {pickerInstances && <div className="key-images-grid picker">
                     {pickerInstances.map((instanceId) => {
                       const selected = keyImages.some((item) => item.instanceId === instanceId);
@@ -345,7 +380,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
       {report.criticalFinding && <p><strong>⚠ HALLAZGO CRÍTICO{report.criticalFindingType && `: ${report.criticalFindingType}`}</strong>{acknowledgedCommunication && <> · Comunicado a {acknowledgedCommunication.recipient} por {channelLabels[acknowledgedCommunication.channel]}, {new Date(acknowledgedCommunication.communicatedAt).toLocaleString("es-CL")}.</>}</p>}
       {sections.map((section) => report[section.name] && <section key={section.name}><h3>{section.label}</h3><p>{report[section.name]}</p></section>)}
       {keyImages.length > 0 && <section className="key-images-print"><h3>Imágenes clave</h3><div>
-        {keyImages.map((item) => <figure key={item.id}><img src={`/api/pacs/instances/${item.instanceId}/preview`} alt="Imagen clave" />{item.caption && <figcaption>{item.caption}</figcaption>}</figure>)}
+        {keyImages.map((item) => <figure key={item.id}>{keyImageSrc(item) && <img src={keyImageSrc(item)} alt="Imagen clave" />}{item.caption && <figcaption>{item.caption}</figcaption>}</figure>)}
       </div></section>}
       {followUps.length > 0 && <section><h3>Recomendaciones y seguimiento</h3>{followUps.map((item) => <p key={item.id}>{item.recommendation} · Plazo {new Date(`${item.dueDate}T00:00:00`).toLocaleDateString("es-CL")} · {followUpLabels[item.status]}</p>)}</section>}
       {addenda.map((item, index) => <section key={item.id}><h3>Adenda {index + 1}</h3><p>{item.text}</p><p>{signerLabel(item.signer.name, item.signer.registration)} · {new Date(item.signedAt).toLocaleString("es-CL")}</p></section>)}
