@@ -110,7 +110,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
       setReport(saved);
       setNotice(status === "final" ? "Informe firmado y bloqueado como definitivo." : "Borrador guardado.");
     } catch {
-      setError(status === "final" ? "No fue posible firmar. Verifica que seas radiólogo y tengas registro profesional configurado." : "No fue posible guardar el borrador.");
+      setError(status === "final" ? "No fue posible firmar. Verifica tu perfil de administración/radiología y el registro profesional." : "No fue posible guardar el borrador.");
     } finally { setSaving(false); }
   }
 
@@ -121,7 +121,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
       setCommunications((current) => [...current, created]);
       setCommunicationDraft({ recipient: "", channel: "phone", communicatedAt: localNow(), acknowledged: false, notes: "" });
       setNotice("Intento de comunicación registrado.");
-    } catch { setError("No fue posible registrar la comunicación. Solo puede hacerlo un radiólogo."); }
+    } catch { setError("No fue posible registrar la comunicación. Requiere perfil de administración o radiología."); }
     finally { setSaving(false); }
   }
 
@@ -132,7 +132,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
       setFollowUps((current) => [...current, created]);
       setFollowUpDraft({ recommendation: "", dueDate: "", responsible: "" });
       setNotice("Seguimiento accionable registrado.");
-    } catch { setError("No fue posible registrar el seguimiento. Solo puede crearlo un radiólogo."); }
+    } catch { setError("No fue posible registrar el seguimiento. Requiere perfil de administración o radiología."); }
     finally { setSaving(false); }
   }
 
@@ -149,7 +149,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
     try {
       const created = await addAddendum(appointmentId, addendumText.trim());
       setAddenda((current) => [...current, created]); setAddendumText(""); setNotice("Adenda firmada.");
-    } catch { setError("No fue posible firmar la adenda. Solo puede hacerlo un radiólogo sobre un informe definitivo."); }
+    } catch { setError("No fue posible firmar la adenda. Requiere perfil de administración/radiología y un informe definitivo."); }
     finally { setSaving(false); }
   }
 
