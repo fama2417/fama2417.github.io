@@ -79,6 +79,23 @@ export async function createResource(input: {
   return id;
 }
 
+// --- Edición y borrado de parametría (institución se gestiona aparte, solo superadmin) ---
+type EntityTable = "locations" | "healthcare_services" | "practitioners" | "practitioner_roles" | "devices" | "service_types" | "schedulable_resources";
+export async function deleteEntity(table: EntityTable, id: string) {
+  const { error } = await supabase.from(table).delete().eq("id", id);
+  if (error) throw error;
+}
+const patch = async (table: EntityTable, id: string, row: Record<string, unknown>) => {
+  const { error } = await supabase.from(table).update(row).eq("id", id);
+  if (error) throw error;
+};
+export const updateLocation = (id: string, p: { name: string; address: string; active: boolean }) => patch("locations", id, p);
+export const updateService = (id: string, p: { name: string; specialty: string; capacity: number; active: boolean }) => patch("healthcare_services", id, p);
+export const updatePractitioner = (id: string, p: { fullName: string; professionalRegistration: string; active: boolean }) => patch("practitioners", id, { full_name: p.fullName, professional_registration: p.professionalRegistration, active: p.active });
+export const updateRole = (id: string, p: { specialty: string; locationId: string | null; healthcareServiceId: string | null; active: boolean }) => patch("practitioner_roles", id, { specialty: p.specialty, location_id: p.locationId, healthcare_service_id: p.healthcareServiceId, active: p.active });
+export const updateDevice = (id: string, p: { name: string; modality: string; locationId: string | null; active: boolean }) => patch("devices", id, { name: p.name, modality: p.modality, location_id: p.locationId, active: p.active });
+export const updateServiceType = (id: string, p: Omit<ServiceType, "id">) => patch("service_types", id, { code: p.code, name: p.name, duration_min: p.durationMin, capacity: p.capacity, requires_contrast: p.requiresContrast, requires_anesthesia: p.requiresAnesthesia, prep_instructions: p.prepInstructions, active: p.active });
+
 export const fetchResourceComponents = async (compositeId: string) => {
   const { data, error } = await supabase.from("schedulable_resource_components").select("member_id").eq("composite_id", compositeId);
   if (error) throw error;

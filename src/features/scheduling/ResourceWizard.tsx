@@ -45,8 +45,8 @@ export function ResourceWizard({ onCreated }: { onCreated?: () => void }) {
 
   useEffect(() => {
     Promise.all([fetchOrganizations(), fetchLocations(), fetchServices(), fetchPractitionerRoles(), fetchPractitioners(), fetchDevices(), fetchResources(), fetchServiceTypes()])
-      .then(([o, l, s, r, p, d, res, st]) => { setOrgs(o); setLocations(l); setServices(s); setRoles(r); setPractitioners(p); setDevices(d); setResources(res); setServiceTypes(st); })
-      .catch(() => setError("No fue posible cargar la parametría. Crea instituciones y sedes primero."));
+      .then(([o, l, s, r, p, d, res, st]) => { setOrgs(o); setOrganizationId(o[0]?.id ?? ""); setLocations(l); setServices(s); setRoles(r); setPractitioners(p); setDevices(d); setResources(res); setServiceTypes(st); })
+      .catch(() => setError("No fue posible cargar la parametría. Crea sedes y servicios primero."));
   }, []);
 
   const practitionerName = useMemo(() => Object.fromEntries(practitioners.map((p) => [p.id, p.fullName])), [practitioners]);
@@ -112,9 +112,10 @@ export function ResourceWizard({ onCreated }: { onCreated?: () => void }) {
 
       {step === 1 && (
         <div className="clinical-form">
-          <label>Institución<select value={organizationId} onChange={(e) => { setOrganizationId(e.target.value); setLocationId(""); setHealthcareServiceId(""); }}><option value="">Seleccionar…</option>{orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select></label>
+          {orgs.length > 1 && <label>Institución<select value={organizationId} onChange={(e) => { setOrganizationId(e.target.value); setLocationId(""); setHealthcareServiceId(""); }}>{orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select></label>}
           <label>Sede<select value={locationId} onChange={(e) => setLocationId(e.target.value)} disabled={!organizationId}><option value="">(Sin sede específica)</option>{orgLocations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select></label>
           <label>Servicio<select value={healthcareServiceId} onChange={(e) => setHealthcareServiceId(e.target.value)} disabled={!organizationId}><option value="">(Sin servicio específico)</option>{orgServices.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+          <p className="empty-inline" style={{ margin: 0 }}>Elige dónde vive el recurso. Sede y servicio son opcionales.</p>
         </div>
       )}
 

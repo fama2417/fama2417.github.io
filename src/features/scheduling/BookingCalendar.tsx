@@ -2,16 +2,15 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
-  availableSlots, bookAppointment, fetchDevices, fetchLocations, fetchOrganizations, fetchPractitioners, fetchPractitionerRoles,
+  availableSlots, bookAppointment, fetchDevices, fetchLocations, fetchPractitioners, fetchPractitionerRoles,
   fetchResources, fetchResourceServiceTypeIds, fetchServices, fetchServiceTypes, searchPatients,
-  type Device, type Location, type Organization, type Practitioner, type PractitionerRole, type SchedulableResource,
+  type Device, type Location, type Practitioner, type PractitionerRole, type SchedulableResource,
   type ServiceType, type Slot,
 } from "./repository";
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
 export function BookingCalendar() {
-  const [orgs, setOrgs] = useState<Organization[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
   const [services, setServices] = useState<{ id: string; organizationId: string; name: string }[]>([]);
   const [resources, setResources] = useState<SchedulableResource[]>([]);
@@ -20,7 +19,6 @@ export function BookingCalendar() {
   const [practitioners, setPractitioners] = useState<Practitioner[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
 
-  const [orgId, setOrgId] = useState("");
   const [locId, setLocId] = useState("");
   const [svcId, setSvcId] = useState("");
   const [serviceTypeId, setServiceTypeId] = useState("");
@@ -35,8 +33,8 @@ export function BookingCalendar() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    Promise.all([fetchOrganizations(), fetchLocations(), fetchServices(), fetchResources(), fetchServiceTypes(), fetchPractitionerRoles(), fetchPractitioners(), fetchDevices()])
-      .then(([o, l, s, r, st, ro, p, d]) => { setOrgs(o); setLocations(l); setServices(s); setResources(r); setServiceTypes(st); setRoles(ro); setPractitioners(p); setDevices(d); })
+    Promise.all([fetchLocations(), fetchServices(), fetchResources(), fetchServiceTypes(), fetchPractitionerRoles(), fetchPractitioners(), fetchDevices()])
+      .then(([l, s, r, st, ro, p, d]) => { setLocations(l); setServices(s); setResources(r); setServiceTypes(st); setRoles(ro); setPractitioners(p); setDevices(d); })
       .catch(() => setError("No fue posible cargar la agenda."));
   }, []);
 
@@ -50,7 +48,6 @@ export function BookingCalendar() {
   const locName = useMemo(() => Object.fromEntries(locations.map((l) => [l.id, l.name])), [locations]);
 
   const filtered = resources.filter((r) => r.active
-    && (!orgId || r.organizationId === orgId)
     && (!locId || r.locationId === locId)
     && (!svcId || r.healthcareServiceId === svcId)
     && (!compatibleIds || compatibleIds.includes(r.id)));
@@ -92,9 +89,8 @@ export function BookingCalendar() {
       {notice && <p className="notice" role="status">{notice}</p>}
 
       <div className="clinical-form">
-        <label>Institución<select value={orgId} onChange={(e) => { setOrgId(e.target.value); setResourceId(""); }}><option value="">Todas</option>{orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select></label>
-        <label>Sede<select value={locId} onChange={(e) => { setLocId(e.target.value); setResourceId(""); }}><option value="">Todas</option>{locations.filter((l) => !orgId || l.organizationId === orgId).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select></label>
-        <label>Servicio<select value={svcId} onChange={(e) => { setSvcId(e.target.value); setResourceId(""); }}><option value="">Todos</option>{services.filter((s) => !orgId || s.organizationId === orgId).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+        <label>Sede<select value={locId} onChange={(e) => { setLocId(e.target.value); setResourceId(""); }}><option value="">Todas</option>{locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select></label>
+        <label>Servicio<select value={svcId} onChange={(e) => { setSvcId(e.target.value); setResourceId(""); }}><option value="">Todos</option>{services.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
         <label>Tipo de atención<select value={serviceTypeId} onChange={(e) => { setServiceTypeId(e.target.value); setResourceId(""); }}><option value="">Todos</option>{serviceTypes.filter((s) => s.active).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
         <label>Recurso agendable<select value={resourceId} onChange={(e) => setResourceId(e.target.value)}><option value="">Seleccionar…</option>{filtered.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select></label>
         <label>Fecha<input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></label>
