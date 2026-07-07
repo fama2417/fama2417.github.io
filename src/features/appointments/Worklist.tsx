@@ -64,7 +64,7 @@ export function Worklist() {
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
   const [unmatched, setUnmatched] = useState<UnmatchedStudy[]>([]);
-  const [pacsConfigured, setPacsConfigured] = useState<boolean | null>(null);
+  const [pacsFiltered, setPacsFiltered] = useState(true);
   const [fixup, setFixup] = useState<UnmatchedStudy | null>(null);
   const [fixupQuery, setFixupQuery] = useState("");
   const [fixupPatients, setFixupPatients] = useState<Patient[]>([]);
@@ -97,7 +97,7 @@ export function Worklist() {
   async function loadUnmatched() {
     try {
       const payload = await fixupApi("GET");
-      setPacsConfigured(payload.configured); setUnmatched(payload.studies ?? []);
+      setPacsFiltered(payload.filtered ?? true); setUnmatched(payload.studies ?? []);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "No fue posible revisar estudios PACS sin vincular.");
     }
@@ -256,7 +256,7 @@ export function Worklist() {
     </div>
     {error && <p className="notice" role="alert">{error}</p>}
     {notice && <p className="form-notice" role="status">{notice}</p>}
-    {role === "admin" && pacsConfigured === false && <p className="notice">FixUp está listo, pero falta configurar <strong>Institución PACS</strong> en Configuración → Institución.</p>}
+    {role === "admin" && !pacsFiltered && unmatched.length > 0 && <p className="notice">FixUp muestra <strong>todos</strong> los estudios sin vincular del PACS. Para separar por institución, define <strong>Institución PACS</strong> en Configuración → Institución.</p>}
     {role === "admin" && unmatched.length > 0 && <section className="card pacs-unmatched" aria-label="Estudios PACS sin vincular">
       <div className="card-heading"><div><h3>Estudios PACS sin vincular ({unmatched.length})</h3><p>Requieren FixUp antes de entrar a la lista de trabajo.</p></div><button className="text-button" type="button" onClick={loadUnmatched}>Actualizar</button></div>
       <div className="pacs-unmatched-list">{unmatched.map((study) => <button type="button" key={study.id} onClick={() => openFixup(study)}><span className="fixup-alert" aria-hidden="true">!</span><span><strong>{study.patientName}</strong><small>{study.patientId || "Sin Patient ID"}{study.accessionNumber && ` · Accession ${study.accessionNumber}`} · {study.date} · {study.modality} · {study.description}</small></span><span>FixUp →</span></button>)}</div>

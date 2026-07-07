@@ -29,7 +29,9 @@ const sameInstitution = (left: string, right: string) => left.trim().toLocaleLow
 export async function GET(request: NextRequest) {
   const auth = await context(request);
   if ("error" in auth) return auth.error;
-  if (!auth.pacsInstitution) return NextResponse.json({ configured: false, studies: [] });
+  // Sin "Institución PACS" configurada se muestran TODOS los estudios sin vincular (útil con un solo Orthanc o pruebas).
+  // ponytail: en multi-tenant real esto mezclaría clientes; define Institución PACS por institución para separarlos.
+  const filtered = !!auth.pacsInstitution;
 
   const [upstream, linked] = await Promise.all([orthanc("/studies?expand"), auth.admin.from("imaging_studies").select("orthanc_study_id, study_instance_uid")]);
   if (!upstream.ok) return NextResponse.json({ error: `PACS no disponible (${upstream.status}).` }, { status: 502 });
@@ -37,15 +39,14 @@ export async function GET(request: NextRequest) {
   const used = new Set((linked.data ?? []).flatMap((row) => [row.orthanc_study_id, row.study_instance_uid].filter(Boolean)));
   // ponytail: se revisan los últimos 100; paginar cuando un PACS mantenga más estudios sin vincular.
   const studies = ((await upstream.json()) as OrthancStudy[]).map(mapOrthancStudy)
-    .filter((study) => study.studyInstanceUid && sameInstitution(study.institution, auth.pacsInstitution) && !used.has(study.id) && !used.has(study.studyInstanceUid))
+    .filter((study) => study.studyInstanceUid && (!filtered || sameInstitution(study.institution, auth.pacsInstitution)) && !used.has(study.id) && !used.has(study.studyInstanceUid))
     .sort((a, b) => b.date.localeCompare(a.date)).slice(0, 100);
-  return NextResponse.json({ configured: true, studies });
+  return NextResponse.json({ configured: true, filtered, studies });
 }
 
 export async function POST(request: NextRequest) {
   const auth = await context(request);
   if ("error" in auth) return auth.error;
-  if (!auth.pacsInstitution) return NextResponse.json({ error: "Configura Institución PACS antes de usar FixUp." }, { status: 400 });
   const { studyId, appointmentId, patientId } = await request.json().catch(() => ({}));
   if (typeof studyId !== "string" || (!appointmentId && !patientId)) return NextResponse.json({ error: "Selecciona un estudio y una cita o paciente." }, { status: 400 });
 
@@ -53,7 +54,8 @@ export async function POST(request: NextRequest) {
   if (!upstream.ok) return NextResponse.json({ error: "Estudio PACS inexistente." }, { status: 404 });
   const raw = await upstream.json() as OrthancStudy;
   const study = mapOrthancStudy(raw);
-  if (!study.studyInstanceUid || !sameInstitution(study.institution, auth.pacsInstitution)) return NextResponse.json({ error: "El estudio no pertenece a la institución activa." }, { status: 403 });
+  // Con Institución PACS definida se exige que el estudio pertenezca a ella; sin ella, se permite vincular cualquiera.
+  if (!study.studyInstanceUid || (auth.pacsInstitution && !sameInstitution(study.institution, auth.pacsInstitution))) return NextResponse.json({ error: "El estudio no pertenece a la institución activa." }, { status: 403 });
   if ((await auth.admin.from("imaging_studies").select("id").or(`orthanc_study_id.eq.${study.id},study_instance_uid.eq.${study.studyInstanceUid}`).maybeSingle()).data) return NextResponse.json({ error: "El estudio ya está vinculado." }, { status: 409 });
 
   let targetAppointmentId = typeof appointmentId === "string" ? appointmentId : "";
