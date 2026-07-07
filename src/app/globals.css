@@ -121,6 +121,11 @@ section.card { margin-bottom: 20px; }
 .card ul { color: var(--muted); line-height: 1.7; margin: 0; padding-left: 20px; }
 .card-heading { align-items: center; display: flex; gap: 12px; justify-content: space-between; }
 .card-heading h3 { margin: 0; }
+.catalog-list li > span:first-child { display: grid; gap: 2px; }
+.catalog-list small { color: var(--muted); }
+.template-builder { display: grid; gap: 10px; }
+.template-builder > p, .template-preview p { margin: 0; }
+.template-preview { background: var(--background); border: 1px solid var(--border); border-radius: 6px; padding: 12px; }
 .phase-state { background: rgba(52, 211, 153, 0.15); border-radius: 999px; color: var(--success); font-size: 0.75rem; font-weight: 800; padding: 5px 10px; white-space: nowrap; }
 .phase-state.pending { background: rgba(251, 191, 36, 0.15); color: var(--warning); }
 
@@ -150,6 +155,24 @@ section.card { margin-bottom: 20px; }
 
 .toolbar { align-items: end; display: flex; gap: 16px; margin-bottom: 20px; padding: 14px; }
 .toolbar label { color: var(--muted); display: grid; flex: 1; font-size: 0.85rem; gap: 6px; }
+.patient-search { position: relative; }
+.patient-search-results { background: var(--background); border: 1px solid var(--primary); border-radius: 6px; box-shadow: var(--shadow); display: grid; left: 0; max-height: 280px; overflow: auto; position: absolute; right: 0; top: 100%; z-index: 20; }
+.patient-search-results button { background: transparent; border: 0; border-bottom: 1px solid var(--border); color: var(--text); cursor: pointer; display: grid; gap: 2px; padding: 10px 12px; text-align: left; }
+.patient-search-results button:hover { background: var(--surface-muted); }
+.patient-search-results small { color: var(--muted); }
+.pacs-unmatched { border-color: rgba(248, 113, 113, 0.55); }
+.pacs-unmatched-list, .fixup-results, .fixup-results section { display: grid; gap: 8px; }
+.pacs-unmatched-list > button, .fixup-results button { align-items: center; background: var(--background); border: 1px solid var(--border); border-radius: 6px; color: var(--text); cursor: pointer; display: flex; gap: 10px; justify-content: space-between; padding: 10px 12px; text-align: left; }
+.pacs-unmatched-list button > span:nth-child(2), .fixup-results button { flex: 1; }
+.pacs-unmatched-list small, .fixup-results button span { color: var(--muted); display: block; }
+.fixup-alert { align-items: center; background: var(--danger); border-radius: 50%; color: #081418; display: inline-flex; font-weight: 900; height: 24px; justify-content: center; width: 24px; }
+.fixup-modal { display: grid; gap: 14px; max-width: 760px; }
+.fixup-modal > p { margin: 0; }
+.fixup-modal > label { display: grid; gap: 6px; }
+.fixup-results { max-height: 380px; overflow: auto; }
+.fixup-results h4 { margin: 8px 0 0; }
+.fixup-results button { display: grid; }
+.fixup-results button.selected { border-color: var(--primary); background: var(--surface-muted); }
 .wide-field { min-width: 320px; }
 
 input, select, textarea {
@@ -351,6 +374,9 @@ body:has(.report-workstation) .app-shell { flex: 1; min-height: 0; }
 .appointment-info dt { color: var(--muted); font-size: 0.72rem; letter-spacing: 0.04em; text-transform: uppercase; }
 .appointment-info dd { margin: 0 0 6px; }
 .patient-detail { max-width: 820px; }
+.patient-summary dl { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin: 0; }
+.patient-summary dt { color: var(--muted); font-size: 0.75rem; }
+.patient-summary dd { margin: 3px 0 0; }
 .patient-detail dl > div:nth-last-child(-n+2) { grid-column: 1 / -1; }
 .audit-list { border-top: 1px solid var(--border); display: grid; gap: 8px; padding-top: 14px; }
 .audit-list h4 { margin: 0; }
@@ -411,6 +437,8 @@ body:has(.report-workstation) .app-shell { flex: 1; min-height: 0; }
 .key-image-dropzone { border: 1px dashed var(--report-accent); border-radius: 8px; cursor: pointer; display: grid; gap: 4px; padding: 14px; text-align: center; }
 .key-image-dropzone:hover { background: rgba(53, 195, 181, 0.08); }
 .key-image-dropzone strong { color: var(--report-accent); font-size: 0.85rem; }
+.read-only-report { gap: 20px; }
+.read-only-report > .notice, .read-only-report > article { margin: 0 20px 20px; }
 .exam-entry { color: var(--text); text-decoration: none; }
 .exam-entry:hover { background: rgba(255, 255, 255, 0.07); }
 .key-images-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }

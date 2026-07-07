@@ -3,6 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase-client";
+import type { UnmatchedStudy } from "@/lib/orthanc";
+import { fetchPatients } from "@/features/patients/repository";
+import type { Patient } from "@/features/patients/mock-data";
 import type { Appointment } from "./mock-data";
 import { assignAppointment, fetchAppointments, fetchRadiologists, orderFileUrl, setAppointmentStatus } from "./repository";
 import { APPOINTMENT_STATUSES, appointmentStatusLabels, type AppointmentStatus } from "./status";
@@ -36,6 +39,15 @@ const quickLabels: Record<string, string> = { pending: "Por informar", critical:
 type SavedFilter = { name: string; isDefault: boolean; filters: Filters };
 const loadSaved = (): SavedFilter[] => { try { return JSON.parse(localStorage.getItem("worklist-saved-filters") ?? "[]"); } catch { return []; } };
 const storeSaved = (items: SavedFilter[]) => localStorage.setItem("worklist-saved-filters", JSON.stringify(items));
+const normalize = (value: string) => value.toLocaleLowerCase("es-CL").replace(/[^a-z0-9áéíóúñ]/g, "");
+
+async function fixupApi(method: "GET" | "POST", body?: unknown) {
+  const { data } = await supabase.auth.getSession();
+  const response = await fetch("/api/pacs/unmatched", { method, headers: { Authorization: `Bearer ${data.session?.access_token ?? ""}`, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error ?? "No fue posible consultar el PACS.");
+  return payload;
+}
 
 export function Worklist() {
   const router = useRouter();
@@ -45,17 +57,31 @@ export function Worklist() {
   const [selectedSaved, setSelectedSaved] = useState("");
   const [radiologists, setRadiologists] = useState<{ id: string; full_name: string }[]>([]);
   const [uid, setUid] = useState("");
+  const [role, setRole] = useState("");
   const [columns, setColumns] = useState<Column[]>(DEFAULT_COLUMNS);
   const [showColumns, setShowColumns] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
+  const [unmatched, setUnmatched] = useState<UnmatchedStudy[]>([]);
+  const [pacsConfigured, setPacsConfigured] = useState<boolean | null>(null);
+  const [fixup, setFixup] = useState<UnmatchedStudy | null>(null);
+  const [fixupQuery, setFixupQuery] = useState("");
+  const [fixupPatients, setFixupPatients] = useState<Patient[]>([]);
+  const [fixupTarget, setFixupTarget] = useState<{ kind: "appointment" | "patient"; id: string; label: string } | null>(null);
+  const [fixupSaving, setFixupSaving] = useState(false);
 
   const set = (key: keyof Filters, value: string) => setFilters((current) => ({ ...current, [key]: value }));
 
   useEffect(() => { fetchAppointments().then(setAppointments).catch(() => setError("No fue posible cargar la worklist.")).finally(() => setLoading(false)); }, []);
   useEffect(() => {
-    fetchRadiologists().then(setRadiologists);
-    supabase.auth.getUser().then(({ data }) => setUid(data.user?.id ?? ""));
+    supabase.auth.getUser().then(async ({ data }) => {
+      setUid(data.user?.id ?? "");
+      const profile = await supabase.from("profiles").select("role").eq("id", data.user?.id ?? "").single();
+      const nextRole = profile.data?.role ?? "";
+      setRole(nextRole);
+      if (nextRole === "admin") { fetchRadiologists().then(setRadiologists); loadUnmatched(); }
+    });
     const stored = localStorage.getItem("worklist-columns");
     if (stored) setColumns((JSON.parse(stored) as Column[]).filter((column) => COLUMNS.includes(column)));
     const savedFilters = loadSaved();
@@ -67,6 +93,15 @@ export function Worklist() {
     if (view === "today") setFilters((current) => ({ ...current, from: today(), to: today() }));
     else if (quickLabels[view]) setFilters((current) => ({ ...current, quick: view, from: "", to: "" }));
   }, []);
+
+  async function loadUnmatched() {
+    try {
+      const payload = await fixupApi("GET");
+      setPacsConfigured(payload.configured); setUnmatched(payload.studies ?? []);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "No fue posible revisar estudios PACS sin vincular.");
+    }
+  }
 
   function toggleColumn(column: Column) {
     setColumns((current) => {
@@ -104,6 +139,9 @@ export function Worklist() {
   const professionals = useMemo(() => [...new Set(appointments.map((item) => item.practitionerName).filter(Boolean))].sort(), [appointments]);
   const rooms = useMemo(() => [...new Set(appointments.map((item) => item.locationName).filter(Boolean))].sort(), [appointments]);
   const tags = useMemo(() => [...new Set(appointments.flatMap((item) => item.tags.split(",").map((tag) => tag.trim()).filter(Boolean)))].sort(), [appointments]);
+  const fixupNeedle = normalize(fixupQuery);
+  const fixupAppointments = useMemo(() => fixupNeedle.length < 2 ? [] : appointments.filter((item) => !item.orthancStudyId && normalize(`${item.patientName} ${item.patientIdentifier ?? ""} ${item.date}`).includes(fixupNeedle)).slice(0, 6), [appointments, fixupNeedle]);
+  const fixupPatientMatches = useMemo(() => fixupNeedle.length < 2 ? [] : fixupPatients.filter((patient) => normalize(`${patient.name} ${patient.identifier}`).includes(fixupNeedle)).slice(0, 6), [fixupPatients, fixupNeedle]);
 
   const worklist = useMemo(() => appointments
     .filter((item) => (!filters.from || item.date >= filters.from) && (!filters.to || item.date <= filters.to))
@@ -147,6 +185,25 @@ export function Worklist() {
     }
   }
 
+  function openFixup(study: UnmatchedStudy) {
+    setFixup(study); setFixupQuery(study.patientId || study.patientName); setFixupTarget(null); setError("");
+    fetchPatients().then(setFixupPatients).catch(() => setError("No fue posible cargar pacientes para FixUp."));
+  }
+
+  async function linkFixup() {
+    if (!fixup || !fixupTarget) return;
+    setFixupSaving(true); setError(""); setNotice("");
+    try {
+      await fixupApi("POST", { studyId: fixup.id, [fixupTarget.kind === "appointment" ? "appointmentId" : "patientId"]: fixupTarget.id });
+      setUnmatched((current) => current.filter((study) => study.id !== fixup.id));
+      setAppointments(await fetchAppointments());
+      setNotice(`Estudio vinculado a ${fixupTarget.label}.`);
+      setFixup(null); setFixupTarget(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "No fue posible vincular el estudio.");
+    } finally { setFixupSaving(false); }
+  }
+
   function exportCsv() {
     const header = ["Fecha", "Hora", "Paciente", "ID Paciente", "Previsión", "Modalidad", "Prestación", "Código", "Sala", "Profesional", "Estado", "Motivo", "Informe", "Asignado", "Prioridad"];
     const lines = worklist.map((item) => [item.date, item.startTime, item.patientName, item.patientIdentifier ?? "", item.patientPrevision ?? "", item.modality, item.reason, item.procedureCode, item.locationName, item.practitionerName, appointmentStatusLabels[item.status], item.statusReason, reportLabels[reportKey(item)], item.assigneeName ?? "", item.priority]
@@ -172,7 +229,7 @@ export function Worklist() {
       case "Profesional": return item.practitionerName;
       case "Estado": return <select className={`status status-${item.status}`} value={item.status} title={item.statusReason || undefined} onClick={(event) => event.stopPropagation()} onChange={(event) => changeStatus(item, event.target.value as AppointmentStatus)} aria-label={`Estado de ${item.patientName}`}>{APPOINTMENT_STATUSES.map((value) => <option key={value} value={value}>{appointmentStatusLabels[value]}</option>)}</select>;
       case "Informe": return <span className={`status ${reportClass[reportKey(item)]}`}>{reportLabels[reportKey(item)]}</span>;
-      case "Asignado": return radiologists.length
+      case "Asignado": return role === "admin" && radiologists.length
         ? <select className="assign-select" value={item.assignedTo ?? ""} onClick={(event) => event.stopPropagation()} onChange={(event) => assign(item, event.target.value)} aria-label={`Asignar informe de ${item.patientName}`}>
             <option value="">Sin asignar</option>
             {radiologists.map((entry) => <option key={entry.id} value={entry.id}>{entry.full_name}</option>)}
@@ -198,6 +255,12 @@ export function Worklist() {
       </div>
     </div>
     {error && <p className="notice" role="alert">{error}</p>}
+    {notice && <p className="form-notice" role="status">{notice}</p>}
+    {role === "admin" && pacsConfigured === false && <p className="notice">FixUp está listo, pero falta configurar <strong>Institución PACS</strong> en Configuración → Institución.</p>}
+    {role === "admin" && unmatched.length > 0 && <section className="card pacs-unmatched" aria-label="Estudios PACS sin vincular">
+      <div className="card-heading"><div><h3>Estudios PACS sin vincular ({unmatched.length})</h3><p>Requieren FixUp antes de entrar a la lista de trabajo.</p></div><button className="text-button" type="button" onClick={loadUnmatched}>Actualizar</button></div>
+      <div className="pacs-unmatched-list">{unmatched.map((study) => <button type="button" key={study.id} onClick={() => openFixup(study)}><span className="fixup-alert" aria-hidden="true">!</span><span><strong>{study.patientName}</strong><small>{study.patientId || "Sin Patient ID"}{study.accessionNumber && ` · Accession ${study.accessionNumber}`} · {study.date} · {study.modality} · {study.description}</small></span><span>FixUp →</span></button>)}</div>
+    </section>}
     <div className="filter-layout">
       <aside className="filter-panel" aria-label="Filtros">
         <div className="saved-filters">
@@ -213,7 +276,7 @@ export function Worklist() {
             {selectedSaved && <button className="tag" type="button" onClick={deleteSaved}>Eliminar</button>}
           </div>
         </div>
-        <label>Paciente<input value={filters.patient} onChange={(event) => set("patient", event.target.value)} placeholder="Nombre o ID (RUN)" type="search" /></label>
+        <label>Paciente<input value={filters.patient} onChange={(event) => set("patient", event.target.value)} placeholder="Nombre o identificador" type="search" /></label>
         <label>Desde<input type="date" value={filters.from} onChange={(event) => set("from", event.target.value)} /></label>
         <label>Hasta<input type="date" value={filters.to} onChange={(event) => set("to", event.target.value)} /></label>
         <div className="preset-row">{presets.map((preset) => <button key={preset.label} className="tag" type="button" onClick={() => { const [nextFrom, nextTo] = preset.range(); setFilters((current) => ({ ...current, from: nextFrom, to: nextTo })); }}>{preset.label}</button>)}</div>
@@ -230,13 +293,27 @@ export function Worklist() {
       </aside>
       <section className="table-card">
         <table><thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>
-          {worklist.map((item) => <tr key={item.id} className="row-link" tabIndex={0} onClick={() => router.push(`/informe/${item.id}`)} onKeyDown={(event) => event.key === "Enter" && router.push(`/informe/${item.id}`)}>
+          {worklist.map((item) => { const target = role === "operator" ? `/pacientes/${item.patientId}` : `/informe/${item.id}`; return <tr key={item.id} className="row-link" tabIndex={0} onClick={() => router.push(target)} onKeyDown={(event) => event.key === "Enter" && router.push(target)}>
             {columns.map((column) => <td key={column}>{cell(item, column)}</td>)}
-          </tr>)}
+          </tr>; })}
         </tbody></table>
         {!loading && !worklist.length && <p className="empty-state">No se encontraron resultados.</p>}
         {loading && <p className="empty-state">Cargando worklist…</p>}
       </section>
     </div>
+    {fixup && <div className="appointment-info-backdrop" role="dialog" aria-modal="true" aria-label="FixUp de estudio PACS" onClick={(event) => { if (event.target === event.currentTarget) setFixup(null); }}>
+      <div className="appointment-info fixup-modal">
+        <div className="card-heading"><div><p className="eyebrow">FixUp PACS</p><h3>{fixup.patientName}</h3></div><button className="text-button" type="button" onClick={() => setFixup(null)}>Cerrar ✕</button></div>
+        <p>{fixup.patientId || "Sin Patient ID"}{fixup.accessionNumber && ` · Accession ${fixup.accessionNumber}`} · {fixup.date} · {fixup.modality} · {fixup.description}</p>
+        <label>Buscar cita o paciente<input type="search" value={fixupQuery} onChange={(event) => { setFixupQuery(event.target.value); setFixupTarget(null); }} placeholder="Nombre, Patient ID o fecha" autoFocus /></label>
+        <div className="fixup-results">
+          {fixupAppointments.length > 0 && <section><h4>Citas sin imágenes</h4>{fixupAppointments.map((item) => <button type="button" className={fixupTarget?.kind === "appointment" && fixupTarget.id === item.id ? "selected" : ""} key={item.id} onClick={() => setFixupTarget({ kind: "appointment", id: item.id, label: `${item.patientName} (${item.date})` })}><strong>{item.patientName} · {item.date} {item.startTime}</strong><span>{item.patientIdentifier} · {item.modality} · {item.reason}</span></button>)}</section>}
+          {fixupPatientMatches.length > 0 && <section><h4>Crear cita desde paciente</h4>{fixupPatientMatches.map((patient) => <button type="button" className={fixupTarget?.kind === "patient" && fixupTarget.id === patient.id ? "selected" : ""} key={patient.id} onClick={() => setFixupTarget({ kind: "patient", id: patient.id, label: patient.name })}><strong>{patient.name}</strong><span>{patient.identifier} · se creará una cita completada con los datos DICOM</span></button>)}</section>}
+          {fixupNeedle.length >= 2 && !fixupAppointments.length && !fixupPatientMatches.length && <p className="empty-inline">Sin coincidencias. Crea primero el paciente desde Agenda si sus datos no existen.</p>}
+        </div>
+        {fixupTarget && <p className="form-notice">Destino: {fixupTarget.label}</p>}
+        <button className="button primary" type="button" disabled={!fixupTarget || fixupSaving} onClick={linkFixup}>{fixupSaving ? "Vinculando…" : fixupTarget?.kind === "patient" ? "Crear cita y vincular" : "Vincular con esta cita"}</button>
+      </div>
+    </div>}
   </>;
 }

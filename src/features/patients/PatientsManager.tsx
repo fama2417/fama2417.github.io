@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase-client";
-import type { Patient } from "./mock-data";
+import { identifierTypeLabels, type Patient } from "./mock-data";
 import { createPatient, fetchPatients, fetchPatientAudit, fetchPatientExams, type PatientAuditEntry, type PatientExam } from "./repository";
 import { appointmentStatusLabels, type AppointmentStatus } from "@/features/appointments/status";
 
@@ -12,6 +12,7 @@ const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9áéí
 const actionLabels: Record<string, string> = { INSERT: "Creación", UPDATE: "Modificación", DELETE: "Eliminación" };
 const fieldLabels: Record<string, string> = {
   identifier: "Identificador", full_name: "Nombre", birth_date: "Fecha de nacimiento", sex: "Sexo", phone: "Teléfono",
+  identifier_type: "Tipo de identificador",
   email: "Correo", address: "Dirección", comuna: "Comuna", prevision: "Previsión", allergies: "Alergias",
   morbid_history: "Antecedentes mórbidos", privacy_consent_at: "Consentimiento",
 };
@@ -72,11 +73,13 @@ export function PatientsManager() {
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
     const identifier = String(form.get("identifier")).trim();
-    if (patients.some((patient) => normalize(patient.identifier) === normalize(identifier))) return setError("Ya existe un paciente con ese identificador.");
+    const identifierType = String(form.get("identifierType")) as Patient["identifierType"];
+    if (patients.some((patient) => patient.identifierType === identifierType && normalize(patient.identifier) === normalize(identifier))) return setError("Ya existe un paciente con ese identificador.");
 
     try {
       const patient = await createPatient({
         identifier,
+        identifierType,
         name: String(form.get("name")).trim(),
         birthDate: String(form.get("birthDate")),
         sex: String(form.get("sex")) as Patient["sex"],
@@ -112,7 +115,8 @@ export function PatientsManager() {
 
       {showForm && (
         <form className="card clinical-form" onSubmit={addPatient}>
-          <label>Identificador<input name="identifier" placeholder="RUN o pasaporte" required /></label>
+          <label>Tipo de identificador<select name="identifierType" defaultValue="run">{Object.entries(identifierTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          <label>Número de identificador<input name="identifier" placeholder="RUN, pasaporte u otro" required /></label>
           <label>Nombre completo<input name="name" required /></label>
           <label>Fecha de nacimiento<input name="birthDate" type="date" required /></label>
           <label>Sexo registral<select name="sex" defaultValue="unknown">{Object.entries(sexLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
@@ -132,7 +136,7 @@ export function PatientsManager() {
       <section className="toolbar" aria-label="Búsqueda de pacientes"><label className="wide-field">Buscar paciente<input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nombre o identificador" type="search" /></label></section>
       <section className="table-card">
         <table><thead><tr><th>Identificador</th><th>Nombre</th><th>Fecha nacimiento</th><th>Sexo</th><th>Teléfono</th><th>Consentimiento</th></tr></thead><tbody>
-          {visiblePatients.map((patient) => <tr className="row-link" key={patient.id} tabIndex={0} onClick={() => openPatient(patient)} onKeyDown={(event) => event.key === "Enter" && openPatient(patient)}><td>{patient.identifier}</td><td>{patient.name}</td><td>{patient.birthDate}</td><td>{sexLabels[patient.sex]}</td><td>{patient.phone || "—"}</td><td>{patient.consentAt ? <span className="status status-completed">Otorgado</span> : <span className="status status-cancelled">Pendiente</span>}</td></tr>)}
+          {visiblePatients.map((patient) => <tr className="row-link" key={patient.id} tabIndex={0} onClick={() => openPatient(patient)} onKeyDown={(event) => event.key === "Enter" && openPatient(patient)}><td>{identifierTypeLabels[patient.identifierType]} · {patient.identifier}</td><td>{patient.name}</td><td>{patient.birthDate}</td><td>{sexLabels[patient.sex]}</td><td>{patient.phone || "—"}</td><td>{patient.consentAt ? <span className="status status-completed">Otorgado</span> : <span className="status status-cancelled">Pendiente</span>}</td></tr>)}
         </tbody></table>
         {!loading && !visiblePatients.length && <p className="empty-state">No se encontraron pacientes.</p>}
         {loading && <p className="empty-state">Cargando pacientes…</p>}
@@ -142,7 +146,7 @@ export function PatientsManager() {
         <div className="appointment-info patient-detail">
           <div className="card-heading"><div><p className="eyebrow">Ficha del paciente</p><h3>{selected.name}</h3></div><button className="text-button" type="button" onClick={() => setSelected(null)}>Cerrar ✕</button></div>
           <dl>
-            <div><dt>Identificador</dt><dd>{selected.identifier}</dd></div>
+            <div><dt>{identifierTypeLabels[selected.identifierType]}</dt><dd>{selected.identifier}</dd></div>
             <div><dt>Fecha de nacimiento</dt><dd>{selected.birthDate}</dd></div>
             <div><dt>Sexo registral</dt><dd>{sexLabels[selected.sex]}</dd></div>
             <div><dt>Previsión</dt><dd>{selected.prevision || "—"}</dd></div>

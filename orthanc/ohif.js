@@ -58,6 +58,21 @@
   * { scrollbar-color: #1e5a5c #09191d; }
 `;
   document.head.appendChild(theme);
+
+  // La cámara de OHIF entrega la captura directamente al informe embebido (un solo clic).
+  const nativeAnchorClick = HTMLAnchorElement.prototype.click;
+  HTMLAnchorElement.prototype.click = function () {
+    if (window.parent !== window && this.download && (this.href.startsWith("blob:") || this.href.startsWith("data:image/"))) {
+      fetch(this.href).then((response) => response.blob()).then((blob) => {
+        if (!blob.type.startsWith("image/")) return nativeAnchorClick.call(this);
+        const reader = new FileReader();
+        reader.onload = () => window.parent.postMessage({ type: "agenda-key-image", dataUrl: reader.result, name: this.download || "captura-ohif.png" }, document.referrer ? new URL(document.referrer).origin : "*");
+        reader.readAsDataURL(blob);
+      }).catch(() => nativeAnchorClick.call(this));
+      return;
+    }
+    nativeAnchorClick.call(this);
+  };
 })();
 
 window.config = {

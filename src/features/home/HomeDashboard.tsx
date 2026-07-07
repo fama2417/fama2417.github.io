@@ -23,6 +23,7 @@ type Stat = { label: string; value: number; hint: string; view: string; tone?: "
 
 export function HomeDashboard() {
   const [role, setRole] = useState<Role | null>(null);
+  const [platform, setPlatform] = useState(false);
   const [name, setName] = useState("");
   const [tenant, setTenant] = useState("");
   const [uid, setUid] = useState("");
@@ -33,9 +34,10 @@ export function HomeDashboard() {
     supabase.auth.getUser().then(({ data: auth }) => {
       if (!auth.user) return;
       setUid(auth.user.id);
-      supabase.from("profiles").select("full_name, role, tenant:tenants!profiles_tenant_id_fkey(name), activeTenant:tenants!profiles_active_tenant_id_fkey(name)").eq("id", auth.user.id).single().then(({ data }) => {
+      supabase.from("profiles").select("full_name, role, platform, tenant:tenants!profiles_tenant_id_fkey(name), activeTenant:tenants!profiles_active_tenant_id_fkey(name)").eq("id", auth.user.id).single().then(({ data }) => {
         if (!data) return;
         setRole(data.role as Role);
+        setPlatform(!!data.platform);
         setName((data.full_name as string) ?? "");
         setTenant((data.activeTenant as unknown as { name: string } | null)?.name ?? (data.tenant as unknown as { name: string } | null)?.name ?? "");
       });
@@ -67,7 +69,7 @@ export function HomeDashboard() {
       <div>
         <p className="eyebrow">{tenant || "Centro de imagenología"}</p>
         <h2>{name ? `Hola, ${name.split(" ")[0]}` : "Bienvenido"}</h2>
-        <p>{role ? `Sesión de ${roleLabels[role]}. ` : ""}Accede a los módulos según tu perfil y revisa el estado del día.</p>
+        <p>{role ? `Sesión de ${platform ? "SuperAdmin" : roleLabels[role]}. ` : ""}Accede a los módulos según tu perfil y revisa el estado del día.</p>
       </div>
     </section>
 

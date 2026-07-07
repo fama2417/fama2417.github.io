@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { emptyPatientRecord, type Patient } from "@/features/patients/mock-data";
+import { emptyPatientRecord, identifierTypeLabels, type Patient } from "@/features/patients/mock-data";
 import { createPatient, fetchPatients } from "@/features/patients/repository";
 import { activeOptions, fetchCatalog, type CatalogItem } from "@/features/catalog/repository";
 import { compressOrderFile } from "@/lib/compress-image";
@@ -14,7 +14,8 @@ import { appointmentError } from "./validation";
 const today = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Santiago" });
 const emptyDraft = (date: string): Appointment => ({ id: "", patientId: "", patientName: "", practitionerName: "", locationName: "", date, startTime: "09:00", endTime: "09:30", status: "scheduled", reason: "", modality: "US", ...emptyClinicalDetail });
 const modalities = ["US", "DX", "CT", "MR", "MG"] as const;
-const emptyNewPatient = { identifier: "", name: "", birthDate: "", sex: "unknown" as Patient["sex"], prevision: "", phone: "", consent: false };
+const emptyNewPatient = { identifier: "", identifierType: "run" as Patient["identifierType"], name: "", birthDate: "", sex: "unknown" as Patient["sex"], prevision: "", phone: "", consent: false };
+const normalizePatient = (value: string) => value.toLocaleLowerCase("es-CL").replace(/[^a-z0-9áéíóúñ]/g, "");
 
 const steps = ["Paciente", "Reserva", "Detalles y adjuntos"] as const;
 
@@ -28,6 +29,7 @@ export function AgendaManager() {
   const [draft, setDraft] = useState<Appointment | null>(null);
   const [step, setStep] = useState(0);
   const [newPatient, setNewPatient] = useState<typeof emptyNewPatient | null>(null);
+  const [patientQuery, setPatientQuery] = useState("");
   const [pendingOrder, setPendingOrder] = useState<File | null>(null);
   const [schedules, setSchedules] = useState<RoomSchedule[]>([]);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
@@ -62,6 +64,11 @@ export function AgendaManager() {
     .sort((a, b) => a.startTime.localeCompare(b.startTime)), [appointments, date, practitioner, location]);
 
   const selectedPatient = patients.find((item) => item.id === draft?.patientId);
+  const patientMatches = useMemo(() => {
+    const needle = normalizePatient(patientQuery);
+    if (needle.length < 2 || selectedPatient) return [];
+    return patients.filter((patient) => normalizePatient(`${patient.name} ${patient.identifier}`).includes(needle)).slice(0, 8);
+  }, [patientQuery, patients, selectedPatient]);
   const set = <Key extends keyof Appointment>(field: Key, value: Appointment[Key]) => setDraft((current) => current && { ...current, [field]: value });
 
   function openDraft(base: Appointment) {
@@ -69,6 +76,7 @@ export function AgendaManager() {
     setStep(0);
     setPendingOrder(null);
     setNewPatient(null);
+    setPatientQuery(base.patientId ? `${base.patientName} · ${base.patientIdentifier ?? ""}` : "");
     setError("");
     setNotice("");
   }
@@ -92,9 +100,10 @@ export function AgendaManager() {
     if (!newPatient.identifier || !newPatient.name || !newPatient.birthDate) return setError("Completa identificador, nombre y fecha de nacimiento.");
     if (!newPatient.consent) return setError("Registra el consentimiento del paciente para continuar.");
     try {
-      const patient = await createPatient({ ...emptyPatientRecord, identifier: newPatient.identifier.trim(), name: newPatient.name.trim(), birthDate: newPatient.birthDate, sex: newPatient.sex, phone: newPatient.phone.trim(), prevision: newPatient.prevision, consentAt: new Date().toISOString() });
+      const patient = await createPatient({ ...emptyPatientRecord, identifier: newPatient.identifier.trim(), identifierType: newPatient.identifierType, name: newPatient.name.trim(), birthDate: newPatient.birthDate, sex: newPatient.sex, phone: newPatient.phone.trim(), prevision: newPatient.prevision, consentAt: new Date().toISOString() });
       setPatients((current) => [...current, patient].sort((a, b) => a.name.localeCompare(b.name)));
       setDraft((current) => current && { ...current, patientId: patient.id });
+      setPatientQuery(`${patient.name} · ${patient.identifier}`);
       setNewPatient(null);
       setError("");
       setNotice(`Paciente ${patient.name} creado (ID ${patient.identifier}).`);
@@ -170,12 +179,16 @@ export function AgendaManager() {
             <fieldset className="booking-section">
               <legend>Paciente</legend>
               <div className="booking-grid">
-                <label className="span-2">Buscar paciente *<select value={draft.patientId} onChange={(event) => set("patientId", event.target.value)}><option value="">Seleccionar…</option>{patients.map((patient) => <option key={patient.id} value={patient.id}>{patient.name} · {patient.identifier}</option>)}</select></label>
+                <label className="span-2 patient-search">Buscar paciente *
+                  <input type="search" value={patientQuery} onChange={(event) => { setPatientQuery(event.target.value); set("patientId", ""); }} placeholder="Escribe nombre o Patient ID" autoComplete="off" />
+                  {patientMatches.length > 0 && <span className="patient-search-results">{patientMatches.map((patient) => <button type="button" key={patient.id} onClick={() => { set("patientId", patient.id); setPatientQuery(`${patient.name} · ${patient.identifier}`); }}><strong>{patient.name}</strong><small>{identifierTypeLabels[patient.identifierType]} · {patient.identifier}</small></button>)}</span>}
+                  {patientQuery.trim().length >= 2 && !selectedPatient && !patientMatches.length && <span className="empty-inline">Sin coincidencias.</span>}
+                </label>
                 <div className="booking-grid-action"><button className="button secondary" type="button" onClick={() => setNewPatient(newPatient ? null : { ...emptyNewPatient })}>{newPatient ? "Cancelar creación" : "+ Nuevo paciente"}</button></div>
               </div>
               {selectedPatient && !newPatient && (
                 <div className="patient-chip">
-                  <span><strong>ID Paciente (DICOM):</strong> {selectedPatient.identifier}</span>
+                  <span><strong>{identifierTypeLabels[selectedPatient.identifierType]} / Patient ID:</strong> {selectedPatient.identifier}</span>
                   <span><strong>Nacimiento:</strong> {selectedPatient.birthDate}</span>
                   <span><strong>Previsión:</strong> {selectedPatient.prevision || "No registrada"}</span>
                   <span><strong>Consentimiento:</strong> {selectedPatient.consentAt ? "Otorgado" : "Pendiente"}</span>
@@ -183,7 +196,8 @@ export function AgendaManager() {
               )}
               {newPatient && (
                 <div className="booking-grid inner-form">
-                  <label>ID Paciente / RUN *<input value={newPatient.identifier} onChange={(event) => setNewPatient({ ...newPatient, identifier: event.target.value })} placeholder="Se usará como Patient ID DICOM" /></label>
+                  <label>Tipo de identificador<select value={newPatient.identifierType} onChange={(event) => setNewPatient({ ...newPatient, identifierType: event.target.value as Patient["identifierType"] })}>{Object.entries(identifierTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+                  <label>Número / Patient ID *<input value={newPatient.identifier} onChange={(event) => setNewPatient({ ...newPatient, identifier: event.target.value })} placeholder="Se usará como Patient ID DICOM" /></label>
                   <label>Nombre completo *<input value={newPatient.name} onChange={(event) => setNewPatient({ ...newPatient, name: event.target.value })} /></label>
                   <label>Fecha de nacimiento *<input type="date" value={newPatient.birthDate} onChange={(event) => setNewPatient({ ...newPatient, birthDate: event.target.value })} /></label>
                   <label>Sexo registral<select value={newPatient.sex} onChange={(event) => setNewPatient({ ...newPatient, sex: event.target.value as Patient["sex"] })}><option value="unknown">No informado</option><option value="female">Femenino</option><option value="male">Masculino</option><option value="other">Otro</option></select></label>

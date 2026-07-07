@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase-client";
 
-type TenantRow = { id: string; name: string; active: boolean; created_at: string };
+type TenantRow = { id: string; name: string; active: boolean; created_at: string; pacs_institution: string };
 
 async function api(method: string, body?: unknown) {
   const { data } = await supabase.auth.getSession();
@@ -35,7 +35,7 @@ export function TenantsManager() {
     setError("");
     setNotice("");
     try {
-      await api("POST", { name: String(form.get("name")).trim(), adminEmail: String(form.get("adminEmail")).trim(), adminPassword: String(form.get("adminPassword")), adminName: String(form.get("adminName")).trim() });
+      await api("POST", { name: String(form.get("name")).trim(), pacsInstitution: String(form.get("pacsInstitution")).trim(), adminEmail: String(form.get("adminEmail")).trim(), adminPassword: String(form.get("adminPassword")), adminName: String(form.get("adminName")).trim() });
       formElement.reset();
       setShowForm(false);
       setNotice("Institución creada con su administrador inicial.");
@@ -57,6 +57,7 @@ export function TenantsManager() {
       {showForm && (
         <form className="clinical-form" onSubmit={createTenant}>
           <label>Nombre de la institución<input name="name" required /></label>
+          <label>Institución PACS<input name="pacsInstitution" required placeholder="InstitutionName DICOM" /></label>
           <label>Nombre del administrador<input name="adminName" required /></label>
           <label>Correo del administrador<input name="adminEmail" type="email" required /></label>
           <label>Contraseña inicial<input name="adminPassword" type="password" minLength={12} required /></label>
@@ -65,7 +66,7 @@ export function TenantsManager() {
       )}
 
       <ul className="catalog-list">
-        {tenants.map((tenant) => <li key={tenant.id} className={tenant.active ? "" : "inactive"}><span>{tenant.name}</span><span className="empty-inline">{new Date(tenant.created_at).toLocaleDateString("es-CL")}</span></li>)}
+        {tenants.map((tenant) => <li key={tenant.id} className={tenant.active ? "" : "inactive"}><span><strong>{tenant.name}</strong><small>{tenant.pacs_institution || "PACS sin configurar"}</small></span><span className="empty-inline">{new Date(tenant.created_at).toLocaleDateString("es-CL")}</span></li>)}
       </ul>
     </section>
   );
