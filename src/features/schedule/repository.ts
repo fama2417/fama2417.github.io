@@ -45,6 +45,8 @@ export async function removeHoliday(id: string) {
   if (error) throw error;
 }
 
+export { availableSlots } from "./slots";
+
 /** Devuelve el motivo de bloqueo si la cita queda fuera de horario o cae en feriado; vacío si es válida. */
 export function scheduleError(candidate: { date: string; startTime: string; endTime: string; locationName: string }, schedules: RoomSchedule[], holidays: Holiday[]) {
   const holiday = holidays.find((item) => item.date === candidate.date);

@@ -5,14 +5,14 @@ import { emptyPatientRecord, identifierTypeLabels, type Patient } from "@/featur
 import { createPatient, fetchPatients } from "@/features/patients/repository";
 import { activeOptions, fetchCatalog, type CatalogItem } from "@/features/catalog/repository";
 import { compressOrderFile } from "@/lib/compress-image";
-import { fetchHolidays, fetchSchedules, scheduleError, type Holiday, type RoomSchedule } from "@/features/schedule/repository";
+import { availableSlots, fetchHolidays, fetchSchedules, scheduleError, type Holiday, type RoomSchedule } from "@/features/schedule/repository";
 import { emptyClinicalDetail, type Appointment } from "./mock-data";
 import { fetchAppointments, saveAppointment, setAppointmentStatus, uploadOrderFile } from "./repository";
 import { APPOINTMENT_STATUSES, appointmentStatusLabels, type AppointmentStatus } from "./status";
 import { appointmentError } from "./validation";
 
 const today = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Santiago" });
-const emptyDraft = (date: string): Appointment => ({ id: "", patientId: "", patientName: "", practitionerName: "", locationName: "", date, startTime: "09:00", endTime: "09:30", status: "scheduled", reason: "", modality: "US", ...emptyClinicalDetail });
+const emptyDraft = (date: string): Appointment => ({ id: "", patientId: "", patientName: "", practitionerName: "", locationName: "", date, startTime: "", endTime: "", status: "scheduled", reason: "", modality: "US", ...emptyClinicalDetail });
 const modalities = ["US", "DX", "CT", "MR", "MG"] as const;
 const emptyNewPatient = { identifier: "", identifierType: "run" as Patient["identifierType"], name: "", birthDate: "", sex: "unknown" as Patient["sex"], prevision: "", phone: "", consent: false };
 const normalizePatient = (value: string) => value.toLocaleLowerCase("es-CL").replace(/[^a-z0-9áéíóúñ]/g, "");
@@ -31,6 +31,7 @@ export function AgendaManager() {
   const [newPatient, setNewPatient] = useState<typeof emptyNewPatient | null>(null);
   const [patientQuery, setPatientQuery] = useState("");
   const [pendingOrder, setPendingOrder] = useState<File | null>(null);
+  const [manualTime, setManualTime] = useState(false);
   const [schedules, setSchedules] = useState<RoomSchedule[]>([]);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [error, setError] = useState("");
@@ -71,9 +72,18 @@ export function AgendaManager() {
   }, [patientQuery, patients, selectedPatient]);
   const set = <Key extends keyof Appointment>(field: Key, value: Appointment[Key]) => setDraft((current) => current && { ...current, [field]: value });
 
+  const procedureDuration = options.prestacion.find((item) => item.label === draft?.reason)?.durationMin ?? 30;
+  const dayHoliday = holidays.find((item) => item.date === draft?.date);
+  const slots = useMemo(() => {
+    if (!draft || dayHoliday) return [];
+    const nowMin = draft.date === today() ? new Date().getHours() * 60 + new Date().getMinutes() : undefined;
+    return availableSlots(draft.date, draft.locationName, procedureDuration, schedules, appointments, { excludeId: draft.id, nowMin });
+  }, [draft?.date, draft?.locationName, procedureDuration, schedules, appointments, dayHoliday, draft?.id]);
+
   function openDraft(base: Appointment) {
     setDraft(base);
     setStep(0);
+    setManualTime(false);
     setPendingOrder(null);
     setNewPatient(null);
     setPatientQuery(base.patientId ? `${base.patientName} · ${base.patientIdentifier ?? ""}` : "");
@@ -83,7 +93,12 @@ export function AgendaManager() {
 
   function pickProcedure(label: string) {
     const item = options.prestacion.find((entry) => entry.label === label);
-    setDraft((current) => current && { ...current, reason: label, procedureCode: item?.code ?? "" });
+    // Nueva duración ⇒ los bloques se regeneran; se limpia la hora elegida para re-seleccionar.
+    setDraft((current) => current && { ...current, reason: label, procedureCode: item?.code ?? "", startTime: "", endTime: "" });
+  }
+
+  function pickSlot(start: string, end: string) {
+    setDraft((current) => current && { ...current, startTime: start, endTime: end });
   }
 
   function toggleTag(tag: string) {
@@ -130,6 +145,7 @@ export function AgendaManager() {
     if (!draft) return;
     if (!draft.patientId) { setStep(0); return setError("Selecciona o crea el paciente."); }
     if (!draft.practitionerName || !draft.reason || !draft.locationName) { setStep(1); return setError("Completa profesional, prestación y sala."); }
+    if (!draft.startTime || !draft.endTime) { setStep(1); return setError("Selecciona un horario disponible."); }
     const patient = patients.find((item) => item.id === draft.patientId);
     const exists = Boolean(draft.id);
     const candidate = { ...draft, id: draft.id || crypto.randomUUID(), patientName: patient?.name ?? "" };
@@ -222,8 +238,23 @@ export function AgendaManager() {
                 <label className="span-2">Prestación *<select value={draft.reason} onChange={(event) => pickProcedure(event.target.value)}><option value="">Seleccionar…</option>{options.prestacion.map((item) => <option key={item.id} value={item.label}>{item.code ? `${item.code} · ` : ""}{item.label}</option>)}</select></label>
                 <label>Sala / equipo *<select value={draft.locationName} onChange={(event) => set("locationName", event.target.value)}><option value="">Seleccionar…</option>{options.sala.map((item) => <option key={item.id} value={item.label}>{item.label}</option>)}</select></label>
                 <label>Fecha *<input required type="date" value={draft.date} onChange={(event) => set("date", event.target.value)} /></label>
-                <label>Inicio *<input required type="time" value={draft.startTime} onChange={(event) => set("startTime", event.target.value)} /></label>
-                <label>Término *<input required type="time" value={draft.endTime} onChange={(event) => set("endTime", event.target.value)} /></label>
+
+                <div className="slot-picker span-2">
+                  <span className="slot-picker-head">Horarios disponibles <small>· {procedureDuration} min por bloque</small>{draft.startTime && <em> · seleccionado {draft.startTime}–{draft.endTime}</em>}</span>
+                  {!draft.locationName || !draft.reason
+                    ? <p className="empty-inline">Elige prestación y sala para ver los bloques.</p>
+                    : dayHoliday
+                    ? <p className="empty-inline">Feriado{dayHoliday.label ? ` (${dayHoliday.label})` : ""}: la sala no atiende.</p>
+                    : slots.length
+                    ? <div className="slot-grid">{slots.map((slot) => <button type="button" key={slot.start} className={`slot ${draft.startTime === slot.start ? "active" : ""}`} onClick={() => pickSlot(slot.start, slot.end)}>{slot.start}</button>)}</div>
+                    : <p className="empty-inline">Sin bloques libres ese día. Ajusta el horario de la sala en Configuración o usa horario manual.</p>}
+                  <button type="button" className="text-button" onClick={() => setManualTime((value) => !value)}>{manualTime ? "Ocultar horario manual" : "Otro horario (manual)"}</button>
+                </div>
+
+                {manualTime && <>
+                  <label>Inicio<input type="time" value={draft.startTime} onChange={(event) => set("startTime", event.target.value)} /></label>
+                  <label>Término<input type="time" value={draft.endTime} onChange={(event) => set("endTime", event.target.value)} /></label>
+                </>}
               </div>
             </fieldset>
           )}

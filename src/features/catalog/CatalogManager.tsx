@@ -21,7 +21,8 @@ export function CatalogManager() {
     const label = String(form.get("label")).trim();
     if (!label) return;
     try {
-      const item = await createCatalogItem({ category, code: String(form.get("code")).trim(), label, active: true, sort: items.length + 1 });
+      const durationMin = category === "prestacion" ? Number(form.get("duration")) || 30 : undefined;
+      const item = await createCatalogItem({ category, code: String(form.get("code")).trim(), label, active: true, sort: items.length + 1, durationMin });
       setCatalog((current) => [...current, item]);
       formElement.reset();
       setError("");
@@ -67,6 +68,7 @@ export function CatalogManager() {
           <form className="catalog-form" onSubmit={addItem}>
             <label>Código (opcional)<input name="code" placeholder="Ej: 04.04.001.101" /></label>
             <label>Nombre<input name="label" required placeholder={`Nueva opción de ${CATALOG_CATEGORIES[category].toLowerCase()}`} /></label>
+            {category === "prestacion" && <label>Duración (min)<input name="duration" type="number" min="5" step="5" defaultValue={30} /></label>}
             <button className="button primary" type="submit">Agregar</button>
           </form>
           {error && <p className="form-error" role="alert">{error}</p>}
@@ -77,11 +79,12 @@ export function CatalogManager() {
                   ? <form className="catalog-form" onSubmit={saveEdit}>
                       <label>Código<input value={editing.code} onChange={(event) => setEditing({ ...editing, code: event.target.value })} /></label>
                       <label>Nombre<input value={editing.label} onChange={(event) => setEditing({ ...editing, label: event.target.value })} required /></label>
+                      {editing.category === "prestacion" && <label>Duración (min)<input type="number" min="5" step="5" value={editing.durationMin ?? 30} onChange={(event) => setEditing({ ...editing, durationMin: Number(event.target.value) || 30 })} /></label>}
                       <button className="button primary" type="submit">Guardar</button>
                       <button className="text-button" type="button" onClick={() => setEditing(null)}>Cancelar</button>
                     </form>
                   : <>
-                      <span>{item.code && <code>{item.code}</code>} {item.label}</span>
+                      <span>{item.code && <code>{item.code}</code>} {item.label}{item.category === "prestacion" && <small className="empty-inline"> · {item.durationMin ?? 30} min</small>}</span>
                       <span>
                         <button className="text-button" type="button" onClick={() => setEditing(item)}>Editar</button>
                         <button className="text-button" type="button" onClick={() => toggleItem(item)}>{item.active ? "Desactivar" : "Activar"}</button>

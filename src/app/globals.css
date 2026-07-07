@@ -264,6 +264,15 @@ tr.row-link:hover td { background: var(--surface-muted); }
 .tag { background: transparent; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); cursor: pointer; font-size: 0.8rem; padding: 6px 12px; }
 .tag.active { background: rgba(31, 182, 166, 0.18); border-color: var(--primary); color: var(--primary); }
 .empty-inline { color: var(--muted); font-size: 0.82rem; }
+.slot-picker { display: grid; gap: 10px; }
+.slot-picker-head { color: var(--muted); font-size: 0.85rem; }
+.slot-picker-head small { color: var(--muted); }
+.slot-picker-head em { color: var(--primary); font-style: normal; font-weight: 700; }
+.slot-grid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(74px, 1fr)); }
+.slot { background: transparent; border: 1px solid var(--border); border-radius: 6px; color: var(--text); cursor: pointer; font-size: 0.9rem; font-variant-numeric: tabular-nums; padding: 10px 0; text-align: center; transition: border-color 0.12s, background 0.12s; }
+.slot:hover { border-color: var(--primary); }
+.slot.active { background: var(--primary); border-color: var(--primary); color: #04211d; font-weight: 700; }
+.slot-picker .text-button { justify-self: start; padding: 0; }
 .booking-actions { align-items: center; display: flex; gap: 16px; }
 .booking-actions .form-error { margin: 0; }
 
