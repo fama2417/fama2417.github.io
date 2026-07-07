@@ -1,8 +1,6 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
-import html2canvas from "html2canvas";
-import { PDFDocument } from "pdf-lib";
 import type { Appointment } from "@/features/appointments/mock-data";
 import { fetchAppointments, orderFileUrl } from "@/features/appointments/repository";
 import { appointmentStatusLabels } from "@/features/appointments/status";
@@ -74,8 +72,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
   const [keyImages, setKeyImages] = useState<ReportKeyImage[]>([]);
   const [captureUrls, setCaptureUrls] = useState<Record<string, string>>({});
   const [role, setRole] = useState<string>("");
-  const printRef = useRef<HTMLDivElement>(null);
-  const [tenantId, setTenantId] = useState<string>("");
+  const viewerRef = useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
     keyImages.filter((item) => isCaptureKeyImage(item.instanceId)).forEach((item) => {
@@ -104,7 +101,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
           .sort((a, b) => `${b.date}${b.startTime}`.localeCompare(`${a.date}${a.startTime}`)));
         if (storedReport) setReport(storedReport);
         setCommunications(storedCommunications); setAddenda(storedAddenda); setFollowUps(storedFollowUps);
-        setTenantId(profile.tenantId); setRole(profile.role);
+        setRole(profile.role);
       })
       .catch(() => setError("No fue posible cargar el estudio. Verifica que la migración clínica esté aplicada."))
       .finally(() => setLoading(false));
@@ -114,10 +111,10 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
   }, [appointmentId]);
 
   useEffect(() => {
-    const allowedOrigins = new Set([window.location.origin, new URL(fallbackOhifUrl, window.location.href).origin]);
     const receiveCapture = (event: MessageEvent) => {
       const message = event.data as { type?: string; dataUrl?: string; name?: string };
-      if (!allowedOrigins.has(event.origin) || message.type !== "agenda-key-image" || !message.dataUrl?.startsWith("data:image/") || message.dataUrl.length > 20_000_000 || report.status === "final") return;
+      // Se acepta solo si viene del iframe del visor (independiente del origen, que cambia por el handoff a la VM).
+      if (event.source !== viewerRef.current?.contentWindow || message.type !== "agenda-key-image" || !message.dataUrl?.startsWith("data:image/") || message.dataUrl.length > 20_000_000 || report.status === "final") return;
       fetch(message.dataUrl).then((response) => response.blob()).then((blob) => uploadCapture(new File([blob], message.name || "captura-ohif.png", { type: blob.type }))).catch(() => setError("No fue posible recibir la captura de OHIF."));
     };
     window.addEventListener("message", receiveCapture);
@@ -128,39 +125,27 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
     if (report.signerId) fetchSignatureUrl(report.signerId).then(setSignatureImage).catch(() => undefined);
   }, [report.signerId]);
 
-  /**
-   * Archiva en el PACS EXACTAMENTE el mismo informe que se imprime: rasteriza el print-sheet
-   * (única fuente de verdad) y arma el PDF, en vez de reconstruirlo aparte.
-   */
+  /** Archiva en el PACS el PDF del informe definitivo (lo genera el servidor con acceso directo a las imágenes). */
   async function archivePdfInPacs() {
     try {
-      const node = printRef.current;
-      if (!node) throw new Error("sin hoja");
-      const canvas = await html2canvas(node, {
-        useCORS: true, backgroundColor: "#ffffff", scale: 2,
-        onclone: (doc) => { const sheet = doc.querySelector(".print-sheet") as HTMLElement | null; if (sheet) sheet.setAttribute("style", "display:block;position:static;width:794px;padding:24px;background:#fff;color:#000;"); },
-      });
-      const pdf = await PDFDocument.create();
-      const embedded = await pdf.embedPng(canvas.toDataURL("image/png"));
-      const pageW = 595, pageH = 842, margin = 24, usableW = pageW - margin * 2;
-      const scaledH = embedded.height * (usableW / embedded.width), contentH = pageH - margin * 2;
-      // ponytail: recorta el alto en páginas A4 dibujando la imagen desplazada; suficiente para informes de 1-3 páginas
-      for (let offset = 0; offset < scaledH || offset === 0; offset += contentH) {
-        pdf.addPage([pageW, pageH]).drawImage(embedded, { x: margin, y: pageH - margin - scaledH + offset, width: usableW, height: scaledH });
-      }
-      const pdfBase64 = btoa(String.fromCharCode(...new Uint8Array(await pdf.save())));
-
       const { data } = await supabase.auth.getSession();
       const response = await fetch("/api/pacs/report-pdf", {
         method: "POST",
         headers: { Authorization: `Bearer ${data.session?.access_token ?? ""}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ appointmentId, pdfBase64 }),
+        body: JSON.stringify({ appointmentId }),
       });
       const payload = await response.json().catch(() => ({}));
       setNotice(response.ok ? "Informe firmado; PDF archivado en el PACS." : `Informe firmado. ${payload.error ?? "No fue posible archivar el PDF en el PACS."}`);
     } catch {
       setNotice("Informe firmado. No fue posible archivar el PDF en el PACS.");
     }
+  }
+
+  /** Borra del PACS el PDF archivado de este informe. */
+  async function deletePdfFromPacs() {
+    const { data } = await supabase.auth.getSession();
+    const response = await fetch(`/api/pacs/report-pdf?appointmentId=${encodeURIComponent(appointmentId)}`, { method: "DELETE", headers: { Authorization: `Bearer ${data.session?.access_token ?? ""}` } });
+    if (!response.ok) throw new Error("No fue posible eliminar el PDF del PACS.");
   }
 
   function applyTemplate(id: string) {
@@ -221,7 +206,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
     const existing = keyImages.find((item) => item.instanceId === instanceId);
     try {
       if (existing) {
-        await removeKeyImage(existing.id);
+        await removeKeyImage(existing.id, existing.instanceId);
         setKeyImages((current) => current.filter((item) => item.id !== existing.id));
       } else {
         const created = await addKeyImage(appointmentId, instanceId);
@@ -279,7 +264,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
     if (!reason) return;
     setSaving(true); setError("");
     try {
-      const reopened = await reopenReport(appointmentId, tenantId, reason);
+      const reopened = await reopenReport(appointmentId, reason);
       setReport(reopened); setNotice("Informe reabierto como borrador. El motivo quedó registrado.");
     } catch { setError("No fue posible reabrir el informe."); }
     finally { setSaving(false); }
@@ -290,8 +275,14 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
     if (!reason) return;
     setSaving(true); setError("");
     try {
-      await deleteReport(appointmentId, tenantId, reason);
-      setReport(emptyReport(appointmentId)); setAddenda([]); setKeyImages([]); setNotice("Informe eliminado. El motivo quedó registrado.");
+      await deleteReport(appointmentId, reason);
+      setReport(emptyReport(appointmentId)); setAddenda([]); setKeyImages([]);
+      try {
+        await deletePdfFromPacs();
+        setNotice("Informe eliminado (también del PACS). El motivo quedó registrado.");
+      } catch {
+        setNotice("Informe eliminado. El motivo quedó registrado, pero el PDF del PACS requiere limpieza manual.");
+      }
     } catch { setError("No fue posible eliminar el informe."); }
     finally { setSaving(false); }
   }
@@ -433,10 +424,10 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
           {report.updatedAt && <span className="report-updated">Última modificación: {new Date(report.updatedAt).toLocaleString("es-CL")}</span>}
         </footer>
       </section>
-      <section className="viewer-pane" aria-label="Visor de imágenes">{fullScreen ? <iframe src={fullScreen} title="Visor OHIF" allow="fullscreen" /> : <p className="empty-state">Este estudio aún no tiene imágenes vinculadas en el PACS.</p>}</section>
+      <section className="viewer-pane" aria-label="Visor de imágenes">{fullScreen ? <iframe ref={viewerRef} src={fullScreen} title="Visor OHIF" allow="fullscreen" /> : <p className="empty-state">Este estudio aún no tiene imágenes vinculadas en el PACS.</p>}</section>
     </div>
 
-    <div className="print-sheet" aria-hidden="true" ref={printRef}>
+    <div className="print-sheet" aria-hidden="true">
       <header>{tenant?.logoUrl && <img src={tenant.logoUrl} alt="" />}<div><h1>{tenant?.name ?? "Informe radiológico"}</h1><p>{[tenant?.rut && `RUT ${tenant.rut}`, tenant?.address, tenant?.phone].filter(Boolean).join(" · ")}</p></div></header>
       <h2>Informe radiológico</h2>
       {tenant?.reportHeader

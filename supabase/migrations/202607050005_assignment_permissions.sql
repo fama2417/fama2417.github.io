@@ -1,5 +1,5 @@
 -- Solo administradores pueden asignar informes; el asignado debe ser un radiólogo del mismo tenant.
-create function private.protect_report_assignment() returns trigger
+create or replace function private.protect_report_assignment() returns trigger
 language plpgsql security definer set search_path = ''
 as $$
 begin
@@ -20,6 +20,7 @@ begin
 end;
 $$;
 
+drop trigger if exists protect_report_assignment on public.appointments;
 create trigger protect_report_assignment before update on public.appointments
 for each row execute function private.protect_report_assignment();
 

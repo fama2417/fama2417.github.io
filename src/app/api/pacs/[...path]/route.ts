@@ -39,4 +39,4 @@ async function proxy(request: NextRequest, { params }: { params: Promise<{ path:
   return new NextResponse(upstream.body, { status: upstream.status, headers: responseHeaders });
 }
 
-export { proxy as GET, proxy as HEAD, proxy as POST };
+export { proxy as GET, proxy as HEAD };
