@@ -284,6 +284,7 @@ tr.row-link:hover td { background: var(--surface-muted); }
 .catalog-tabs button.active { background: var(--surface-muted); border-left-color: var(--primary); color: var(--text); }
 .catalog-form { align-items: end; display: grid; gap: 12px; grid-template-columns: 200px 1fr auto; margin-bottom: 12px; }
 .catalog-form label { color: var(--muted); display: grid; font-size: 0.82rem; gap: 5px; }
+.catalog-form label.checkbox { align-items: center; grid-auto-flow: column; justify-content: start; }
 .catalog-list { display: grid; gap: 4px; list-style: none; margin: 0; padding: 0; }
 .catalog-list li { align-items: center; border-bottom: 1px solid var(--border); display: flex; gap: 12px; justify-content: space-between; padding: 8px 4px; }
 .catalog-list li.inactive > span { color: var(--muted); text-decoration: line-through; }
