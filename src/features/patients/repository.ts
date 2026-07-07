@@ -1,16 +1,16 @@
 import { supabase } from "@/lib/supabase-client";
 import type { Patient } from "./mock-data";
 
-const columns = "id, identifier, full_name, birth_date, sex, phone, privacy_consent_at, address, comuna, email, allergies, morbid_history, prevision";
+const columns = "id, identifier, identifier_type, full_name, birth_date, sex, phone, privacy_consent_at, address, comuna, email, allergies, morbid_history, prevision";
 
 type PatientRow = {
-  id: string; identifier: string; full_name: string; birth_date: string; sex: Patient["sex"]; phone: string;
+  id: string; identifier: string; identifier_type: Patient["identifierType"]; full_name: string; birth_date: string; sex: Patient["sex"]; phone: string;
   privacy_consent_at: string | null; address: string; comuna: string; email: string; allergies: string; morbid_history: string; prevision: string;
 };
 
 function mapPatient(row: PatientRow): Patient {
   return {
-    id: row.id, identifier: row.identifier, name: row.full_name, birthDate: row.birth_date, sex: row.sex, phone: row.phone,
+    id: row.id, identifier: row.identifier, identifierType: row.identifier_type ?? "run", name: row.full_name, birthDate: row.birth_date, sex: row.sex, phone: row.phone,
     consentAt: row.privacy_consent_at ?? undefined,
     address: row.address ?? "", comuna: row.comuna ?? "", email: row.email ?? "", allergies: row.allergies ?? "", morbidHistory: row.morbid_history ?? "",
     prevision: row.prevision ?? "",
@@ -35,6 +35,12 @@ export async function fetchPatients() {
   return (data as PatientRow[]).map(mapPatient);
 }
 
+export async function fetchPatient(id: string) {
+  const { data, error } = await supabase.from("patients").select(columns).eq("id", id).single();
+  if (error) throw error;
+  return mapPatient(data as PatientRow);
+}
+
 export type PatientAuditEntry = { id: number; action: string; changedAt: string; actorName: string; details: Record<string, unknown> | null };
 
 /** Trazabilidad del paciente (Ley 19.628/21.719): quién, cuándo y qué cambió. Solo admins (RLS de audit_log). */
@@ -57,6 +63,7 @@ export async function fetchPatientAudit(patientId: string): Promise<PatientAudit
 export async function createPatient(patient: Omit<Patient, "id">) {
   const { data, error } = await supabase.from("patients").insert({
     identifier: patient.identifier,
+    identifier_type: patient.identifierType,
     full_name: patient.name,
     birth_date: patient.birthDate,
     sex: patient.sex,

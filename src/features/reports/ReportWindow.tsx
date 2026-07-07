@@ -94,8 +94,8 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
   }, []);
 
   useEffect(() => {
-    Promise.all([fetchAppointments(), fetchReport(appointmentId), fetchCommunications(appointmentId), fetchAddenda(appointmentId), fetchFollowUps(appointmentId)])
-      .then(([appointments, storedReport, storedCommunications, storedAddenda, storedFollowUps]) => {
+    Promise.all([fetchAppointments(), fetchReport(appointmentId), fetchCommunications(appointmentId), fetchAddenda(appointmentId), fetchFollowUps(appointmentId), fetchMyProfile()])
+      .then(([appointments, storedReport, storedCommunications, storedAddenda, storedFollowUps, profile]) => {
         const current = appointments.find((item) => item.id === appointmentId) ?? null;
         setAppointment(current);
         if (current) setPriorReports(appointments
@@ -103,14 +103,25 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
           .sort((a, b) => `${b.date}${b.startTime}`.localeCompare(`${a.date}${a.startTime}`)));
         if (storedReport) setReport(storedReport);
         setCommunications(storedCommunications); setAddenda(storedAddenda); setFollowUps(storedFollowUps);
+        setTenantId(profile.tenantId); setRole(profile.role);
       })
       .catch(() => setError("No fue posible cargar el estudio. Verifica que la migración clínica esté aplicada."))
       .finally(() => setLoading(false));
     fetchTemplates().then(setTemplates).catch(() => undefined);
     fetchMyTenant().then(setTenant).catch(() => undefined);
     fetchKeyImages(appointmentId).then(setKeyImages).catch(() => undefined);
-    fetchMyProfile().then(({ tenantId: tid, role: r }) => { setTenantId(tid); setRole(r); }).catch(() => undefined);
   }, [appointmentId]);
+
+  useEffect(() => {
+    const allowedOrigins = new Set([window.location.origin, new URL(fallbackOhifUrl, window.location.href).origin]);
+    const receiveCapture = (event: MessageEvent) => {
+      const message = event.data as { type?: string; dataUrl?: string; name?: string };
+      if (!allowedOrigins.has(event.origin) || message.type !== "agenda-key-image" || !message.dataUrl?.startsWith("data:image/") || message.dataUrl.length > 20_000_000 || report.status === "final") return;
+      fetch(message.dataUrl).then((response) => response.blob()).then((blob) => uploadCapture(new File([blob], message.name || "captura-ohif.png", { type: blob.type }))).catch(() => setError("No fue posible recibir la captura de OHIF."));
+    };
+    window.addEventListener("message", receiveCapture);
+    return () => window.removeEventListener("message", receiveCapture);
+  }, [report.status]);
 
   useEffect(() => {
     if (report.signerId) fetchSignatureUrl(report.signerId).then(setSignatureImage).catch(() => undefined);
@@ -281,7 +292,20 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
   }
 
   if (loading) return <p className="empty-state">Cargando estudio…</p>;
+  if (!role) return <p className="notice" role="alert">{error || "No fue posible verificar tu perfil."}</p>;
   if (!appointment) return <p className="notice" role="alert">{error || "Estudio no encontrado."}</p>;
+
+  const baseKeyImages = keyImages.filter((item) => !item.addendumId);
+  if (role === "operator") return <div className="report-workstation read-only-report">
+    <header className="report-workstation-header"><div><p className="eyebrow">Informe radiológico</p><h2>{appointment.patientName}</h2><p className="report-meta"><span>{appointment.date}</span><span>{appointment.modality} · {appointment.reason}</span></p></div>{report.status === "final" && <button className="text-button" type="button" onClick={() => window.print()}>Imprimir</button>}</header>
+    {report.status !== "final" ? <p className="notice">El informe definitivo aún no está disponible.</p> : <article className="card legal-content">
+      {tenant?.reportHeader && <p>{renderHeader(tenant.reportHeader, { paciente: appointment.patientName, id: appointment.patientIdentifier || "—", medico: appointment.treatingPhysician || appointment.requesterName || "—", examen: `${appointment.modality} · ${appointment.reason}`, fecha: appointment.date, institucion: tenant.name })}</p>}
+      {sections.map((section) => report[section.name] && <section key={section.name}><h3>{section.label}</h3><p>{report[section.name]}</p></section>)}
+      {baseKeyImages.length > 0 && <section><h3>Imágenes clave</h3><div className="key-images-grid">{baseKeyImages.map((item) => <figure key={item.id}>{keyImageSrc(item) && <img src={keyImageSrc(item)} alt="Imagen clave" />}{item.caption && <figcaption>{item.caption}</figcaption>}</figure>)}</div></section>}
+      {addenda.map((item, index) => <section key={item.id}><h3>Adenda {index + 1}</h3><p>{item.text}</p></section>)}
+      <footer><strong>{report.signer ? signerLabel(report.signer.name, report.signer.registration) : ""}</strong>{report.signedAt && <p>Firmado el {new Date(report.signedAt).toLocaleString("es-CL")}</p>}</footer>
+    </article>}
+  </div>;
 
   const setSection = (name: string, value: string) => setReport((current) => ({ ...current, [name]: value }));
   const viewer = appointment.studyInstanceUid && viewerBase ? `${viewerBase}/viewer?StudyInstanceUIDs=${encodeURIComponent(appointment.studyInstanceUid)}` : null;
@@ -289,7 +313,6 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
     ? `/api/pacs/handoff?next=${encodeURIComponent(`/ohif/viewer?StudyInstanceUIDs=${appointment.studyInstanceUid}`)}` : viewer;
   const detail: [string, string][] = [["Anamnesis", appointment.anamnesis || "—"], ["Hipótesis diagnóstica", appointment.diagnosticHypothesis || "—"], ...appointmentDetail(appointment).filter(([, value]) => value)];
   const acknowledgedCommunication = communications.findLast((item) => item.urgency === "critical" && item.acknowledged);
-  const baseKeyImages = keyImages.filter((item) => !item.addendumId);
 
   return <div className="report-workstation">
     <header className="report-workstation-header">
@@ -344,7 +367,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
             </form>
           </details>}
 
-          <details className="report-clinical-panel collapsible">
+          <details className="report-clinical-panel collapsible" open>
             <summary><span className="collapsible-icon">🩻</span>Imágenes clave (KIN){baseKeyImages.length > 0 && <span className="collapsible-count">{baseKeyImages.length}</span>}</summary>
             {baseKeyImages.length > 0 && <div className="key-images-grid">
               {baseKeyImages.map((item) => <figure key={item.id} className="key-image">
@@ -363,7 +386,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
             </label>}
             {report.status !== "final" && (appointment.orthancStudyId
               ? <>
-                  {!pickerInstances && <button className="text-button" type="button" disabled={pickerLoading} onClick={loadPicker}>{pickerLoading ? "Cargando imágenes…" : "…o elegir cortes del estudio (series pequeñas)"}</button>}
+                  {!pickerInstances && <button className="button secondary" type="button" disabled={pickerLoading} onClick={loadPicker}>{pickerLoading ? "Cargando imágenes…" : "Seleccionar cortes del estudio"}</button>}
                   {pickerInstances && <div className="key-images-grid picker">
                     {pickerInstances.map((instanceId) => {
                       const selected = keyImages.some((item) => item.instanceId === instanceId);

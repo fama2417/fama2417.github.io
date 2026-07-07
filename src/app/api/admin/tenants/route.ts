@@ -20,7 +20,7 @@ async function requirePlatform(request: NextRequest) {
 export async function GET(request: NextRequest) {
   const context = await requirePlatform(request);
   if ("error" in context) return context.error;
-  const { data, error } = await context.admin.from("tenants").select("id, name, active, created_at").order("name");
+  const { data, error } = await context.admin.from("tenants").select("id, name, active, created_at, pacs_institution").order("name");
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ tenants: data });
 }
@@ -29,11 +29,13 @@ export async function POST(request: NextRequest) {
   const context = await requirePlatform(request);
   if ("error" in context) return context.error;
   const { admin } = context;
-  const { name, adminEmail, adminPassword, adminName } = (await request.json()) ?? {};
-  if (!name || !adminEmail || !adminPassword || !adminName) return NextResponse.json({ error: "Datos incompletos." }, { status: 400 });
+  const { name, pacsInstitution, adminEmail, adminPassword, adminName } = (await request.json()) ?? {};
+  const tenantName = String(name ?? "").trim();
+  const pacsName = String(pacsInstitution ?? "").trim();
+  if (!tenantName || !pacsName || !adminEmail || !adminPassword || !adminName) return NextResponse.json({ error: "Datos incompletos." }, { status: 400 });
   if (String(adminPassword).length < 12) return NextResponse.json({ error: "La contraseña debe tener al menos 12 caracteres." }, { status: 400 });
 
-  const { data: tenant, error: tenantError } = await admin.from("tenants").insert({ name }).select("id").single();
+  const { data: tenant, error: tenantError } = await admin.from("tenants").insert({ name: tenantName, pacs_institution: pacsName }).select("id").single();
   if (tenantError) return NextResponse.json({ error: tenantError.message }, { status: 400 });
 
   const { data: created, error: userError } = await admin.auth.admin.createUser({ email: adminEmail, password: adminPassword, email_confirm: true });
