@@ -7,17 +7,27 @@ type TenantRow = { id: string; name: string; rut: string; address: string; phone
 
 const mapTenant = (row: TenantRow): Tenant => ({ id: row.id, name: row.name, rut: row.rut, address: row.address, phone: row.phone, logoUrl: row.logo_url, reportHeader: row.report_header ?? "", pacsInstitution: row.pacs_institution ?? "" });
 
+const tenantColumns = "id, name, rut, address, phone, logo_url, report_header, pacs_institution";
+
 export async function fetchMyTenant() {
   const auth = await supabase.auth.getUser();
   const profile = await supabase.from("profiles").select("tenant_id, active_tenant_id, platform").eq("id", auth.data.user?.id ?? "").single();
   if (profile.error) throw profile.error;
-  const { data, error } = await supabase.from("tenants").select("id, name, rut, address, phone, logo_url, report_header, pacs_institution").eq("id", effectiveTenantId(profile.data)).single();
-  if (error) throw error;
-  return mapTenant(data as TenantRow);
+  const tenantId = effectiveTenantId(profile.data);
+  const result = await supabase.from("tenants").select(tenantColumns).eq("id", tenantId).single();
+  if (!result.error) return mapTenant(result.data as TenantRow);
+  // ponytail: fallback mientras la migración de pacs_institution no esté aplicada; quitar cuando esté en producción
+  const fallback = await supabase.from("tenants").select(tenantColumns.replace(", pacs_institution", "")).eq("id", tenantId).single();
+  if (fallback.error) throw fallback.error;
+  return mapTenant(fallback.data as unknown as TenantRow);
 }
 
 export async function updateTenant(tenant: Tenant) {
-  const { error } = await supabase.from("tenants").update({ name: tenant.name, rut: tenant.rut, address: tenant.address, phone: tenant.phone, logo_url: tenant.logoUrl, report_header: tenant.reportHeader, pacs_institution: tenant.pacsInstitution.trim() }).eq("id", tenant.id);
+  const base = { name: tenant.name, rut: tenant.rut, address: tenant.address, phone: tenant.phone, logo_url: tenant.logoUrl, report_header: tenant.reportHeader };
+  const result = await supabase.from("tenants").update({ ...base, pacs_institution: tenant.pacsInstitution.trim() }).eq("id", tenant.id);
+  if (!result.error) return;
+  // ponytail: fallback si aún no existe la columna pacs_institution; quitar cuando la migración esté aplicada
+  const { error } = await supabase.from("tenants").update(base).eq("id", tenant.id);
   if (error) throw error;
 }
 
