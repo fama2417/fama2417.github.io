@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { effectiveTenantId } from "@/lib/tenant";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
@@ -13,9 +14,9 @@ async function requireAdmin(request: NextRequest) {
   const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
   const { data: caller } = await admin.auth.getUser(token);
   if (!caller.user) return { error: NextResponse.json({ error: "Sesión inválida." }, { status: 401 }) };
-  const { data: profile } = await admin.from("profiles").select("role, tenant_id").eq("id", caller.user.id).single();
+  const { data: profile } = await admin.from("profiles").select("role, platform, tenant_id, active_tenant_id").eq("id", caller.user.id).single();
   if (profile?.role !== "admin") return { error: NextResponse.json({ error: "Solo administradores." }, { status: 403 }) };
-  return { admin, tenantId: profile.tenant_id as string };
+  return { admin, tenantId: effectiveTenantId(profile) };
 }
 
 export async function GET(request: NextRequest) {

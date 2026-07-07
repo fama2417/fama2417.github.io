@@ -3,7 +3,8 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase-client";
 import type { Patient } from "./mock-data";
-import { createPatient, fetchPatients, fetchPatientAudit, type PatientAuditEntry } from "./repository";
+import { createPatient, fetchPatients, fetchPatientAudit, fetchPatientExams, type PatientAuditEntry, type PatientExam } from "./repository";
+import { appointmentStatusLabels, type AppointmentStatus } from "@/features/appointments/status";
 
 const sexLabels = { female: "Femenino", male: "Masculino", other: "Otro", unknown: "No informado" };
 const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9áéíóúñ]/g, "");
@@ -34,6 +35,7 @@ export function PatientsManager() {
   const [audit, setAudit] = useState<PatientAuditEntry[]>([]);
   const [auditError, setAuditError] = useState("");
   const [auditLoading, setAuditLoading] = useState(false);
+  const [exams, setExams] = useState<PatientExam[]>([]);
   const visiblePatients = useMemo(() => {
     const needle = normalize(query);
     return patients.filter((patient) => normalize(`${patient.identifier} ${patient.name}`).includes(needle));
@@ -55,13 +57,14 @@ export function PatientsManager() {
 
   function openPatient(patient: Patient) {
     setSelected(patient);
-    setAudit([]);
+    setAudit([]); setExams([]);
     setAuditError("");
     setAuditLoading(true);
     fetchPatientAudit(patient.id)
       .then(setAudit)
       .catch(() => setAuditError("No fue posible cargar la trazabilidad."))
       .finally(() => setAuditLoading(false));
+    fetchPatientExams(patient.id).then(setExams).catch(() => undefined);
   }
 
   async function addPatient(event: FormEvent<HTMLFormElement>) {
@@ -150,6 +153,14 @@ export function PatientsManager() {
             <div><dt>Alergias</dt><dd>{selected.allergies || "Sin alergias registradas"}</dd></div>
             <div><dt>Antecedentes mórbidos</dt><dd>{selected.morbidHistory || "Sin antecedentes registrados"}</dd></div>
           </dl>
+          <section className="audit-list" aria-label="Exámenes del paciente">
+            <h4>Exámenes ({exams.length})</h4>
+            {exams.map((exam) => <a className="workflow-entry exam-entry" key={exam.id} href={`/informe/${exam.id}`} target="_blank" rel="noreferrer">
+              <strong>{exam.date} · {exam.modality} · {exam.reason}</strong>
+              <span>{appointmentStatusLabels[exam.status as AppointmentStatus] ?? exam.status}{exam.hasImages && " · con imágenes"}{exam.reportStatus && ` · informe ${exam.reportStatus === "final" ? "definitivo" : "borrador"}`}</span>
+            </a>)}
+            {!exams.length && <p className="empty-inline">Sin exámenes registrados.</p>}
+          </section>
           <section className="audit-list" aria-label="Trazabilidad del paciente">
             <h4>Trazabilidad</h4>
             {audit.map((entry) => <div className="workflow-entry" key={entry.id}><strong>{actionLabels[entry.action] ?? entry.action}</strong><span>{new Date(entry.changedAt).toLocaleString("es-CL")} · {entry.actorName}</span><span>{describeChange(entry)}</span></div>)}

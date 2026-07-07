@@ -1,5 +1,6 @@
 import { compressOrderFile } from "@/lib/compress-image";
 import { supabase } from "@/lib/supabase-client";
+import { effectiveTenantId } from "@/lib/tenant";
 
 export type Signer = { name: string; registration: string };
 
@@ -218,9 +219,9 @@ export async function deleteReport(appointmentId: string, tenantId: string, reas
 export async function fetchMyProfile() {
   const { data: auth } = await supabase.auth.getUser();
   if (!auth.user) return { tenantId: "", role: "" };
-  const { data } = await supabase.from("profiles").select("tenant_id, role").eq("id", auth.user.id).maybeSingle();
-  const row = data as { tenant_id?: string; role?: string } | null;
-  return { tenantId: row?.tenant_id ?? "", role: row?.role ?? "" };
+  const { data } = await supabase.from("profiles").select("tenant_id, active_tenant_id, platform, role").eq("id", auth.user.id).maybeSingle();
+  const row = data as { tenant_id?: string; active_tenant_id?: string; platform?: boolean; role?: string } | null;
+  return { tenantId: effectiveTenantId(row ?? {}), role: row?.role ?? "" };
 }
 
 export async function updateFollowUpStatus(id: string, status: FollowUpStatus) {

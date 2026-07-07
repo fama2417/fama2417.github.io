@@ -41,6 +41,9 @@ button:disabled { cursor: wait; opacity: 0.65; }
 .session-identity { display: flex; flex-direction: column; text-align: right; }
 .session-identity strong { color: var(--text); font-weight: 600; }
 .session-identity span { font-size: 0.72rem; }
+.tenant-switcher { align-items: center; color: var(--muted); display: flex; gap: 6px; }
+.tenant-switcher select { background: var(--surface); border: 1px solid var(--border); border-radius: 4px; color: var(--text); padding: 3px 6px; }
+.session-bar .form-error { color: var(--danger); }
 .session-bar button { background: transparent; border: 0; color: var(--primary); cursor: pointer; font-weight: 700; }
 
 /* Barra superior con pestañas (disposición tipo PACS) */
@@ -405,6 +408,11 @@ body:has(.report-workstation) .app-shell { flex: 1; min-height: 0; }
 /* Imágenes clave (KIN) */
 .capture-upload { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; }
 .capture-upload .button { cursor: pointer; }
+.key-image-dropzone { border: 1px dashed var(--report-accent); border-radius: 8px; cursor: pointer; display: grid; gap: 4px; padding: 14px; text-align: center; }
+.key-image-dropzone:hover { background: rgba(53, 195, 181, 0.08); }
+.key-image-dropzone strong { color: var(--report-accent); font-size: 0.85rem; }
+.exam-entry { color: var(--text); text-decoration: none; }
+.exam-entry:hover { background: rgba(255, 255, 255, 0.07); }
 .key-images-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
 .key-images-grid img { background: #000; border-radius: 6px; display: block; height: 96px; object-fit: contain; width: 100%; }
 .key-images-grid .key-image { display: grid; gap: 4px; margin: 0; }
