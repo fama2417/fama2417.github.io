@@ -22,6 +22,15 @@ const trustedAssetUrl = (value: string) => {
 const orthancFetch = (path: string, init?: RequestInit) =>
   fetch(`${orthancUrl}${path}`, { ...init, headers: { Authorization: `Basic ${Buffer.from(orthancCreds).toString("base64")}`, ...(init?.headers ?? {}) } });
 
+type LinkedStudy = { orthanc_study_id: string | null; study_instance_uid: string | null };
+async function resolveOrthancStudyId(study?: LinkedStudy | null) {
+  if (study?.orthanc_study_id) return study.orthanc_study_id;
+  if (!study?.study_instance_uid) return "";
+  const found = await orthancFetch("/tools/find", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ Level: "Study", Query: { StudyInstanceUID: study.study_instance_uid }, Limit: 1 }) });
+  if (!found.ok) throw new Error(`PACS no disponible (${found.status}).`);
+  return ((await found.json()) as string[])[0] ?? "";
+}
+
 /** Borra del estudio Orthanc las series PDF del informe (evita duplicados al re-archivar y al eliminar el informe). */
 async function deleteReportPdfSeries(orthancStudyId: string) {
   const study = await orthancFetch(`/studies/${encodeURIComponent(orthancStudyId)}`);
@@ -46,8 +55,8 @@ async function studyOf(request: NextRequest, appointmentId: string) {
   if (!auth.user) return { error: NextResponse.json({ error: "No autenticado." }, { status: 401 }) };
   const { data: profile } = await db.from("profiles").select("role").eq("id", auth.user.id).single();
   if (profile?.role !== "admin") return { error: NextResponse.json({ error: "Solo administradores pueden eliminar el PDF del PACS." }, { status: 403 }) };
-  const { data } = await db.from("appointments").select("study:imaging_studies(orthanc_study_id)").eq("id", appointmentId).maybeSingle();
-  const orthancStudyId = (data as unknown as { study: { orthanc_study_id: string | null } | null } | null)?.study?.orthanc_study_id ?? "";
+  const { data } = await db.from("appointments").select("study:imaging_studies(orthanc_study_id, study_instance_uid)").eq("id", appointmentId).maybeSingle();
+  const orthancStudyId = await resolveOrthancStudyId((data as unknown as { study: LinkedStudy | null } | null)?.study);
   return { orthancStudyId };
 }
 
@@ -56,9 +65,9 @@ export async function DELETE(request: NextRequest) {
   if (!orthancUrl || !orthancCreds) return NextResponse.json({ error: "PACS sin configurar en el servidor." }, { status: 501 });
   const appointmentId = request.nextUrl.searchParams.get("appointmentId") ?? "";
   if (!appointmentId) return NextResponse.json({ error: "Falta appointmentId." }, { status: 400 });
-  const ctx = await studyOf(request, appointmentId);
-  if ("error" in ctx) return ctx.error;
   try {
+    const ctx = await studyOf(request, appointmentId);
+    if ("error" in ctx) return ctx.error;
     if (ctx.orthancStudyId) await deleteReportPdfSeries(ctx.orthancStudyId);
   } catch (cause) {
     return NextResponse.json({ error: cause instanceof Error ? cause.message : "No fue posible eliminar el PDF del PACS." }, { status: 502 });
@@ -83,7 +92,7 @@ export async function POST(request: NextRequest) {
 
   const [report, appointment, tenant, keyImagesResult, followUpsResult, communicationsResult] = await Promise.all([
     db.from("radiology_reports").select("clinical_indication, technique, comparison, findings, impression, status, critical_finding, critical_finding_type, signed_at, signed_by, signer_name, signer_registration").eq("appointment_id", appointmentId).maybeSingle(),
-    db.from("appointments").select("appointment_date, modality, reason, treating_physician, requester_name, patient:patients(full_name, identifier), study:imaging_studies(orthanc_study_id)").eq("id", appointmentId).maybeSingle(),
+    db.from("appointments").select("appointment_date, modality, reason, treating_physician, requester_name, patient:patients(full_name, identifier), study:imaging_studies(orthanc_study_id, study_instance_uid)").eq("id", appointmentId).maybeSingle(),
     db.from("tenants").select("name, rut, address, phone, report_header, logo_url").eq("id", tenantId).maybeSingle(),
     db.from("report_key_images").select("instance_id, caption").eq("appointment_id", appointmentId).order("created_at"),
     db.from("report_follow_ups").select("recommendation, due_date, status").eq("appointment_id", appointmentId).order("due_date"),
@@ -95,9 +104,11 @@ export async function POST(request: NextRequest) {
   const followUps = (followUpsResult.data ?? []) as { recommendation: string; due_date: string; status: string }[];
   const acknowledged = ((communicationsResult.data ?? []) as { recipient: string; channel: string; communicated_at: string; acknowledged: boolean; urgency: string }[]).filter((c) => c.urgency === "critical" && c.acknowledged).at(-1);
   const reportRow = report.data;
-  const appointmentRow = appointment.data as unknown as { appointment_date: string; modality: string; reason: string; treating_physician: string; requester_name: string; patient: { full_name: string; identifier: string } | null; study: { orthanc_study_id: string | null } | null } | null;
+  const appointmentRow = appointment.data as unknown as { appointment_date: string; modality: string; reason: string; treating_physician: string; requester_name: string; patient: { full_name: string; identifier: string } | null; study: LinkedStudy | null } | null;
   if (!reportRow || reportRow.status !== "final" || !appointmentRow) return NextResponse.json({ error: "No hay informe definitivo para archivar." }, { status: 409 });
-  const orthancStudyId = appointmentRow.study?.orthanc_study_id;
+  let orthancStudyId = "";
+  try { orthancStudyId = await resolveOrthancStudyId(appointmentRow.study); }
+  catch (cause) { return NextResponse.json({ error: cause instanceof Error ? cause.message : "PACS no disponible." }, { status: 502 }); }
   if (!orthancStudyId) return NextResponse.json({ error: "El estudio no tiene imágenes vinculadas en el PACS; el PDF no se archivó." }, { status: 409 });
 
   // --- PDF ---
