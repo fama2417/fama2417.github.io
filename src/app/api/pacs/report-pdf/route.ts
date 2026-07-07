@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { pdfSafeText } from "@/lib/safe-text";
+import { effectiveTenantId } from "@/lib/tenant";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? "";
@@ -73,8 +74,9 @@ export async function POST(request: NextRequest) {
   const db = createClient(supabaseUrl, publishableKey, { global: { headers: { Authorization: `Bearer ${token}` } }, auth: { persistSession: false, autoRefreshToken: false } });
   const { data: auth } = await db.auth.getUser(token);
   if (!auth.user) return NextResponse.json({ error: "No autenticado." }, { status: 401 });
-  const { data: profile } = await db.from("profiles").select("role").eq("id", auth.user.id).single();
+  const { data: profile } = await db.from("profiles").select("role, tenant_id, active_tenant_id, platform").eq("id", auth.user.id).single();
   if (!profile || !["admin", "radiologist"].includes(profile.role)) return NextResponse.json({ error: "Solo administración o radiología pueden archivar informes." }, { status: 403 });
+  const tenantId = effectiveTenantId(profile);
 
   const { appointmentId } = (await request.json().catch(() => ({}))) ?? {};
   if (!appointmentId) return NextResponse.json({ error: "Falta appointmentId." }, { status: 400 });
@@ -82,7 +84,7 @@ export async function POST(request: NextRequest) {
   const [report, appointment, tenant, keyImagesResult, followUpsResult, communicationsResult] = await Promise.all([
     db.from("radiology_reports").select("clinical_indication, technique, comparison, findings, impression, status, critical_finding, critical_finding_type, signed_at, signed_by, signer_name, signer_registration").eq("appointment_id", appointmentId).maybeSingle(),
     db.from("appointments").select("appointment_date, modality, reason, treating_physician, requester_name, patient:patients(full_name, identifier), study:imaging_studies(orthanc_study_id)").eq("id", appointmentId).maybeSingle(),
-    db.from("tenants").select("name, rut, address, phone, report_header, logo_url").maybeSingle(),
+    db.from("tenants").select("name, rut, address, phone, report_header, logo_url").eq("id", tenantId).maybeSingle(),
     db.from("report_key_images").select("instance_id, caption").eq("appointment_id", appointmentId).order("created_at"),
     db.from("report_follow_ups").select("recommendation, due_date, status").eq("appointment_id", appointmentId).order("due_date"),
     db.from("report_communications").select("recipient, channel, communicated_at, acknowledged, urgency").eq("appointment_id", appointmentId).order("communicated_at"),
