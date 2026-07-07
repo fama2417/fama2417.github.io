@@ -1,6 +1,8 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
+import html2canvas from "html2canvas";
+import { PDFDocument } from "pdf-lib";
 import type { Appointment } from "@/features/appointments/mock-data";
 import { fetchAppointments, orderFileUrl } from "@/features/appointments/repository";
 import { appointmentStatusLabels } from "@/features/appointments/status";
@@ -72,6 +74,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
   const [keyImages, setKeyImages] = useState<ReportKeyImage[]>([]);
   const [captureUrls, setCaptureUrls] = useState<Record<string, string>>({});
   const [role, setRole] = useState<string>("");
+  const printRef = useRef<HTMLDivElement>(null);
   const [tenantId, setTenantId] = useState<string>("");
 
   useEffect(() => {
@@ -125,14 +128,33 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
     if (report.signerId) fetchSignatureUrl(report.signerId).then(setSignatureImage).catch(() => undefined);
   }, [report.signerId]);
 
-  /** Genera el PDF del informe firmado y lo archiva como serie DICOM junto a las imágenes del estudio. */
+  /**
+   * Archiva en el PACS EXACTAMENTE el mismo informe que se imprime: rasteriza el print-sheet
+   * (única fuente de verdad) y arma el PDF, en vez de reconstruirlo aparte.
+   */
   async function archivePdfInPacs() {
     try {
+      const node = printRef.current;
+      if (!node) throw new Error("sin hoja");
+      const canvas = await html2canvas(node, {
+        useCORS: true, backgroundColor: "#ffffff", scale: 2,
+        onclone: (doc) => { const sheet = doc.querySelector(".print-sheet") as HTMLElement | null; if (sheet) sheet.setAttribute("style", "display:block;position:static;width:794px;padding:24px;background:#fff;color:#000;"); },
+      });
+      const pdf = await PDFDocument.create();
+      const embedded = await pdf.embedPng(canvas.toDataURL("image/png"));
+      const pageW = 595, pageH = 842, margin = 24, usableW = pageW - margin * 2;
+      const scaledH = embedded.height * (usableW / embedded.width), contentH = pageH - margin * 2;
+      // ponytail: recorta el alto en páginas A4 dibujando la imagen desplazada; suficiente para informes de 1-3 páginas
+      for (let offset = 0; offset < scaledH || offset === 0; offset += contentH) {
+        pdf.addPage([pageW, pageH]).drawImage(embedded, { x: margin, y: pageH - margin - scaledH + offset, width: usableW, height: scaledH });
+      }
+      const pdfBase64 = btoa(String.fromCharCode(...new Uint8Array(await pdf.save())));
+
       const { data } = await supabase.auth.getSession();
       const response = await fetch("/api/pacs/report-pdf", {
         method: "POST",
         headers: { Authorization: `Bearer ${data.session?.access_token ?? ""}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ appointmentId }),
+        body: JSON.stringify({ appointmentId, pdfBase64 }),
       });
       const payload = await response.json().catch(() => ({}));
       setNotice(response.ok ? "Informe firmado; PDF archivado en el PACS." : `Informe firmado. ${payload.error ?? "No fue posible archivar el PDF en el PACS."}`);
@@ -414,7 +436,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
       <section className="viewer-pane" aria-label="Visor de imágenes">{fullScreen ? <iframe src={fullScreen} title="Visor OHIF" allow="fullscreen" /> : <p className="empty-state">Este estudio aún no tiene imágenes vinculadas en el PACS.</p>}</section>
     </div>
 
-    <div className="print-sheet" aria-hidden="true">
+    <div className="print-sheet" aria-hidden="true" ref={printRef}>
       <header>{tenant?.logoUrl && <img src={tenant.logoUrl} alt="" />}<div><h1>{tenant?.name ?? "Informe radiológico"}</h1><p>{[tenant?.rut && `RUT ${tenant.rut}`, tenant?.address, tenant?.phone].filter(Boolean).join(" · ")}</p></div></header>
       <h2>Informe radiológico</h2>
       {tenant?.reportHeader

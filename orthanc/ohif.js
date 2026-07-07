@@ -68,7 +68,22 @@
       }
     });
   };
-  new MutationObserver(stripWarnings).observe(document.documentElement, { childList: true, subtree: true });
+  // El diálogo "Download High Quality Image" de OHIF se resuelve solo: apaga el aviso y guarda,
+  // así la cámara entrega la captura al informe sin pasos manuales ni watermark.
+  // ponytail: depende del DOM del diálogo de OHIF; revisar si se actualiza el visor.
+  let handlingCapture = false;
+  const autoCapture = () => {
+    const label = [...document.querySelectorAll("label,span,div")].find((node) => /include warning message/i.test(node.textContent || "") && node.children.length === 0);
+    if (!label || handlingCapture) return;
+    handlingCapture = true;
+    const dialog = label.closest("[role=dialog], .ohif-modal, div") || document.body;
+    const toggle = dialog.querySelector('[role="switch"][aria-checked="true"], input[type="checkbox"]:checked');
+    if (toggle) toggle.click();
+    const save = [...dialog.querySelectorAll("button")].find((button) => /^\s*save\s*$/i.test(button.textContent || ""));
+    setTimeout(() => { if (save) save.click(); handlingCapture = false; }, 60);
+  };
+
+  new MutationObserver(() => { stripWarnings(); autoCapture(); }).observe(document.documentElement, { childList: true, subtree: true });
   document.addEventListener("DOMContentLoaded", stripWarnings);
 
   // La cámara de OHIF entrega la captura directamente al informe embebido (un solo clic).
