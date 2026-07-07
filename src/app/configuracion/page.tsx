@@ -1,8 +1,6 @@
 import { AppShell } from "@/components/AppShell";
 import { RequireRole } from "@/components/RequireRole";
-import { CatalogManager } from "@/features/catalog/CatalogManager";
 import { TemplatesManager } from "@/features/reports/TemplatesManager";
-import { ScheduleManager } from "@/features/schedule/ScheduleManager";
 import { ParametryManager } from "@/features/scheduling/ParametryManager";
 import { ResourceWizard } from "@/features/scheduling/ResourceWizard";
 import { InstitutionSettings } from "@/features/tenant/InstitutionSettings";
@@ -22,8 +20,6 @@ export default function SettingsPage() {
       <UsersManager />
       <ParametryManager />
       <ResourceWizard />
-      <CatalogManager />
-      <ScheduleManager />
       <TemplatesManager />
       <TenantsManager />
       <section className="grid two-columns">
