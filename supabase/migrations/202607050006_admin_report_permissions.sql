@@ -1,15 +1,18 @@
 -- Administradores y radiólogos comparten las acciones de la ventana de informe.
-drop policy "radiologists record report communications" on public.report_communications;
+drop policy if exists "radiologists record report communications" on public.report_communications;
+drop policy if exists "report staff record report communications" on public.report_communications;
 create policy "report staff record report communications" on public.report_communications for insert to authenticated
 with check (tenant_id = (select private.current_tenant()) and (select private.current_role()) in ('admin', 'radiologist')
   and exists (select 1 from public.appointments a where a.id = appointment_id and a.tenant_id = (select private.current_tenant())));
 
-drop policy "radiologists sign report addenda" on public.report_addenda;
+drop policy if exists "radiologists sign report addenda" on public.report_addenda;
+drop policy if exists "report staff sign report addenda" on public.report_addenda;
 create policy "report staff sign report addenda" on public.report_addenda for insert to authenticated
 with check (tenant_id = (select private.current_tenant()) and (select private.current_role()) in ('admin', 'radiologist')
   and exists (select 1 from public.appointments a where a.id = appointment_id and a.tenant_id = (select private.current_tenant())));
 
-drop policy "radiologists create report follow ups" on public.report_follow_ups;
+drop policy if exists "radiologists create report follow ups" on public.report_follow_ups;
+drop policy if exists "report staff create report follow ups" on public.report_follow_ups;
 create policy "report staff create report follow ups" on public.report_follow_ups for insert to authenticated
 with check (tenant_id = (select private.current_tenant()) and (select private.current_role()) in ('admin', 'radiologist')
   and exists (select 1 from public.appointments a where a.id = appointment_id and a.tenant_id = (select private.current_tenant())));

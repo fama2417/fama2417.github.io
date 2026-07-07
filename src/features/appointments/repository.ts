@@ -18,7 +18,6 @@ type AppointmentRow = {
   assignee?: { full_name: string } | null;
 };
 
-const baseColumns = "id, patient_id, practitioner_name, location_name, appointment_date, start_time, end_time, status, reason, modality, patient:patients(full_name, identifier, prevision), study:imaging_studies(study_instance_uid, orthanc_study_id)";
 const columns = "id, patient_id, practitioner_name, location_name, appointment_date, start_time, end_time, status, reason, modality, branch, service, specialty, procedure_code, treating_physician, order_date, anesthesia, contrast, priority, payment_order, tags, anamnesis, diagnostic_hypothesis, comment, requester_type, requester_name, requester_run, requester_email, pickup_name, pickup_run, pickup_phone, origin_type, origin_desc, status_reason, order_file, assigned_to, patient:patients(full_name, identifier, prevision), study:imaging_studies(study_instance_uid, orthanc_study_id), report:radiology_reports(status, critical_finding), followups:report_follow_ups(status), assignee:profiles!appointments_assigned_to_fkey(full_name)";
 
 const mapAppointment = (row: AppointmentRow): Appointment => ({
@@ -109,11 +108,9 @@ const toRow = (appointment: Appointment) => ({
 });
 
 export async function fetchAppointments() {
-  const result = await supabase.from("appointments").select(columns).order("appointment_date").order("start_time");
-  if (!result.error) return (result.data as unknown as AppointmentRow[]).map(mapAppointment);
-  const fallback = await supabase.from("appointments").select(baseColumns).order("appointment_date").order("start_time");
-  if (fallback.error) throw fallback.error;
-  return (fallback.data as unknown as AppointmentRow[]).map(mapAppointment);
+  const { data, error } = await supabase.from("appointments").select(columns).order("appointment_date").order("start_time");
+  if (error) throw error;
+  return (data as unknown as AppointmentRow[]).map(mapAppointment);
 }
 
 export async function assignAppointment(id: string, profileId: string | null) {

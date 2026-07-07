@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase-client";
+import { csvCell } from "@/lib/safe-text";
 import type { UnmatchedStudy } from "@/lib/orthanc";
 import { fetchPatients } from "@/features/patients/repository";
 import type { Patient } from "@/features/patients/mock-data";
@@ -83,7 +84,7 @@ export function Worklist() {
       if (nextRole === "admin") { fetchRadiologists().then(setRadiologists); loadUnmatched(); }
     });
     const stored = localStorage.getItem("worklist-columns");
-    if (stored) setColumns((JSON.parse(stored) as Column[]).filter((column) => COLUMNS.includes(column)));
+    if (stored) try { setColumns((JSON.parse(stored) as Column[]).filter((column) => COLUMNS.includes(column))); } catch { localStorage.removeItem("worklist-columns"); }
     const savedFilters = loadSaved();
     setSaved(savedFilters);
     const preset = savedFilters.find((item) => item.isDefault);
@@ -178,9 +179,13 @@ export function Worklist() {
   }
 
   async function openOrder(path: string) {
+    const popup = window.open("about:blank", "_blank");
     try {
-      window.open(await orderFileUrl(path), "_blank");
+      const url = await orderFileUrl(path);
+      if (popup) { popup.opener = null; popup.location.href = url; }
+      else window.location.href = url;
     } catch {
+      popup?.close();
       setError("No fue posible abrir la orden adjunta.");
     }
   }
@@ -207,7 +212,7 @@ export function Worklist() {
   function exportCsv() {
     const header = ["Fecha", "Hora", "Paciente", "ID Paciente", "Previsión", "Modalidad", "Prestación", "Código", "Sala", "Profesional", "Estado", "Motivo", "Informe", "Asignado", "Prioridad"];
     const lines = worklist.map((item) => [item.date, item.startTime, item.patientName, item.patientIdentifier ?? "", item.patientPrevision ?? "", item.modality, item.reason, item.procedureCode, item.locationName, item.practitionerName, appointmentStatusLabels[item.status], item.statusReason, reportLabels[reportKey(item)], item.assigneeName ?? "", item.priority]
-      .map((value) => `"${String(value).replaceAll('"', '""')}"`).join(";"));
+      .map(csvCell).join(";"));
     const blob = new Blob(["﻿" + [header.join(";"), ...lines].join("\n")], { type: "text/csv;charset=utf-8" });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);

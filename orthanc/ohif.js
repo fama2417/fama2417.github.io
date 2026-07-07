@@ -59,45 +59,29 @@
 `;
   document.head.appendChild(theme);
 
-  // Elimina cualquier aviso "Not for diagnostic use" / "Investigational use" (también antes de capturar el viewport).
-  const stripWarnings = () => {
-    document.querySelectorAll("body *:not(script):not(style)").forEach((node) => {
-      if (node.children.length === 0 && /not for diagnostic use|investigational use/i.test(node.textContent || "")) {
-        const box = node.closest("div,section,footer,header,span");
-        (box && box !== document.body ? box : node).remove();
-      }
-    });
+  // La cámara de OHIF entrega la captura directamente al informe embebido. Se toma la descarga
+  // de la imagen (anchor download con href blob:/data:image) y se envía al padre por postMessage.
+  // Sin manipular el DOM del visor (por eso no lo brickea).
+  const sendCaptureToParent = (href, name) => {
+    fetch(href).then((response) => response.blob()).then((blob) => {
+      if (!blob.type.startsWith("image/")) return;
+      const reader = new FileReader();
+      reader.onload = () => window.parent.postMessage({ type: "agenda-key-image", dataUrl: reader.result, name: name || "captura-ohif.png" }, document.referrer ? new URL(document.referrer).origin : "*");
+      reader.readAsDataURL(blob);
+    }).catch(() => undefined);
   };
-  // El diálogo "Download High Quality Image" de OHIF se resuelve solo: apaga el aviso y guarda,
-  // así la cámara entrega la captura al informe sin pasos manuales ni watermark.
-  // ponytail: depende del DOM del diálogo de OHIF; revisar si se actualiza el visor.
-  let handlingCapture = false;
-  const autoCapture = () => {
-    const label = [...document.querySelectorAll("label,span,div")].find((node) => /include warning message/i.test(node.textContent || "") && node.children.length === 0);
-    if (!label || handlingCapture) return;
-    handlingCapture = true;
-    const dialog = label.closest("[role=dialog], .ohif-modal, div") || document.body;
-    const toggle = dialog.querySelector('[role="switch"][aria-checked="true"], input[type="checkbox"]:checked');
-    if (toggle) toggle.click();
-    const save = [...dialog.querySelectorAll("button")].find((button) => /^\s*save\s*$/i.test(button.textContent || ""));
-    setTimeout(() => { if (save) save.click(); handlingCapture = false; }, 60);
-  };
+  const isCaptureAnchor = (el) => el && el.tagName === "A" && el.download && (el.href.startsWith("blob:") || el.href.startsWith("data:image/"));
 
-  new MutationObserver(() => { stripWarnings(); autoCapture(); }).observe(document.documentElement, { childList: true, subtree: true });
-  document.addEventListener("DOMContentLoaded", stripWarnings);
+  // Cubre tanto anchor.click() como los clicks despachados (dispatchEvent): listener en captura.
+  document.addEventListener("click", (event) => {
+    if (window.parent === window) return;
+    const anchor = event.target && event.target.closest ? event.target.closest("a[download]") : null;
+    if (isCaptureAnchor(anchor)) { event.preventDefault(); event.stopPropagation(); sendCaptureToParent(anchor.href, anchor.download); }
+  }, true);
 
-  // La cámara de OHIF entrega la captura directamente al informe embebido (un solo clic).
   const nativeAnchorClick = HTMLAnchorElement.prototype.click;
   HTMLAnchorElement.prototype.click = function () {
-    if (window.parent !== window && this.download && (this.href.startsWith("blob:") || this.href.startsWith("data:image/"))) {
-      fetch(this.href).then((response) => response.blob()).then((blob) => {
-        if (!blob.type.startsWith("image/")) return nativeAnchorClick.call(this);
-        const reader = new FileReader();
-        reader.onload = () => window.parent.postMessage({ type: "agenda-key-image", dataUrl: reader.result, name: this.download || "captura-ohif.png" }, document.referrer ? new URL(document.referrer).origin : "*");
-        reader.readAsDataURL(blob);
-      }).catch(() => nativeAnchorClick.call(this));
-      return;
-    }
+    if (window.parent !== window && isCaptureAnchor(this)) { sendCaptureToParent(this.href, this.download); return; }
     nativeAnchorClick.call(this);
   };
 })();

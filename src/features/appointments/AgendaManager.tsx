@@ -154,7 +154,13 @@ export function AgendaManager() {
     setSaving(true);
     try {
       await saveAppointment(candidate, exists);
-      if (pendingOrder) candidate.orderFile = await uploadOrderFile(candidate.id, pendingOrder);
+      if (pendingOrder) {
+        try {
+          candidate.orderFile = await uploadOrderFile(candidate.id, pendingOrder);
+        } catch {
+          setNotice("La cita quedó guardada, pero no fue posible adjuntar la orden.");
+        }
+      }
       setAppointments((current) => exists ? current.map((item) => item.id === candidate.id ? candidate : item) : [...current, candidate]);
       setDraft(null);
       setPendingOrder(null);

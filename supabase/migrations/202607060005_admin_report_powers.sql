@@ -37,10 +37,13 @@ create table if not exists public.report_reopenings (
   created_at timestamptz not null default now()
 );
 alter table public.report_reopenings enable row level security;
+drop policy if exists "admins read reopenings" on public.report_reopenings;
+drop policy if exists "admins log reopenings" on public.report_reopenings;
 create policy "admins read reopenings" on public.report_reopenings for select to authenticated
 using (tenant_id = (select private.current_tenant()) and (select private.current_role()) = 'admin');
 create policy "admins log reopenings" on public.report_reopenings for insert to authenticated
 with check (tenant_id = (select private.current_tenant()) and (select private.current_role()) = 'admin');
+drop trigger if exists audit_report_reopenings on public.report_reopenings;
 create trigger audit_report_reopenings after insert on public.report_reopenings for each row execute function private.audit_change();
 
 -- 3. Firmar admin+radiólogo; admin reabre (final->draft) si registró el motivo hace <1 min

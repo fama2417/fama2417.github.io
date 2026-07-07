@@ -1,4 +1,4 @@
-import { compressOrderFile } from "@/lib/compress-image";
+import { compressImageFile } from "@/lib/compress-image";
 import { supabase } from "@/lib/supabase-client";
 import { effectiveTenantId } from "@/lib/tenant";
 
@@ -163,7 +163,7 @@ export const isCaptureKeyImage = (instanceId: string) => instanceId.includes("/"
 
 /** Sube una captura del visor (JPG/PNG, se comprime bajo 1 MB) y la registra como imagen clave. */
 export async function uploadKeyImageCapture(appointmentId: string, file: File, addendumId?: string) {
-  const compressed = await compressOrderFile(file);
+  const compressed = await compressImageFile(file);
   const path = `${appointmentId}/captura-${Date.now()}.${compressed.name.split(".").pop() || "jpg"}`;
   const { error } = await supabase.storage.from("capturas").upload(path, compressed, { upsert: true });
   if (error) throw error;
@@ -181,9 +181,10 @@ export async function updateKeyImageCaption(id: string, caption: string) {
   if (error) throw error;
 }
 
-export async function removeKeyImage(id: string) {
+export async function removeKeyImage(id: string, instanceId?: string) {
   const { error } = await supabase.from("report_key_images").delete().eq("id", id);
   if (error) throw error;
+  if (instanceId && isCaptureKeyImage(instanceId)) await supabase.storage.from("capturas").remove([instanceId]);
 }
 
 /** URL temporal de la imagen de firma del firmante (bucket privado; visible según RLS de profiles). */
@@ -196,23 +197,20 @@ export async function fetchSignatureUrl(profileId: string) {
 }
 
 /** Admin reabre un informe definitivo a borrador dejando registro del motivo (queda auditado). */
-export async function reopenReport(appointmentId: string, tenantId: string, reason: string) {
-  const { error: logError } = await supabase.from("report_reopenings").insert({ appointment_id: appointmentId, tenant_id: tenantId, action: "reopen", reason });
-  if (logError) throw logError;
-  const { data, error } = await supabase.from("radiology_reports").update({ status: "draft" }).eq("appointment_id", appointmentId).select(reportColumns).single();
+export async function reopenReport(appointmentId: string, reason: string) {
+  const { error } = await supabase.rpc("reopen_report", { p_appointment_id: appointmentId, p_reason: reason });
   if (error) throw error;
-  return mapReport(data as unknown as ReportRow);
+  const report = await fetchReport(appointmentId);
+  if (!report) throw new Error("Informe inexistente.");
+  return report;
 }
 
 /** Admin elimina el informe (sin dejar adenda) con motivo registrado; borra sus adendas e imágenes. */
-export async function deleteReport(appointmentId: string, tenantId: string, reason: string) {
-  const { error: logError } = await supabase.from("report_reopenings").insert({ appointment_id: appointmentId, tenant_id: tenantId, action: "delete", reason });
-  if (logError) throw logError;
-  // Borrar el informe primero levanta el bloqueo de inmutabilidad sobre las imágenes.
-  const { error } = await supabase.from("radiology_reports").delete().eq("appointment_id", appointmentId);
+export async function deleteReport(appointmentId: string, reason: string) {
+  const { data, error } = await supabase.rpc("delete_report", { p_appointment_id: appointmentId, p_reason: reason });
   if (error) throw error;
-  await supabase.from("report_key_images").delete().eq("appointment_id", appointmentId);
-  await supabase.from("report_addenda").delete().eq("appointment_id", appointmentId);
+  const paths = (data ?? []) as string[];
+  if (paths.length) await supabase.storage.from("capturas").remove(paths);
 }
 
 /** Tenant y rol del usuario actual (filtra por su id: un admin ve varias filas de profiles). */

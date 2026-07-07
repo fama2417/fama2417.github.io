@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase-client";
+import { compressImageFile } from "@/lib/compress-image";
 
 type ManagedUser = { id: string; email: string; full_name: string; role: string; tenant_id: string; professional_registration: string; signature_url: string };
 type TenantOption = { id: string; name: string };
@@ -94,8 +95,9 @@ export function UsersManager() {
     if (!file) return;
     setError("");
     try {
-      const path = `${user.id}/firma-${Date.now()}.${file.name.split(".").pop()}`;
-      const { error: uploadError } = await supabase.storage.from("firmas").upload(path, file, { upsert: true });
+      const image = await compressImageFile(file);
+      const path = `${user.id}/firma-${Date.now()}.${image.name.split(".").pop()}`;
+      const { error: uploadError } = await supabase.storage.from("firmas").upload(path, image, { upsert: true });
       if (uploadError) throw uploadError;
       await api("PATCH", { userId: user.id, role: user.role, tenantId: user.tenant_id, professionalRegistration: user.professional_registration, signaturePath: path });
       setUsers((current) => current.map((item) => item.id === user.id ? { ...item, signature_url: path } : item));
