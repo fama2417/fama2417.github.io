@@ -59,6 +59,18 @@
 `;
   document.head.appendChild(theme);
 
+  // Elimina cualquier aviso "Not for diagnostic use" / "Investigational use" (también antes de capturar el viewport).
+  const stripWarnings = () => {
+    document.querySelectorAll("body *:not(script):not(style)").forEach((node) => {
+      if (node.children.length === 0 && /not for diagnostic use|investigational use/i.test(node.textContent || "")) {
+        const box = node.closest("div,section,footer,header,span");
+        (box && box !== document.body ? box : node).remove();
+      }
+    });
+  };
+  new MutationObserver(stripWarnings).observe(document.documentElement, { childList: true, subtree: true });
+  document.addEventListener("DOMContentLoaded", stripWarnings);
+
   // La cámara de OHIF entrega la captura directamente al informe embebido (un solo clic).
   const nativeAnchorClick = HTMLAnchorElement.prototype.click;
   HTMLAnchorElement.prototype.click = function () {

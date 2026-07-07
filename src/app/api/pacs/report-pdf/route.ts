@@ -10,6 +10,9 @@ const orthancCreds = process.env.ORTHANC_CREDS ?? "";
 const renderHeader = (template: string, values: Record<string, string>) =>
   template.replace(/{{\s*(\w+)\s*}}/g, (_, key: string) => values[key] ?? "");
 
+const channelLabels: Record<string, string> = { phone: "Teléfono", in_person: "Presencial", secure_message: "Mensajería segura", email: "Correo", other: "Otro" };
+const followUpLabels: Record<string, string> = { pending: "Pendiente", acknowledged: "Recibido", completed: "Realizado" };
+
 /** Genera el PDF del informe definitivo y lo adjunta al estudio en Orthanc como serie DICOM (PDF encapsulado). */
 export async function POST(request: NextRequest) {
   if (!orthancUrl || !orthancCreds) return NextResponse.json({ error: "PACS sin configurar en el servidor." }, { status: 501 });
@@ -22,13 +25,17 @@ export async function POST(request: NextRequest) {
   const { appointmentId } = (await request.json().catch(() => ({}))) ?? {};
   if (!appointmentId) return NextResponse.json({ error: "Falta appointmentId." }, { status: 400 });
 
-  const [report, appointment, tenant, keyImagesResult] = await Promise.all([
-    db.from("radiology_reports").select("clinical_indication, technique, comparison, findings, impression, status, critical_finding, critical_finding_type, signed_at, signer_name, signer_registration").eq("appointment_id", appointmentId).maybeSingle(),
+  const [report, appointment, tenant, keyImagesResult, followUpsResult, communicationsResult] = await Promise.all([
+    db.from("radiology_reports").select("clinical_indication, technique, comparison, findings, impression, status, critical_finding, critical_finding_type, signed_at, signed_by, signer_name, signer_registration").eq("appointment_id", appointmentId).maybeSingle(),
     db.from("appointments").select("appointment_date, modality, reason, treating_physician, requester_name, patient:patients(full_name, identifier), study:imaging_studies(orthanc_study_id)").eq("id", appointmentId).maybeSingle(),
-    db.from("tenants").select("name, rut, address, phone, report_header").maybeSingle(),
+    db.from("tenants").select("name, rut, address, phone, report_header, logo_url").maybeSingle(),
     db.from("report_key_images").select("instance_id, caption").eq("appointment_id", appointmentId).order("created_at"),
+    db.from("report_follow_ups").select("recommendation, due_date, status").eq("appointment_id", appointmentId).order("due_date"),
+    db.from("report_communications").select("recipient, channel, communicated_at, acknowledged, urgency").eq("appointment_id", appointmentId).order("communicated_at"),
   ]);
   const keyImages = (keyImagesResult.data ?? []) as { instance_id: string; caption: string }[];
+  const followUps = (followUpsResult.data ?? []) as { recommendation: string; due_date: string; status: string }[];
+  const acknowledged = ((communicationsResult.data ?? []) as { recipient: string; channel: string; communicated_at: string; acknowledged: boolean; urgency: string }[]).filter((c) => c.urgency === "critical" && c.acknowledged).at(-1);
   const reportRow = report.data;
   const appointmentRow = appointment.data as unknown as { appointment_date: string; modality: string; reason: string; treating_physician: string; requester_name: string; patient: { full_name: string; identifier: string } | null; study: { orthanc_study_id: string | null } | null } | null;
   if (!reportRow || reportRow.status !== "final" || !appointmentRow) return NextResponse.json({ error: "No hay informe definitivo para archivar." }, { status: 409 });
@@ -39,6 +46,8 @@ export async function POST(request: NextRequest) {
   const pdf = await PDFDocument.create();
   const font = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const embedImage = async (bytes: ArrayBuffer) => { try { return await pdf.embedPng(bytes); } catch { try { return await pdf.embedJpg(bytes); } catch { return null; } } };
+  const basicAuth = `Basic ${Buffer.from(orthancCreds).toString("base64")}`;
   let page = pdf.addPage([595, 842]); // A4
   let y = 800;
   const margin = 50;
@@ -69,8 +78,14 @@ export async function POST(request: NextRequest) {
     body.split("\n").filter(Boolean).forEach((line) => writeLine(line));
   };
 
-  const tenantRow = tenant.data as { name?: string; rut?: string; address?: string; phone?: string; report_header?: string } | null;
+  const tenantRow = tenant.data as { name?: string; rut?: string; address?: string; phone?: string; report_header?: string; logo_url?: string } | null;
   const patientName = appointmentRow.patient?.full_name ?? "Paciente";
+  if (tenantRow?.logo_url) {
+    try {
+      const logo = await embedImage(await (await fetch(tenantRow.logo_url)).arrayBuffer());
+      if (logo) { const scale = Math.min(120 / logo.width, 48 / logo.height); page.drawImage(logo, { x: 595 - margin - logo.width * scale, y: y - logo.height * scale + 8, width: logo.width * scale, height: logo.height * scale }); }
+    } catch { /* logo opcional */ }
+  }
   writeLine(tenantRow?.name ?? "Informe radiológico", { bold: true, size: 14 });
   writeLine([tenantRow?.rut && `RUT ${tenantRow.rut}`, tenantRow?.address, tenantRow?.phone].filter(Boolean).join(" · "), { size: 8 });
   y -= 8;
@@ -85,7 +100,7 @@ export async function POST(request: NextRequest) {
     writeLine(`Paciente: ${patientName} · ID: ${appointmentRow.patient?.identifier ?? "—"}`);
     writeLine(`Examen: ${appointmentRow.modality} · ${appointmentRow.reason} · Fecha: ${appointmentRow.appointment_date}`);
   }
-  if (reportRow.critical_finding) writeLine(`⚠ HALLAZGO CRÍTICO${reportRow.critical_finding_type ? `: ${reportRow.critical_finding_type}` : ""}`, { bold: true });
+  if (reportRow.critical_finding) writeLine(`⚠ HALLAZGO CRÍTICO${reportRow.critical_finding_type ? `: ${reportRow.critical_finding_type}` : ""}${acknowledged ? ` · Comunicado a ${acknowledged.recipient} por ${channelLabels[acknowledged.channel] ?? acknowledged.channel}, ${new Date(acknowledged.communicated_at).toLocaleString("es-CL", { timeZone: "America/Santiago" })}.` : ""}`, { bold: true });
   writeBlock("Indicación clínica", reportRow.clinical_indication);
   writeBlock("Técnica", reportRow.technique);
   writeBlock("Comparación", reportRow.comparison);
@@ -95,7 +110,6 @@ export async function POST(request: NextRequest) {
   if (keyImages.length) {
     y -= 6;
     writeLine("IMÁGENES CLAVE", { bold: true, size: 10 });
-    const basicAuth = `Basic ${Buffer.from(orthancCreds).toString("base64")}`;
     const cellWidth = (width - 10) / 2;
     for (let index = 0; index < keyImages.length; index += 2) {
       const pair = keyImages.slice(index, index + 2);
@@ -134,7 +148,25 @@ export async function POST(request: NextRequest) {
       y -= rowHeight + 24;
     }
   }
-  y -= 10;
+  if (followUps.length) {
+    y -= 6;
+    writeLine("RECOMENDACIONES Y SEGUIMIENTO", { bold: true, size: 10 });
+    followUps.forEach((item) => writeLine(`${item.recommendation} · Plazo ${new Date(`${item.due_date}T00:00:00`).toLocaleDateString("es-CL")} · ${followUpLabels[item.status] ?? item.status}`));
+  }
+
+  y -= 16;
+  // Firma escaneada del firmante (bucket privado "firmas"), igual que en el informe impreso.
+  if (reportRow.signed_by) {
+    try {
+      const { data: signer } = await db.from("profiles").select("signature_url").eq("id", reportRow.signed_by).maybeSingle();
+      const path = (signer as { signature_url?: string } | null)?.signature_url;
+      if (path) {
+        const file = await db.storage.from("firmas").download(path);
+        const image = file.data ? await embedImage(await file.data.arrayBuffer()) : null;
+        if (image) { const scale = Math.min(160 / image.width, 50 / image.height); if (y - image.height * scale < 60) { page = pdf.addPage([595, 842]); y = 800; } page.drawImage(image, { x: margin, y: y - image.height * scale, width: image.width * scale, height: image.height * scale }); y -= image.height * scale + 4; }
+      }
+    } catch { /* firma opcional */ }
+  }
   writeLine([reportRow.signer_name, reportRow.signer_registration].filter(Boolean).join(" · "), { bold: true });
   writeLine(`Firmado electrónicamente · ${reportRow.signed_at ? new Date(reportRow.signed_at).toLocaleString("es-CL", { timeZone: "America/Santiago" }) : ""}`, { size: 8 });
 

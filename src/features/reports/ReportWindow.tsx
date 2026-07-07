@@ -70,8 +70,6 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
   const [saving, setSaving] = useState(false);
   const [signatureImage, setSignatureImage] = useState<string | null>(null);
   const [keyImages, setKeyImages] = useState<ReportKeyImage[]>([]);
-  const [pickerInstances, setPickerInstances] = useState<string[] | null>(null);
-  const [pickerLoading, setPickerLoading] = useState(false);
   const [captureUrls, setCaptureUrls] = useState<Record<string, string>>({});
   const [role, setRole] = useState<string>("");
   const [tenantId, setTenantId] = useState<string>("");
@@ -194,21 +192,6 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
       const updated = await updateFollowUpStatus(id, status);
       setFollowUps((current) => current.map((item) => item.id === id ? updated : item));
     } catch { setError("No fue posible actualizar el seguimiento."); }
-  }
-
-  async function loadPicker() {
-    if (!appointment?.orthancStudyId) return;
-    setPickerLoading(true); setError("");
-    try {
-      const response = await fetch(`/api/pacs/studies/${appointment.orthancStudyId}/instances`);
-      if (!response.ok) throw new Error();
-      const list = (await response.json()) as { ID: string; MainDicomTags?: { InstanceNumber?: string } }[];
-      // ponytail: primeras 120 instancias del estudio; si aparecen series muy largas, el paso siguiente es marcar KOS desde el visor
-      setPickerInstances(list
-        .sort((a, b) => Number(a.MainDicomTags?.InstanceNumber ?? 0) - Number(b.MainDicomTags?.InstanceNumber ?? 0))
-        .slice(0, 120).map((item) => item.ID));
-    } catch { setError("No fue posible cargar las imágenes del estudio."); }
-    finally { setPickerLoading(false); }
   }
 
   async function toggleKeyImage(instanceId: string) {
@@ -384,19 +367,6 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
               <strong>Pega (Ctrl+V), arrastra o haz clic para agregar una imagen clave</strong>
               <span className="empty-inline">CT/MR/PET-CT: captura el corte con la cámara 📷 de OHIF (conserva las anotaciones) y suéltalo aquí — sin pasar por el escritorio si copias al portapapeles.</span>
             </label>}
-            {report.status !== "final" && (appointment.orthancStudyId
-              ? <>
-                  {!pickerInstances && <button className="button secondary" type="button" disabled={pickerLoading} onClick={loadPicker}>{pickerLoading ? "Cargando imágenes…" : "Seleccionar cortes del estudio"}</button>}
-                  {pickerInstances && <div className="key-images-grid picker">
-                    {pickerInstances.map((instanceId) => {
-                      const selected = keyImages.some((item) => item.instanceId === instanceId);
-                      return <button key={instanceId} type="button" className={selected ? "selected" : ""} title={selected ? "Quitar de imágenes clave" : "Marcar como imagen clave"} onClick={() => toggleKeyImage(instanceId)}>
-                        <img src={`/api/pacs/instances/${instanceId}/preview`} alt="" loading="lazy" />
-                      </button>;
-                    })}
-                  </div>}
-                </>
-              : <p className="empty-inline">Sin estudio vinculado en el PACS: no hay imágenes para seleccionar.</p>)}
           </details>
 
           <details className="report-clinical-panel collapsible">
