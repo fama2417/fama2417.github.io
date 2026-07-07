@@ -15,8 +15,8 @@ const modules: { href: string; icon: string; title: string; description: string;
   { href: "/agenda", icon: "📅", title: "Agenda", description: "Programar, editar y confirmar citas de imagenología.", roles: ["admin", "operator"] },
   { href: "/worklist", icon: "🩺", title: "Lista de trabajo", description: "Informar estudios junto a sus imágenes y asignar casos.", roles: ["admin", "operator", "radiologist"] },
   { href: "/pacientes", icon: "👤", title: "Pacientes", description: "Registro clínico y trazabilidad de datos personales.", roles: ["admin"] },
-  { href: "/configuracion", icon: "⚙️", title: "Configuración", description: "Institución, usuarios, plantillas y parámetros de la agenda.", roles: ["admin", "operator"] },
-  { href: "/privacidad", icon: "🔒", title: "Privacidad", description: "Política de tratamiento de datos personales (Ley 19.628).", roles: ["admin", "operator", "radiologist"] },
+  { href: "/configuracion", icon: "⚙️", title: "Configuración", description: "Institución, usuarios, plantillas y parámetros de la agenda.", roles: ["admin"] },
+  { href: "/privacidad", icon: "🔒", title: "Privacidad", description: "Política de tratamiento de datos personales (Ley 19.628).", roles: ["admin", "radiologist"] },
 ];
 
 type Stat = { label: string; value: number; hint: string; view: string; tone?: "danger" | "warning" };
@@ -33,11 +33,11 @@ export function HomeDashboard() {
     supabase.auth.getUser().then(({ data: auth }) => {
       if (!auth.user) return;
       setUid(auth.user.id);
-      supabase.from("profiles").select("full_name, role, tenant:tenants(name)").eq("id", auth.user.id).single().then(({ data }) => {
+      supabase.from("profiles").select("full_name, role, tenant:tenants!profiles_tenant_id_fkey(name), activeTenant:tenants!profiles_active_tenant_id_fkey(name)").eq("id", auth.user.id).single().then(({ data }) => {
         if (!data) return;
         setRole(data.role as Role);
         setName((data.full_name as string) ?? "");
-        setTenant((data.tenant as unknown as { name: string } | null)?.name ?? "");
+        setTenant((data.activeTenant as unknown as { name: string } | null)?.name ?? (data.tenant as unknown as { name: string } | null)?.name ?? "");
       });
     });
     fetchAppointments().then(setAppointments).catch(() => undefined).finally(() => setLoading(false));
@@ -60,7 +60,7 @@ export function HomeDashboard() {
     return base;
   }, [appointments, role, uid]);
 
-  const tiles = modules.filter((item) => !role || item.roles.includes(role));
+  const tiles = role ? modules.filter((item) => item.roles.includes(role)) : [];
 
   return <>
     <section className="hero home-hero">

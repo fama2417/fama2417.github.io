@@ -63,6 +63,7 @@
 window.config = {
   extensions: [],
   modes: [],
+  investigationalUseDialog: { option: "never" },
   whiteLabeling: {
     createLogoComponentFn: function (React) {
       return React.createElement("span", {

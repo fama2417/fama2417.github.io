@@ -238,6 +238,12 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
     if (file && report.status !== "final") { event.preventDefault(); uploadCapture(file); }
   }
 
+  function handleDrop(event: React.DragEvent) {
+    event.preventDefault();
+    const file = Array.from(event.dataTransfer.files).find((entry) => entry.type.startsWith("image/"));
+    if (file && report.status !== "final") uploadCapture(file);
+  }
+
   const [addendumFiles, setAddendumFiles] = useState<File[]>([]);
 
   async function signAddendum(event: FormEvent<HTMLFormElement>) {
@@ -350,10 +356,11 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
               </figure>)}
             </div>}
             {report.status === "final" && <p className="empty-inline">El informe está firmado: adjunta nuevas imágenes desde una adenda.</p>}
-            {report.status !== "final" && <div className="capture-upload">
-              <label className="button secondary">Subir captura del visor<input type="file" accept="image/png,image/jpeg" hidden onChange={(event) => { uploadCapture(event.target.files?.[0]); event.target.value = ""; }} /></label>
-              <span className="empty-inline">Para CT/MR/PET-CT: usa la cámara 📷 de OHIF para exportar el corte con sus anotaciones y súbelo aquí, o pégalo directo con Ctrl+V.</span>
-            </div>}
+            {report.status !== "final" && <label className="key-image-dropzone" onDrop={handleDrop} onDragOver={(event) => event.preventDefault()}>
+              <input type="file" accept="image/png,image/jpeg" hidden onChange={(event) => { uploadCapture(event.target.files?.[0]); event.target.value = ""; }} />
+              <strong>Pega (Ctrl+V), arrastra o haz clic para agregar una imagen clave</strong>
+              <span className="empty-inline">CT/MR/PET-CT: captura el corte con la cámara 📷 de OHIF (conserva las anotaciones) y suéltalo aquí — sin pasar por el escritorio si copias al portapapeles.</span>
+            </label>}
             {report.status !== "final" && (appointment.orthancStudyId
               ? <>
                   {!pickerInstances && <button className="text-button" type="button" disabled={pickerLoading} onClick={loadPicker}>{pickerLoading ? "Cargando imágenes…" : "…o elegir cortes del estudio (series pequeñas)"}</button>}

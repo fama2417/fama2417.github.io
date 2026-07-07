@@ -17,6 +17,18 @@ function mapPatient(row: PatientRow): Patient {
   };
 }
 
+export type PatientExam = { id: string; date: string; modality: string; reason: string; status: string; reportStatus?: "draft" | "final"; hasImages: boolean };
+
+/** Exámenes (citas) del paciente para la ficha, del más reciente al más antiguo. */
+export async function fetchPatientExams(patientId: string): Promise<PatientExam[]> {
+  const { data, error } = await supabase.from("appointments")
+    .select("id, appointment_date, modality, reason, status, study:imaging_studies(id), report:radiology_reports(status)")
+    .eq("patient_id", patientId).order("appointment_date", { ascending: false }).order("start_time", { ascending: false });
+  if (error) throw error;
+  return ((data ?? []) as unknown as { id: string; appointment_date: string; modality: string; reason: string; status: string; study: { id: string } | null; report: { status: "draft" | "final" } | null }[])
+    .map((row) => ({ id: row.id, date: row.appointment_date, modality: row.modality, reason: row.reason, status: row.status, reportStatus: row.report?.status, hasImages: !!row.study }));
+}
+
 export async function fetchPatients() {
   const { data, error } = await supabase.from("patients").select(columns).order("full_name");
   if (error) throw error;

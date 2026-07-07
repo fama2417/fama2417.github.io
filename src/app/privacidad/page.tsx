@@ -1,7 +1,9 @@
 import { AppShell } from "@/components/AppShell";
+import { RequireRole } from "@/components/RequireRole";
 
 export default function PrivacyPage() {
   return <AppShell>
+    <RequireRole roles={["admin", "radiologist"]}>
     <div className="page-header"><div><p className="eyebrow">Protección de datos</p><h2>Política de privacidad y tratamiento de datos de salud</h2><p>Ley N.º 19.628 sobre protección de la vida privada y Ley N.º 21.668 que la moderniza (Chile).</p></div></div>
     <article className="legal-content">
       <h3>1. Responsable del tratamiento</h3>
@@ -42,5 +44,6 @@ export default function PrivacyPage() {
       <h3>7. Incidentes de seguridad</h3>
       <p>Ante una vulneración que afecte datos personales, el responsable notificará a la autoridad y a los titulares afectados conforme al deber de reporte de la Ley 21.668, y aplicará el plan de contención y respaldo definido.</p>
     </article>
+    </RequireRole>
   </AppShell>;
 }

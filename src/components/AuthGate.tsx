@@ -3,8 +3,11 @@
 import { FormEvent, useEffect, useState } from "react";
 import type { AuthError, Session } from "@supabase/supabase-js";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase-client";
+import { effectiveTenantId } from "@/lib/tenant";
 
 const roleLabels: Record<string, string> = { admin: "Administrador", operator: "Operador", radiologist: "Radiólogo" };
+
+type Tenant = { id: string; name: string; active: boolean };
 
 const authMessage = (error: AuthError) => {
   if (error.code === "email_not_confirmed") return "El correo del usuario todavía no está confirmado.";
@@ -20,14 +23,38 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const [notice, setNotice] = useState("");
   const [recovering, setRecovering] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [profile, setProfile] = useState<{ role: string; tenant: string } | null>(null);
+  const [profile, setProfile] = useState<{ role: string; tenant: string; platform: boolean; tenantId: string } | null>(null);
+  const [tenants, setTenants] = useState<Tenant[]>([]);
 
   useEffect(() => {
     if (!session?.user.id) return setProfile(null);
-    supabase.from("profiles").select("role, tenant:tenants(name)").eq("id", session.user.id).single().then(({ data }) => {
-      if (data) setProfile({ role: data.role, tenant: (data.tenant as unknown as { name: string } | null)?.name ?? "" });
+    supabase.from("profiles").select("role, platform, tenant_id, active_tenant_id, tenant:tenants!profiles_tenant_id_fkey(name), activeTenant:tenants!profiles_active_tenant_id_fkey(name)").eq("id", session.user.id).single().then(({ data }) => {
+      if (!data) return;
+      const baseTenant = data.tenant as unknown as { name: string } | null;
+      const activeTenant = data.activeTenant as unknown as { name: string } | null;
+      setProfile({
+        role: data.role,
+        tenant: data.platform ? activeTenant?.name ?? baseTenant?.name ?? "" : baseTenant?.name ?? "",
+        platform: !!data.platform,
+        tenantId: effectiveTenantId(data),
+      });
+      // El superadmin ve todas las instituciones para cambiar entre ellas.
+      if (data.platform) fetch("/api/admin/tenants", { headers: { Authorization: `Bearer ${session.access_token}` } })
+        .then((response) => response.ok ? response.json() : { tenants: [] })
+        .then((payload) => setTenants(payload.tenants ?? []))
+        .catch(() => undefined);
     });
-  }, [session?.user.id]);
+  }, [session?.user.id, session?.access_token]);
+
+  async function switchTenant(tenantId: string) {
+    setError("");
+    const response = await fetch("/api/admin/switch-tenant", { method: "POST", headers: { Authorization: `Bearer ${session?.access_token ?? ""}`, "Content-Type": "application/json" }, body: JSON.stringify({ tenantId }) });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      return setError(payload.error ?? "No fue posible cambiar de institución.");
+    }
+    window.location.reload();
+  }
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -96,10 +123,16 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   );
 
   return <><div className="session-bar">
+    {profile?.platform && tenants.some((tenant) => tenant.active) && <label className="tenant-switcher">Institución
+      <select value={profile.tenantId} onChange={(event) => void switchTenant(event.target.value)}>
+        {tenants.filter((tenant) => tenant.active).map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name}</option>)}
+      </select>
+    </label>}
     <span className="session-identity">
       <strong>{session.user.email}</strong>
       {profile && <span>{roleLabels[profile.role] ?? profile.role}{profile.tenant && ` · ${profile.tenant}`}</span>}
     </span>
     <button type="button" onClick={() => supabase.auth.signOut()}>Cerrar sesión</button>
+    {error && <span className="form-error" role="alert">{error}</span>}
   </div>{children}</>;
 }
