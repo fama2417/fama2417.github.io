@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
+import { supabase } from "@/lib/supabase-client";
 import { fetchMyTenant, HEADER_VARIABLES, renderHeader, updateTenant, uploadLogo, type Tenant } from "./repository";
 
 const variableLabels: Record<(typeof HEADER_VARIABLES)[number], string> = { paciente: "Paciente", id: "Identificador", medico: "Médico", examen: "Examen", fecha: "Fecha", institucion: "Institución" };
@@ -10,9 +11,17 @@ export function InstitutionSettings() {
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [pacsOptions, setPacsOptions] = useState<string[]>([]);
   const headerRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => { fetchMyTenant().then(setTenant).catch(() => setError("No fue posible cargar la institución.")); }, []);
+  useEffect(() => {
+    supabase.auth.getSession()
+      .then(({ data }) => fetch("/api/pacs/institutions", { headers: { Authorization: `Bearer ${data.session?.access_token ?? ""}` } }))
+      .then((response) => response.ok ? response.json() : { institutions: [] })
+      .then((payload) => setPacsOptions(payload.institutions ?? []))
+      .catch(() => undefined);
+  }, []);
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -63,7 +72,7 @@ export function InstitutionSettings() {
         <label>Dirección<input value={tenant.address} onChange={(event) => setTenant({ ...tenant, address: event.target.value })} /></label>
         <label>Teléfono<input value={tenant.phone} onChange={(event) => setTenant({ ...tenant, phone: event.target.value })} /></label>
         <label>Logo (PNG/JPG)<input type="file" accept="image/*" onChange={(event) => pickLogo(event.target.files?.[0])} /></label>
-        <label>Institución PACS<input value={tenant.pacsInstitution} onChange={(event) => setTenant({ ...tenant, pacsInstitution: event.target.value })} placeholder="Valor DICOM InstitutionName" /><span className="empty-inline">Separa los estudios entrantes de cada cliente para FixUp.</span></label>
+        <label>Institución PACS<input list="pacs-institutions" value={tenant.pacsInstitution} onChange={(event) => setTenant({ ...tenant, pacsInstitution: event.target.value })} placeholder="Elige el InstitutionName del estudio" /><datalist id="pacs-institutions">{pacsOptions.map((option) => <option key={option} value={option} />)}</datalist><span className="empty-inline">{pacsOptions.length ? "Valores DICOM InstitutionName detectados en el PACS." : "Se completa con los estudios que existan en Orthanc."} Separa los estudios entrantes de cada cliente para FixUp.</span></label>
         <div className="span-2 template-builder">
           <div className="card-heading"><strong>Encabezado del informe</strong><button className="text-button" type="button" onClick={() => setTenant({ ...tenant, reportHeader: simpleHeader })}>Usar formato simple</button></div>
           <p>Escribe texto normal e inserta datos del informe con un clic.</p>
