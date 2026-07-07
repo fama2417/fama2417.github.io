@@ -1,5 +1,5 @@
 import { supabase } from "@/lib/supabase-client";
-import { addMinutes, commonStarts } from "./slot-math";
+import { addMinutes, runCovering, startsFittingDuration } from "./slot-math";
 
 // Nombres internos cercanos a FHIR; la UI usa etiquetas amigables (ver labels.ts).
 export type Organization = { id: string; name: string; active: boolean };
@@ -134,16 +134,19 @@ async function freeSlots(resourceId: string, from: string, to: string) {
     .filter((s) => s.bookedCount < s.capacity);
 }
 
-/** Cupos disponibles de un recurso. Composite → intersección (por hora de inicio) de sus miembros.
- *  ponytail: la intersección asume que los miembros comparten grilla de inicio; si mezclas duraciones
- *  distintas entre miembros habría que solapar por rango, no por igualdad de starts_at. */
-export async function availableSlots(resource: SchedulableResource, from: string, to: string): Promise<Slot[]> {
-  if (resource.kind !== "composite") return freeSlots(resource.id, from, to);
+/** Inicios agendables de un recurso en el rango. Con `durationMin`, solo los inicios donde la
+ *  prestación cabe en cupos base consecutivos (equipo con grilla base + prestaciones de distinta
+ *  duración). Composite → además la corrida debe existir en TODOS los miembros a la misma hora. */
+export async function availableSlots(resource: SchedulableResource, from: string, to: string, durationMin?: number): Promise<Slot[]> {
+  if (resource.kind !== "composite") {
+    const free = await freeSlots(resource.id, from, to);
+    return durationMin ? startsFittingDuration(free, durationMin) as Slot[] : free;
+  }
   const memberIds = await fetchResourceComponents(resource.id);
   if (!memberIds.length) return [];
   const perMember = await Promise.all(memberIds.map((id) => freeSlots(id, from, to)));
-  const common = commonStarts(perMember.map((slots) => slots.map((s) => s.startsAt)));
-  return perMember[0].filter((slot) => common.has(slot.startsAt));
+  return perMember[0].filter((slot) => perMember.every((member) =>
+    durationMin ? runCovering(member, slot.startsAt, durationMin) !== null : member.some((s) => s.startsAt === slot.startsAt)));
 }
 
 export async function searchPatients(term: string) {
@@ -172,24 +175,27 @@ export async function bookAppointment(input: {
 }) {
   const date = input.startsAt.slice(0, 10);
   const startTime = input.startsAt.slice(11, 16);
-  const endTime = addMinutes(startTime, input.serviceType.durationMin);
+  const duration = input.serviceType.durationMin;
+  const endTime = addMinutes(startTime, duration);
+  const dayEnd = `${date}T23:59:59+00:00`; // cupos del día desde el inicio para armar la corrida
 
-  // Resuelve los cupos a ocupar y revalida disponibilidad justo antes de reservar (evita choques).
+  // Resuelve la corrida de cupos a ocupar y revalida justo antes de reservar (evita choques).
   let slotId: string | null = null;
   let toOccupy: string[] = [];
   if (input.resource.kind === "composite") {
     const memberIds = await fetchResourceComponents(input.resource.id);
-    const perMember = await Promise.all(memberIds.map((id) => freeSlots(id, input.startsAt, input.startsAt)));
-    if (perMember.some((slots) => !slots.some((s) => s.startsAt === input.startsAt))) {
-      throw new Error("Ya no hay disponibilidad simultánea de todos los recursos en ese horario.");
+    const perMember = await Promise.all(memberIds.map((id) => freeSlots(id, input.startsAt, dayEnd)));
+    const runs = perMember.map((slots) => runCovering(slots, input.startsAt, duration));
+    if (runs.some((run) => run === null)) {
+      throw new Error("Ya no hay disponibilidad simultánea de todos los recursos por esa duración.");
     }
-    toOccupy = perMember.map((slots) => slots.find((s) => s.startsAt === input.startsAt)!.id);
+    toOccupy = runs.flatMap((run) => run!);
   } else {
-    const free = await freeSlots(input.resource.id, input.startsAt, input.startsAt);
-    const slot = free.find((s) => s.startsAt === input.startsAt);
-    if (!slot) throw new Error("El cupo ya no está disponible.");
-    slotId = slot.id;
-    toOccupy = [slot.id];
+    const free = await freeSlots(input.resource.id, input.startsAt, dayEnd);
+    const run = runCovering(free, input.startsAt, duration);
+    if (!run) throw new Error("El cupo ya no cabe (revisa disponibilidad y duración).");
+    slotId = run[0];
+    toOccupy = run;
   }
 
   const { data, error } = await supabase.from("appointments").insert({

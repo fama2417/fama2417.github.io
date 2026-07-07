@@ -142,13 +142,13 @@ export function ResourceWizard({ onCreated }: { onCreated?: () => void }) {
 
       {step === 5 && kind !== "composite" && (
         <div>
-          <p>Plantilla horaria: un bloque por día (permite jornadas partidas). Los cupos se generan según la duración.</p>
+          <p>Plantilla horaria: un bloque por día (permite jornadas partidas). La <strong>granularidad</strong> es el paso base de los cupos; una prestación más larga ocupa varios cupos consecutivos (ej. equipo con grilla de 15′ que atiende prestaciones de 30′ o 60′).</p>
           {blocks.map((b, i) => (
             <div className="clinical-form" key={i}>
               <label>Día<select value={b.weekday} onChange={(e) => setBlocks((bs) => bs.map((x, j) => j === i ? { ...x, weekday: Number(e.target.value) } : x))}>{WEEKDAYS.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}</select></label>
               <label>Abre<input type="time" value={b.startTime} onChange={(e) => setBlocks((bs) => bs.map((x, j) => j === i ? { ...x, startTime: e.target.value } : x))} /></label>
               <label>Cierra<input type="time" value={b.endTime} onChange={(e) => setBlocks((bs) => bs.map((x, j) => j === i ? { ...x, endTime: e.target.value } : x))} /></label>
-              <label>Duración cupo (min)<input type="number" min={5} value={b.slotDurationMin} onChange={(e) => setBlocks((bs) => bs.map((x, j) => j === i ? { ...x, slotDurationMin: Number(e.target.value) } : x))} /></label>
+              <label>Granularidad (min)<input type="number" min={5} step={5} value={b.slotDurationMin} onChange={(e) => setBlocks((bs) => bs.map((x, j) => j === i ? { ...x, slotDurationMin: Number(e.target.value) } : x))} /></label>
               <label>Capacidad<input type="number" min={1} value={b.slotCapacity} onChange={(e) => setBlocks((bs) => bs.map((x, j) => j === i ? { ...x, slotCapacity: Number(e.target.value) } : x))} /></label>
               <button className="text-button" type="button" onClick={() => setBlocks((bs) => bs.filter((_, j) => j !== i))}>Quitar</button>
             </div>
