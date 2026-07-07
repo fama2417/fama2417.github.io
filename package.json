@@ -8,7 +8,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test src/features/appointments/validation.test.ts src/features/reports/validation.test.ts src/app/api/pacs/auth.test.ts src/lib/tenant.test.ts src/lib/orthanc.test.ts",
+    "test": "node --experimental-strip-types --test src/features/appointments/validation.test.ts src/features/schedule/slots.test.ts src/features/reports/validation.test.ts src/app/api/pacs/auth.test.ts src/lib/tenant.test.ts src/lib/orthanc.test.ts",
     "dicom:start": "docker compose up -d",
     "dicom:stop": "docker compose down"
   },
