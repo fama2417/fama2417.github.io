@@ -3,6 +3,8 @@ import { RequireRole } from "@/components/RequireRole";
 import { CatalogManager } from "@/features/catalog/CatalogManager";
 import { TemplatesManager } from "@/features/reports/TemplatesManager";
 import { ScheduleManager } from "@/features/schedule/ScheduleManager";
+import { ParametryManager } from "@/features/scheduling/ParametryManager";
+import { ResourceWizard } from "@/features/scheduling/ResourceWizard";
 import { InstitutionSettings } from "@/features/tenant/InstitutionSettings";
 import { TenantsManager } from "@/features/tenant/TenantsManager";
 import { UsersManager } from "@/features/users/UsersManager";
@@ -18,6 +20,8 @@ export default function SettingsPage() {
       <div className="page-header"><div><p className="eyebrow">Configuración</p><h2>Parámetros e integraciones</h2><p>Administra los listados de la agenda y revisa el estado de los servicios.</p></div></div>
       <InstitutionSettings />
       <UsersManager />
+      <ParametryManager />
+      <ResourceWizard />
       <CatalogManager />
       <ScheduleManager />
       <TemplatesManager />
