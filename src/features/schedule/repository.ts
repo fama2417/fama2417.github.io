@@ -19,7 +19,7 @@ export async function upsertSchedule(schedule: Omit<RoomSchedule, "id"> & { id?:
   const query = schedule.id
     ? supabase.from("room_schedules").update(row).eq("id", schedule.id)
     : supabase.from("room_schedules").insert(row);
-  const { error } = await query;
+  const { error } = await query.select("id").single();
   if (error) throw error;
 }
 

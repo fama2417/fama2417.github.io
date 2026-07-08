@@ -208,9 +208,19 @@ input:focus, select:focus, textarea:focus { border-color: var(--primary); outlin
   gap: 16px;
   grid-template-columns: 96px 1fr auto;
   padding: 16px;
+  position: relative;
+  overflow: hidden;
 }
+.appointment-card::before { background: var(--primary); bottom: 0; content: ""; left: 0; position: absolute; top: 0; width: 4px; }
+.appointment-card.appointment-arrived::before, .appointment-card.appointment-in_progress::before { background: var(--warning); }
+.appointment-card.appointment-completed::before, .appointment-card.appointment-confirmed::before { background: var(--success); }
+.appointment-card.appointment-cancelled::before, .appointment-card.appointment-no_show::before { background: var(--danger); }
+.appointment-card:hover { border-color: #2d575d; }
 .appointment-card h3 { margin: 0 0 6px; }
 .appointment-card p, .appointment-card span { color: var(--muted); margin: 0; }
+.appointment-main { min-width: 0; }
+.appointment-main h3 { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
+.appointment-main h3 .status { margin: 0; }
 .appointment-actions { align-items: flex-end; display: grid; gap: 8px; justify-items: end; }
 .text-button { background: transparent; border: 0; color: var(--primary); cursor: pointer; font-weight: 700; padding: 4px; }
 .text-button.danger { color: var(--danger); }
@@ -237,7 +247,8 @@ input:focus, select:focus, textarea:focus { border-color: var(--primary); outlin
 .status-arrived, .status-in_progress { background: rgba(251, 191, 36, 0.15); color: var(--warning); }
 .status-cancelled, .status-no_show { background: rgba(248, 113, 113, 0.15); color: var(--danger); }
 
-.empty-state { color: var(--muted); margin: 0; padding: 24px; text-align: center; }
+.empty-state { color: var(--muted); display: grid; gap: 6px; margin: 0; padding: 32px; text-align: center; }
+.empty-state strong { color: var(--text); font-size: 1rem; }
 .notice { background: rgba(251, 191, 36, 0.1); border: 1px solid rgba(251, 191, 36, 0.35); border-radius: 8px; color: var(--warning); padding: 16px; }
 .integration-links { align-items: center; display: flex; gap: 16px; }
 .integration-links a { color: var(--primary); font-weight: 700; }
@@ -323,6 +334,48 @@ tr.row-link:hover td { background: var(--surface-muted); }
 .patient-chip strong { color: var(--primary); font-weight: 600; }
 .inner-form { background: #0a1a1d; border: 1px dashed var(--border); border-radius: 8px; margin-top: 14px; padding: 14px; }
 .booking-grid-action { align-self: end; display: grid; }
+
+/* Agenda operativa: información primero, controles después. */
+.agenda-page { margin: 0 auto; max-width: 1440px; }
+.agenda-header { background: linear-gradient(135deg, rgba(31, 182, 166, 0.12), transparent 55%); border: 1px solid var(--border); border-radius: 12px; padding: 22px 24px; }
+.agenda-header h2 { text-transform: capitalize; }
+.agenda-new { min-height: 44px; }
+.agenda-summary { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 16px; }
+.agenda-summary span { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; color: var(--muted); padding: 14px 16px; }
+.agenda-summary strong { color: var(--text); font-size: 1.35rem; margin-right: 6px; }
+.agenda-toolbar { border-radius: 10px; position: sticky; top: 8px; z-index: 10; }
+.agenda-toolbar .button { flex: 0 0 auto; }
+.agenda-page .booking-form { background: rgba(8, 20, 24, 0.55); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
+.agenda-page .booking-section { border-radius: 10px; }
+.agenda-page .booking-actions { border-top: 1px solid var(--border); padding-top: 16px; }
+.booking-advanced { border: 1px dashed var(--border); border-radius: 8px; color: var(--muted); padding: 10px 12px; }
+.booking-advanced summary { color: var(--primary); cursor: pointer; font-size: 0.85rem; font-weight: 700; }
+.booking-advanced > div { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); padding-top: 12px; }
+.booking-advanced label { color: var(--muted); display: grid; font-size: 0.85rem; gap: 6px; }
+.settings-advanced { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 20px; }
+.settings-advanced > summary { color: var(--primary); cursor: pointer; font-weight: 800; padding: 18px 20px; }
+.settings-advanced > div { border-top: 1px solid var(--border); padding: 20px; }
+.offering-context { grid-template-columns: repeat(3, minmax(180px, 1fr)); margin-top: 16px; }
+.offering-search { align-items: end; display: flex; gap: 16px; justify-content: space-between; margin: 16px 0 10px; }
+.offering-search label { color: var(--muted); display: grid; flex: 1; font-size: 0.85rem; gap: 6px; }
+.offering-search span { color: var(--primary); font-size: 0.82rem; font-weight: 700; padding-bottom: 10px; }
+.offering-list { border: 1px solid var(--border); border-radius: 8px; display: grid; list-style: none; margin: 0; max-height: 380px; overflow: auto; padding: 0 !important; }
+.offering-list li { border-bottom: 1px solid var(--border); padding: 10px 12px; }
+.offering-list li:last-child { border-bottom: 0; }
+.offering-list label { align-items: center; cursor: pointer; display: flex; gap: 10px; }
+.offering-list input { width: auto; }
+.offering-list label span { display: grid; gap: 2px; }
+.offering-list small { color: var(--muted); }
+.offering-create { margin-top: 14px; }
+.offering-create .catalog-form { margin: 12px 0 0; }
+.offering-admin { margin-bottom: 14px; }
+.offering-admin > div { grid-template-columns: 1fr 1.5fr; }
+.offering-admin section { display: grid; gap: 8px; }
+.offering-admin section > strong { color: var(--text); font-size: 0.85rem; }
+.offering-admin section label { align-items: center; display: flex; gap: 8px; justify-content: space-between; }
+.offering-admin section input { width: auto; }
+.offering-resource-row { align-items: center; display: grid; gap: 8px; grid-template-columns: minmax(140px, 1fr) minmax(150px, 1fr) minmax(170px, 1fr); }
+.offering-resource-row > strong { font-weight: 600; }
 
 /* Alertas y utilidades de worklist */
 .priority-dot { background: var(--danger); border-radius: 50%; display: inline-block; height: 9px; margin-right: 7px; width: 9px; }
@@ -487,4 +540,29 @@ body:has(.report-workstation) .app-shell { flex: 1; min-height: 0; }
   .two-columns, .appointment-card, .clinical-form, .filter-layout { grid-template-columns: 1fr; }
   .toolbar, .hero-actions, .page-header { align-items: stretch; flex-direction: column; }
   .appointment-actions { justify-items: stretch; }
+  .agenda-summary { grid-template-columns: 1fr; }
+  .agenda-toolbar { position: static; }
+  .booking-advanced > div { grid-template-columns: 1fr; }
+  .offering-context { grid-template-columns: 1fr; }
+  .offering-search { align-items: stretch; flex-direction: column; }
+  .offering-admin > div { grid-template-columns: 1fr; }
+  .offering-resource-row { grid-template-columns: 1fr; }
 }
+
+.offering-branch { display: grid; gap: 6px; max-width: 420px; margin: 18px 0 24px; }
+.resource-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+.resource-section-heading h4, .resource-section-heading p { margin: 0; }
+.resource-section-heading p { color: var(--muted); margin-top: 4px; }
+.resource-editor { padding: 18px; margin-bottom: 16px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+.resource-grid { display: grid; gap: 10px; margin-bottom: 20px; }
+.resource-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 12px; }
+.resource-card > div:first-child { display: grid; gap: 3px; }
+.resource-card small { color: var(--muted); }
+.resource-card > div:last-child { display: flex; flex-wrap: wrap; gap: 12px; }
+.resource-card.inactive { opacity: .65; }
+.text-button.danger { color: #d96b6b; }
+.status-reason { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.status-reason input { min-width: 180px; }
+.service-checks { display: grid; gap: 8px; padding-top: 12px; }
+.service-checks label, .checkbox-label { display: flex; align-items: center; gap: 8px; }
+@media (max-width: 720px) { .resource-section-heading, .resource-card { align-items: stretch; flex-direction: column; } }

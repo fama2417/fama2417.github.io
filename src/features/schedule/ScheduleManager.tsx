@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { activeOptions, fetchCatalog } from "@/features/catalog/repository";
+import { fetchResources } from "@/features/scheduling/repository";
 import { addHoliday, deleteSchedule, fetchHolidays, fetchSchedules, removeHoliday, upsertSchedule, WEEKDAYS, type Holiday, type RoomSchedule } from "./repository";
 
 const emptySchedule = { roomLabel: "", days: "1,2,3,4,5", openTime: "08:00", closeTime: "18:00" };
@@ -15,10 +15,10 @@ export function ScheduleManager() {
   const [allowed, setAllowed] = useState(true);
 
   useEffect(() => {
-    Promise.all([fetchSchedules(), fetchHolidays(), fetchCatalog()]).then(([nextSchedules, nextHolidays, catalog]) => {
+    Promise.all([fetchSchedules(), fetchHolidays(), fetchResources()]).then(([nextSchedules, nextHolidays, resources]) => {
       setSchedules(nextSchedules);
       setHolidays(nextHolidays);
-      setRooms(activeOptions(catalog, "sala").map((item) => item.label));
+      setRooms(resources.filter((item) => item.active && ["location", "device", "composite"].includes(item.kind)).map((item) => item.name));
     }).catch(() => setAllowed(false));
   }, []);
 
@@ -69,9 +69,9 @@ export function ScheduleManager() {
 
       {draft && (
         <form className="clinical-form" onSubmit={saveSchedule}>
-          <label>Sala / equipo<select required value={draft.roomLabel} onChange={(event) => setDraft({ ...draft, roomLabel: event.target.value })} disabled={Boolean(draft.id)}><option value="">Seleccionar…</option>{rooms.map((room) => <option key={room} value={room}>{room}</option>)}</select></label>
-          <label>Abre<input type="time" value={draft.openTime} onChange={(event) => setDraft({ ...draft, openTime: event.target.value })} /></label>
-          <label>Cierra<input type="time" value={draft.closeTime} onChange={(event) => setDraft({ ...draft, closeTime: event.target.value })} /></label>
+          <label>Sala / equipo<select required value={draft.roomLabel} onChange={(event) => setDraft((current) => current ? { ...current, roomLabel: event.target.value } : current)} disabled={Boolean(draft.id)}><option value="">Seleccionar…</option>{rooms.map((room) => <option key={room} value={room}>{room}</option>)}</select></label>
+          <label>Abre<input type="time" value={draft.openTime} onChange={(event) => setDraft((current) => current ? { ...current, openTime: event.target.value } : current)} /></label>
+          <label>Cierra<input type="time" value={draft.closeTime} onChange={(event) => setDraft((current) => current ? { ...current, closeTime: event.target.value } : current)} /></label>
           <div className="booking-tags"><span>Días de atención</span><div>{WEEKDAYS.map((day) => <button key={day.value} type="button" className={`tag ${draft.days.split(",").includes(day.value) ? "active" : ""}`} onClick={() => toggleDay(day.value)}>{day.label}</button>)}</div></div>
           <button className="button primary" type="submit">Guardar horario</button>
         </form>

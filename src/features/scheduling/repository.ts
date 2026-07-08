@@ -3,7 +3,7 @@ import { addMinutes, runCovering, startsFittingDuration } from "./slot-math";
 
 // Nombres internos cercanos a FHIR; la UI usa etiquetas amigables (ver labels.ts).
 export type Organization = { id: string; name: string; active: boolean };
-export type Location = { id: string; organizationId: string; name: string; address: string; active: boolean };
+export type Location = { id: string; organizationId: string; name: string; address: string; active: boolean; kind: "branch" | "room"; parentId: string | null };
 export type HealthcareService = { id: string; organizationId: string; name: string; specialty: string; capacity: number; active: boolean };
 export type Practitioner = { id: string; fullName: string; professionalRegistration: string; active: boolean };
 export type PractitionerRole = { id: string; practitionerId: string; organizationId: string; locationId: string | null; healthcareServiceId: string | null; specialty: string; active: boolean };
@@ -25,6 +25,7 @@ export type SchedulableResource = {
 };
 export type Schedule = { id: string; resourceId: string; weekday: number; startTime: string; endTime: string; slotDurationMin: number; slotCapacity: number; validFrom: string; validTo: string | null };
 export type Slot = { id: string; resourceId: string; startsAt: string; endsAt: string; capacity: number; bookedCount: number; status: "free" | "busy" | "held" };
+export type ResourceChoice = { id: string; name: string; kind: ResourceKind };
 
 // --- Lecturas simples (todas quedan filtradas por tenant vía RLS) ---
 const rows = async <T>(table: string, cols: string, map: (r: Record<string, unknown>) => T, order = "name") => {
@@ -34,13 +35,94 @@ const rows = async <T>(table: string, cols: string, map: (r: Record<string, unkn
 };
 
 export const fetchOrganizations = () => rows<Organization>("organizations", "id, name, active", (r) => r as Organization);
-export const fetchLocations = () => rows<Location>("locations", "id, organization_id, name, address, active", (r) => ({ id: r.id, organizationId: r.organization_id, name: r.name, address: r.address, active: r.active } as Location));
+export const fetchLocations = () => rows<Location>("locations", "id, organization_id, name, address, active, kind, parent_location_id", (r) => ({ id: r.id, organizationId: r.organization_id, name: r.name, address: r.address, active: r.active, kind: r.kind, parentId: r.parent_location_id } as Location));
 export const fetchServices = () => rows<HealthcareService>("healthcare_services", "id, organization_id, name, specialty, capacity, active", (r) => ({ id: r.id, organizationId: r.organization_id, name: r.name, specialty: r.specialty, capacity: r.capacity, active: r.active } as HealthcareService));
 export const fetchPractitioners = () => rows<Practitioner>("practitioners", "id, full_name, professional_registration, active", (r) => ({ id: r.id, fullName: r.full_name, professionalRegistration: r.professional_registration, active: r.active } as Practitioner), "full_name");
 export const fetchPractitionerRoles = () => rows<PractitionerRole>("practitioner_roles", "id, practitioner_id, organization_id, location_id, healthcare_service_id, specialty, active", (r) => ({ id: r.id, practitionerId: r.practitioner_id, organizationId: r.organization_id, locationId: r.location_id, healthcareServiceId: r.healthcare_service_id, specialty: r.specialty, active: r.active } as PractitionerRole), "created_at");
 export const fetchDevices = () => rows<Device>("devices", "id, organization_id, location_id, name, modality, active", (r) => ({ id: r.id, organizationId: r.organization_id, locationId: r.location_id, name: r.name, modality: r.modality, active: r.active } as Device));
 export const fetchServiceTypes = () => rows<ServiceType>("service_types", "id, code, name, duration_min, capacity, requires_contrast, requires_anesthesia, prep_instructions, active", (r) => ({ id: r.id, code: r.code, name: r.name, durationMin: r.duration_min, capacity: r.capacity, requiresContrast: r.requires_contrast, requiresAnesthesia: r.requires_anesthesia, prepInstructions: r.prep_instructions, active: r.active } as ServiceType));
 export const fetchResources = () => rows<SchedulableResource>("schedulable_resources", "id, organization_id, location_id, healthcare_service_id, kind, name, practitioner_role_id, device_id, active", (r) => ({ id: r.id, organizationId: r.organization_id, locationId: r.location_id, healthcareServiceId: r.healthcare_service_id, kind: r.kind, name: r.name, practitionerRoleId: r.practitioner_role_id, deviceId: r.device_id, active: r.active } as SchedulableResource));
+
+export const fetchBranches = async () => {
+  const { data, error } = await supabase.from("locations").select("id, organization_id, name, address, active, kind, parent_location_id").eq("kind", "branch").eq("active", true).order("name");
+  if (error) throw error;
+  return (data as Record<string, unknown>[]).map((r) => ({ id: r.id, organizationId: r.organization_id, name: r.name, address: r.address, active: r.active, kind: r.kind, parentId: r.parent_location_id } as Location));
+};
+
+export const fetchBranchServices = async (branchId: string) => {
+  const { data, error } = await supabase.rpc("available_branch_services", { p_branch: branchId });
+  if (error) throw error;
+  return (data ?? []) as { id: string; name: string }[];
+};
+
+const mapServiceType = (r: Record<string, unknown>): ServiceType => ({
+  id: r.id as string, code: String(r.code ?? ""), name: String(r.name ?? ""), durationMin: Number(r.duration_min ?? 30),
+  capacity: Number(r.capacity ?? 1), requiresContrast: Boolean(r.requires_contrast), requiresAnesthesia: Boolean(r.requires_anesthesia),
+  prepInstructions: String(r.prep_instructions ?? ""), active: r.active !== false,
+});
+
+export const searchAvailableServiceTypes = async (branchId: string, serviceId: string, term: string) => {
+  const { data, error } = await supabase.rpc("search_available_service_types", { p_branch: branchId, p_service: serviceId, p_term: term });
+  if (error) throw error;
+  return (data as Record<string, unknown>[]).map(mapServiceType);
+};
+
+export const fetchCompatibleResources = async (branchId: string, serviceTypeId: string) => {
+  const { data, error } = await supabase.rpc("available_branch_resources", { p_branch: branchId, p_service_type: serviceTypeId });
+  if (error) throw error;
+  return (data ?? []) as ResourceChoice[];
+};
+
+export const searchMasterServiceTypes = async (serviceId: string, term = "") => {
+  const { data, error } = await supabase.rpc("search_master_service_types", { p_service: serviceId || null, p_term: term });
+  if (error) throw error;
+  return (data as Record<string, unknown>[]).map(mapServiceType);
+};
+
+export const createMasterServiceType = (serviceId: string, code: string, name: string, durationMin: number) =>
+  insert1("service_types", { healthcare_service_id: serviceId, code, name, duration_min: durationMin });
+
+export const countTestServiceTypes = async () => {
+  const { count, error } = await supabase.from("service_types").select("id", { count: "exact", head: true }).like("name", "[Prueba]%");
+  if (error) throw error;
+  return count ?? 0;
+};
+
+export const fetchAssignedServiceTypeIds = async (resourceId: string) => {
+  const { data, error } = await supabase.from("resource_service_types").select("service_type_id").eq("resource_id", resourceId);
+  if (error) throw error;
+  return (data as { service_type_id: string }[]).map((r) => r.service_type_id);
+};
+
+export async function setResourceServiceType(resourceId: string, serviceTypeId: string, enabled: boolean) {
+  const query = supabase.from("resource_service_types");
+  const { error } = enabled
+    ? await query.insert({ resource_id: resourceId, service_type_id: serviceTypeId })
+    : await query.delete().eq("resource_id", resourceId).eq("service_type_id", serviceTypeId);
+  if (error) throw error;
+}
+
+export async function setBranchService(branchId: string, serviceId: string, enabled: boolean) {
+  const query = supabase.from("healthcare_service_locations");
+  const { error } = enabled
+    ? await query.insert({ location_id: branchId, healthcare_service_id: serviceId })
+    : await query.delete().eq("location_id", branchId).eq("healthcare_service_id", serviceId);
+  if (error) throw error;
+}
+
+export async function saveLocationResource(input: { id?: string | null; branchId: string; serviceId: string; name: string; active: boolean }) {
+  const { data, error } = await supabase.rpc("save_location_resource", {
+    p_id: input.id ?? null, p_branch: input.branchId, p_service: input.serviceId,
+    p_name: input.name, p_active: input.active,
+  });
+  if (error) throw error;
+  return data as string;
+}
+
+export async function deleteLocationResource(id: string) {
+  const { error } = await supabase.rpc("delete_location_resource", { p_id: id });
+  if (error) throw error;
+}
 
 // --- Altas de parametría (admin) ---
 const insert1 = async (table: string, row: Record<string, unknown>) => {
