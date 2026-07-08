@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
+import { CODE_SYSTEMS, codeHref, codingError } from "@/features/clinical/coding";
 import type { Appointment } from "@/features/appointments/mock-data";
 import { fetchAppointments, orderFileUrl } from "@/features/appointments/repository";
 import { appointmentStatusLabels } from "@/features/appointments/status";
@@ -13,11 +14,22 @@ import {
   type RadiologyReport, type ReportAddendum, type ReportCommunication, type ReportFollowUp, type ReportKeyImage,
 } from "./repository";
 import { fetchTemplates, type ReportTemplate } from "./templates";
+import { profileFor } from "./profiles";
 import { validateFinalReport } from "./validation";
 
 const fallbackOhifUrl = (process.env.NEXT_PUBLIC_OHIF_URL ?? "http://localhost:8042/ohif").replace(/\/$/, "");
 const localNow = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
-const emptyReport = (appointmentId: string): RadiologyReport => ({
+const emptyReport = (appointmentId: string, appointment?: Appointment): RadiologyReport => ({
+  reportCategory: appointment?.serviceCategory ?? "imaging",
+  reportCodeSystem: appointment?.standardCodeSystem || "LOCAL",
+  reportCode: appointment?.standardCode || appointment?.procedureCode || appointment?.serviceTypeId || "",
+  reportCodeDisplay: appointment?.standardDisplay || appointment?.reason || "",
+  findingCodeSystem: "SNOMEDCT",
+  findingCode: "",
+  findingCodeDisplay: "",
+  diagnosisCodeSystem: "ICD-10",
+  diagnosisCode: "",
+  diagnosisCodeDisplay: "",
   appointmentId, clinicalIndication: "", technique: "", comparison: "Sin estudios previos disponibles.", findings: "", impression: "",
   status: "draft", criticalFinding: false, criticalFindingType: "", identityConfirmed: false, clinicalQuestionAnswered: false,
 });
@@ -72,6 +84,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
   const [keyImages, setKeyImages] = useState<ReportKeyImage[]>([]);
   const [captureUrls, setCaptureUrls] = useState<Record<string, string>>({});
   const [role, setRole] = useState<string>("");
+  const [reportAction, setReportAction] = useState<{ kind: "reopen" | "delete"; reason: string } | null>(null);
   const viewerRef = useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
@@ -100,6 +113,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
           .filter((item) => item.patientId === current.patientId && item.id !== current.id && item.reportStatus)
           .sort((a, b) => `${b.date}${b.startTime}`.localeCompare(`${a.date}${a.startTime}`)));
         if (storedReport) setReport(storedReport);
+        else if (current) setReport(emptyReport(appointmentId, current));
         setCommunications(storedCommunications); setAddenda(storedAddenda); setFollowUps(storedFollowUps);
         setRole(profile.role);
       })
@@ -143,6 +157,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
 
   /** Borra del PACS el PDF archivado de este informe. */
   async function deletePdfFromPacs() {
+    if (appointment?.serviceCategory !== "imaging") return;
     const { data } = await supabase.auth.getSession();
     const response = await fetch(`/api/pacs/report-pdf?appointmentId=${encodeURIComponent(appointmentId)}`, { method: "DELETE", headers: { Authorization: `Bearer ${data.session?.access_token ?? ""}` } });
     if (!response.ok) throw new Error("No fue posible eliminar el PDF del PACS.");
@@ -159,13 +174,19 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
     if (status === "final") {
       const validation = validateFinalReport(report, communications.some((item) => item.urgency === "critical" && item.acknowledged));
       if (validation) return setError(validation);
+      const codingValidation = [
+        codingError(report.reportCodeSystem, report.reportCode, report.reportCodeDisplay, "Reporte/prestación", true),
+        codingError(report.findingCodeSystem, report.findingCode, report.findingCodeDisplay, "Hallazgo principal"),
+        codingError(report.diagnosisCodeSystem, report.diagnosisCode, report.diagnosisCodeDisplay, "Diagnóstico"),
+      ].find(Boolean);
+      if (codingValidation) return setError(codingValidation);
     }
     setSaving(true); setError(""); setNotice("");
     try {
-      const saved = await saveReport({ ...report, status });
+      const saved = await saveReport({ ...report, status, reportCategory: appointment?.serviceCategory ?? report.reportCategory });
       setReport(saved);
-      setNotice(status === "final" ? "Informe firmado y bloqueado como definitivo." : "Borrador guardado.");
-      if (status === "final") await archivePdfInPacs();
+      setNotice(status === "final" ? "Reporte firmado y bloqueado como definitivo." : "Borrador guardado.");
+      if (status === "final" && appointment?.serviceCategory === "imaging") await archivePdfInPacs();
     } catch {
       setError(status === "final" ? "No fue posible firmar. Verifica tu perfil de administración/radiología y el registro profesional." : "No fue posible guardar el borrador.");
     } finally { setSaving(false); }
@@ -259,24 +280,21 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
     finally { setSaving(false); }
   }
 
-  async function reopen() {
-    const reason = window.prompt("Motivo de la reapertura (queda registrado):")?.trim();
-    if (!reason) return;
+  async function reopen(reason: string) {
     setSaving(true); setError("");
     try {
       const reopened = await reopenReport(appointmentId, reason);
+      setReportAction(null);
       setReport(reopened); setNotice("Informe reabierto como borrador. El motivo quedó registrado.");
     } catch { setError("No fue posible reabrir el informe."); }
     finally { setSaving(false); }
   }
 
-  async function removeReport() {
-    const reason = window.prompt("Eliminar el informe es irreversible. Indica el motivo (queda registrado):")?.trim();
-    if (!reason) return;
+  async function removeReport(reason: string) {
     setSaving(true); setError("");
     try {
       await deleteReport(appointmentId, reason);
-      setReport(emptyReport(appointmentId)); setAddenda([]); setKeyImages([]);
+      setReport(emptyReport(appointmentId, appointment ?? undefined)); setAddenda([]); setKeyImages([]); setReportAction(null);
       try {
         await deletePdfFromPacs();
         setNotice("Informe eliminado (también del PACS). El motivo quedó registrado.");
@@ -292,10 +310,13 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
   if (!appointment) return <p className="notice" role="alert">{error || "Estudio no encontrado."}</p>;
 
   const baseKeyImages = keyImages.filter((item) => !item.addendumId);
+  const profile = profileFor(appointment.serviceCategory);
+  const sections = profile.sections;
+  const examLabel = `${appointment.serviceCategory === "imaging" && appointment.modality !== "OT" ? `${appointment.modality} · ` : ""}${appointment.reason}`;
   if (role === "operator") return <div className="report-workstation read-only-report">
-    <header className="report-workstation-header"><div><p className="eyebrow">Informe radiológico</p><h2>{appointment.patientName}</h2><p className="report-meta"><span>{appointment.date}</span><span>{appointment.modality} · {appointment.reason}</span></p></div>{report.status === "final" && <button className="text-button" type="button" onClick={() => window.print()}>Imprimir</button>}</header>
+    <header className="report-workstation-header"><div><p className="eyebrow">{profile.title}</p><h2>{appointment.patientName}</h2><p className="report-meta"><span>{appointment.date}</span><span>{examLabel}</span></p></div>{report.status === "final" && <button className="text-button" type="button" onClick={() => window.print()}>Imprimir</button>}</header>
     {report.status !== "final" ? <p className="notice">El informe definitivo aún no está disponible.</p> : <article className="card legal-content">
-      {tenant?.reportHeader && <p>{renderHeader(tenant.reportHeader, { paciente: appointment.patientName, id: appointment.patientIdentifier || "—", medico: appointment.treatingPhysician || appointment.requesterName || "—", examen: `${appointment.modality} · ${appointment.reason}`, fecha: appointment.date, institucion: tenant.name })}</p>}
+      {tenant?.reportHeader && <p>{renderHeader(tenant.reportHeader, { paciente: appointment.patientName, id: appointment.patientIdentifier || "—", medico: appointment.treatingPhysician || appointment.requesterName || "—", examen: examLabel, fecha: appointment.date, institucion: tenant.name })}</p>}
       {sections.map((section) => report[section.name] && <section key={section.name}><h3>{section.label}</h3><p>{report[section.name]}</p></section>)}
       {baseKeyImages.length > 0 && <section><h3>Imágenes clave</h3><div className="key-images-grid">{baseKeyImages.map((item) => <figure key={item.id}>{keyImageSrc(item) && <img src={keyImageSrc(item)} alt="Imagen clave" />}{item.caption && <figcaption>{item.caption}</figcaption>}</figure>)}</div></section>}
       {addenda.map((item, index) => <section key={item.id}><h3>Adenda {index + 1}</h3><p>{item.text}</p></section>)}
@@ -309,11 +330,15 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
     ? `/api/pacs/handoff?next=${encodeURIComponent(`/ohif/viewer?StudyInstanceUIDs=${appointment.studyInstanceUid}`)}` : viewer;
   const detail: [string, string][] = [["Anamnesis", appointment.anamnesis || "—"], ["Hipótesis diagnóstica", appointment.diagnosticHypothesis || "—"], ...appointmentDetail(appointment).filter(([, value]) => value)];
   const acknowledgedCommunication = communications.findLast((item) => item.urgency === "critical" && item.acknowledged);
+  const codingAnchor = (system: string, code: string) => {
+    const href = codeHref(system, code);
+    return href ? <a className="coding-link" href={href} target="_blank" rel="noreferrer">Ver código oficial ↗</a> : null;
+  };
 
   return <div className="report-workstation">
     <header className="report-workstation-header">
-      <div><p className="eyebrow">Informe radiológico</p><h2>{appointment.patientName}</h2><p className="report-meta">
-        <span>{appointment.date} {appointment.startTime}</span><span>{appointment.modality} · {appointment.reason}</span><span>{appointment.locationName}</span><span>{appointmentStatusLabels[appointment.status]}</span>
+      <div><p className="eyebrow">{profile.title}</p><h2>{appointment.patientName}</h2><p className="report-meta">
+        <span>{appointment.date} {appointment.startTime}</span><span>{examLabel}</span><span>{appointment.locationName}</span><span>{appointmentStatusLabels[appointment.status]}</span>
       </p></div>
       <div className="report-header-actions">
         <button className="text-button" type="button" onClick={() => setShowDetail(true)}>Datos de la cita</button>
@@ -333,14 +358,32 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
     <div className="report-layout">
       <section className="report-editor" aria-label="Editor de informe" onPaste={handlePaste}>
         <div className="report-fields">
-          <div className="card-heading"><h3>Informe estructurado (ACR)</h3>{report.status !== "final" && templates.some((template) => template.active) &&
+          <div className="card-heading"><h3>{profile.editor}</h3>{report.status !== "final" && templates.some((template) => template.active && template.category === appointment.serviceCategory) &&
             <select defaultValue="" onChange={(event) => { applyTemplate(event.target.value); event.target.value = ""; }} aria-label="Aplicar plantilla">
               <option value="" disabled>Aplicar plantilla…</option>
-              <optgroup label={`Modalidad ${appointment.modality}`}>{templates.filter((template) => template.active && template.modality === appointment.modality).map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}</optgroup>
-              <optgroup label="Otras modalidades">{templates.filter((template) => template.active && template.modality !== appointment.modality).map((template) => <option key={template.id} value={template.id}>{template.modality} · {template.name}</option>)}</optgroup>
+              {templates.filter((template) => template.active && template.category === appointment.serviceCategory && (appointment.serviceCategory !== "imaging" || template.modality === appointment.modality)).map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}
+              {appointment.serviceCategory === "imaging" && templates.filter((template) => template.active && template.category === "imaging" && template.modality !== appointment.modality).map((template) => <option key={template.id} value={template.id}>{template.modality} · {template.name}</option>)}
             </select>}
           </div>
           {sections.map((section) => <label key={section.name}>{section.label}<textarea name={section.name} value={report[section.name]} placeholder={section.hint} onChange={(event) => setSection(section.name, event.target.value)} disabled={report.status === "final"} /></label>)}
+
+          <details className="report-clinical-panel collapsible">
+            <summary><span className="collapsible-icon">#</span>Codificación estándar</summary>
+            <div className="clinical-form">
+              <label>Sistema reporte/prestación<select value={report.reportCodeSystem || "LOCAL"} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, reportCodeSystem: event.target.value }))}>{CODE_SYSTEMS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+              <label>Código reporte/prestación<input value={report.reportCode} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, reportCode: event.target.value }))} placeholder="LOINC / código local" /></label>
+              <label className="span-2">Nombre estándar<input value={report.reportCodeDisplay} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, reportCodeDisplay: event.target.value }))} placeholder="Nombre oficial o local" /></label>
+              {codingAnchor(report.reportCodeSystem, report.reportCode)}
+              <label>Hallazgo principal<select value={report.findingCodeSystem || "SNOMEDCT"} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, findingCodeSystem: event.target.value }))}>{CODE_SYSTEMS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+              <label>Código hallazgo<input value={report.findingCode} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, findingCode: event.target.value }))} placeholder="SNOMED CT si aplica" /></label>
+              <label className="span-2">Texto hallazgo<input value={report.findingCodeDisplay} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, findingCodeDisplay: event.target.value }))} /></label>
+              {codingAnchor(report.findingCodeSystem, report.findingCode)}
+              <label>Diagnóstico administrativo<select value={report.diagnosisCodeSystem || "ICD-10"} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, diagnosisCodeSystem: event.target.value }))}>{CODE_SYSTEMS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+              <label>Código diagnóstico<input value={report.diagnosisCode} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, diagnosisCode: event.target.value }))} placeholder="CIE-10 / CIE-11" /></label>
+              <label className="span-2">Texto diagnóstico<input value={report.diagnosisCodeDisplay} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, diagnosisCodeDisplay: event.target.value }))} /></label>
+              {codingAnchor(report.diagnosisCodeSystem, report.diagnosisCode)}
+            </div>
+          </details>
 
           <div className="report-confirmations">
             <label className="consent-field"><input type="checkbox" checked={report.identityConfirmed} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, identityConfirmed: event.target.checked }))} />Confirmo la identidad del paciente y el estudio.</label>
@@ -419,7 +462,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
         <footer className="report-actions">
           {report.status === "draft" && <><button className="button secondary" type="button" disabled={saving} onClick={() => persist("draft")}>Guardar borrador</button><button className="button primary" type="button" disabled={saving} onClick={() => persist("final")}>Firmar definitivo</button></>}
           {report.status === "final" && <span>Definitivo · las correcciones se agregan como adenda.</span>}
-          {report.status === "final" && role === "admin" && <><button className="button secondary" type="button" disabled={saving} onClick={reopen}>Reabrir informe</button><button className="text-button danger" type="button" disabled={saving} onClick={removeReport}>Eliminar informe</button></>}
+          {report.status === "final" && role === "admin" && <><button className="button secondary" type="button" disabled={saving} onClick={() => setReportAction({ kind: "reopen", reason: "" })}>Reabrir informe</button><button className="text-button danger" type="button" disabled={saving} onClick={() => setReportAction({ kind: "delete", reason: "" })}>Eliminar informe</button></>}
           {notice && <span className="form-notice" role="status">{notice}</span>}
           {report.updatedAt && <span className="report-updated">Última modificación: {new Date(report.updatedAt).toLocaleString("es-CL")}</span>}
         </footer>
@@ -427,12 +470,21 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
       <section className="viewer-pane" aria-label="Visor de imágenes">{fullScreen ? <iframe ref={viewerRef} src={fullScreen} title="Visor OHIF" allow="fullscreen" /> : <p className="empty-state">Este estudio aún no tiene imágenes vinculadas en el PACS.</p>}</section>
     </div>
 
+    {reportAction && <div className="appointment-info-backdrop" role="dialog" aria-modal="true" aria-label={reportAction.kind === "reopen" ? "Reabrir reporte" : "Eliminar reporte"} onClick={(event) => { if (event.target === event.currentTarget) setReportAction(null); }}>
+      <form className="appointment-info status-change-dialog" onSubmit={(event) => { event.preventDefault(); const reason = reportAction.reason.trim(); if (!reason) return; reportAction.kind === "reopen" ? reopen(reason) : removeReport(reason); }}>
+        <div className="card-heading"><div><p className="eyebrow">Auditoría clínica</p><h3>{reportAction.kind === "reopen" ? "Reabrir reporte" : "Eliminar reporte"}</h3></div><button className="text-button" type="button" onClick={() => setReportAction(null)}>Cerrar ✕</button></div>
+        <p>{reportAction.kind === "reopen" ? "El reporte volverá a borrador para corregirse." : "Eliminar el reporte es irreversible; las adendas e imágenes clave asociadas se eliminan."}</p>
+        <label>Motivo<textarea autoFocus required value={reportAction.reason} onChange={(event) => setReportAction({ ...reportAction, reason: event.target.value })} /></label>
+        <div className="form-actions"><button className="button primary" type="submit" disabled={!reportAction.reason.trim() || saving}>{reportAction.kind === "reopen" ? "Reabrir" : "Eliminar"}</button><button className="button secondary" type="button" onClick={() => setReportAction(null)}>Cancelar</button></div>
+      </form>
+    </div>}
+
     <div className="print-sheet" aria-hidden="true">
-      <header>{tenant?.logoUrl && <img src={tenant.logoUrl} alt="" />}<div><h1>{tenant?.name ?? "Informe radiológico"}</h1><p>{[tenant?.rut && `RUT ${tenant.rut}`, tenant?.address, tenant?.phone].filter(Boolean).join(" · ")}</p></div></header>
-      <h2>Informe radiológico</h2>
+      <header>{tenant?.logoUrl && <img src={tenant.logoUrl} alt="" />}<div><h1>{tenant?.name ?? profile.title}</h1><p>{[tenant?.rut && `RUT ${tenant.rut}`, tenant?.address, tenant?.phone].filter(Boolean).join(" · ")}</p></div></header>
+      <h2>{profile.title}</h2>
       {tenant?.reportHeader
-        ? renderHeader(tenant.reportHeader, { paciente: appointment.patientName, id: appointment.patientIdentifier || "—", medico: appointment.treatingPhysician || appointment.requesterName || "—", examen: `${appointment.modality} · ${appointment.reason}`, fecha: appointment.date, institucion: tenant.name }).split("\n").map((line, index) => <p key={index}>{line}</p>)
-        : <><p><strong>Paciente:</strong> {appointment.patientName} · <strong>ID:</strong> {appointment.patientIdentifier || "—"}</p><p><strong>Examen:</strong> {appointment.modality} · {appointment.reason} · <strong>Fecha:</strong> {appointment.date}</p></>}
+        ? renderHeader(tenant.reportHeader, { paciente: appointment.patientName, id: appointment.patientIdentifier || "—", medico: appointment.treatingPhysician || appointment.requesterName || "—", examen: examLabel, fecha: appointment.date, institucion: tenant.name }).split("\n").map((line, index) => <p key={index}>{line}</p>)
+        : <><p><strong>Paciente:</strong> {appointment.patientName} · <strong>ID:</strong> {appointment.patientIdentifier || "—"}</p><p><strong>Prestación:</strong> {examLabel} · <strong>Fecha:</strong> {appointment.date}</p></>}
       {report.criticalFinding && <p><strong>⚠ HALLAZGO CRÍTICO{report.criticalFindingType && `: ${report.criticalFindingType}`}</strong>{acknowledgedCommunication && <> · Comunicado a {acknowledgedCommunication.recipient} por {channelLabels[acknowledgedCommunication.channel]}, {new Date(acknowledgedCommunication.communicatedAt).toLocaleString("es-CL")}.</>}</p>}
       {sections.map((section) => report[section.name] && <section key={section.name}><h3>{section.label}</h3><p>{report[section.name]}</p></section>)}
       {baseKeyImages.length > 0 && <section className="key-images-print"><h3>Imágenes clave</h3><div>

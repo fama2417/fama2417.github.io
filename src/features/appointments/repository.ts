@@ -4,7 +4,7 @@ import type { Appointment } from "./mock-data";
 type AppointmentRow = {
   id: string; patient_id: string; practitioner_name: string; location_name: string; appointment_date: string;
   start_time: string; end_time: string; status: Appointment["status"]; reason: string; modality: Appointment["modality"];
-  branch?: string; service?: string; specialty?: string; procedure_code?: string; treating_physician?: string; order_date?: string | null;
+  branch?: string; service?: string; service_type_id?: string | null; service_category?: Appointment["serviceCategory"]; practitioner_requirement?: Appointment["practitionerRequirement"]; specialty?: string; procedure_code?: string; treating_physician?: string; order_date?: string | null;
   anesthesia?: boolean; contrast?: boolean; priority?: Appointment["priority"]; payment_order?: string; tags?: string;
   anamnesis?: string; diagnostic_hypothesis?: string; comment?: string;
   requester_type?: Appointment["requesterType"]; requester_name?: string; requester_run?: string; requester_email?: string;
@@ -16,9 +16,11 @@ type AppointmentRow = {
   followups?: { status: "pending" | "acknowledged" | "completed" }[] | null;
   assigned_to?: string | null;
   assignee?: { full_name: string } | null;
+  service_type?: { standard_code_system?: string; standard_code?: string; standard_display?: string } | null;
 };
 
-const columns = "id, patient_id, practitioner_name, location_name, appointment_date, start_time, end_time, status, reason, modality, branch, service, specialty, procedure_code, treating_physician, order_date, anesthesia, contrast, priority, payment_order, tags, anamnesis, diagnostic_hypothesis, comment, requester_type, requester_name, requester_run, requester_email, pickup_name, pickup_run, pickup_phone, origin_type, origin_desc, status_reason, order_file, assigned_to, patient:patients(full_name, identifier, prevision), study:imaging_studies(study_instance_uid, orthanc_study_id), report:radiology_reports(status, critical_finding), followups:report_follow_ups(status), assignee:profiles!appointments_assigned_to_fkey(full_name)";
+const columns = "id, patient_id, practitioner_name, location_name, appointment_date, start_time, end_time, status, reason, modality, branch, service, service_type_id, service_category, practitioner_requirement, specialty, procedure_code, treating_physician, order_date, anesthesia, contrast, priority, payment_order, tags, anamnesis, diagnostic_hypothesis, comment, requester_type, requester_name, requester_run, requester_email, pickup_name, pickup_run, pickup_phone, origin_type, origin_desc, status_reason, order_file, assigned_to, patient:patients(full_name, identifier, prevision), study:imaging_studies(study_instance_uid, orthanc_study_id), report:radiology_reports(status, critical_finding), followups:report_follow_ups(status), assignee:profiles!appointments_assigned_to_fkey(full_name), service_type:service_types(standard_code_system, standard_code, standard_display)";
+const legacyColumns = columns.replace(", service_type:service_types(standard_code_system, standard_code, standard_display)", "");
 
 const mapAppointment = (row: AppointmentRow): Appointment => ({
   id: row.id,
@@ -36,6 +38,9 @@ const mapAppointment = (row: AppointmentRow): Appointment => ({
   orthancStudyId: row.study?.orthanc_study_id ?? undefined,
   branch: row.branch ?? "",
   service: row.service ?? "",
+  serviceTypeId: row.service_type_id ?? undefined,
+  serviceCategory: row.service_category ?? "procedure",
+  practitionerRequirement: row.practitioner_requirement ?? "optional",
   specialty: row.specialty ?? "",
   procedureCode: row.procedure_code ?? "",
   treatingPhysician: row.treating_physician ?? "",
@@ -66,6 +71,9 @@ const mapAppointment = (row: AppointmentRow): Appointment => ({
   assigneeName: row.assignee?.full_name,
   patientIdentifier: row.patient?.identifier ?? "",
   patientPrevision: row.patient?.prevision ?? "",
+  standardCodeSystem: row.service_type?.standard_code_system ?? "",
+  standardCode: row.service_type?.standard_code ?? "",
+  standardDisplay: row.service_type?.standard_display ?? "",
 });
 
 const toRow = (appointment: Appointment) => ({
@@ -81,6 +89,9 @@ const toRow = (appointment: Appointment) => ({
   modality: appointment.modality,
   branch: appointment.branch,
   service: appointment.service,
+  service_type_id: appointment.serviceTypeId ?? null,
+  service_category: appointment.serviceCategory,
+  practitioner_requirement: appointment.practitionerRequirement,
   specialty: appointment.specialty,
   procedure_code: appointment.procedureCode,
   treating_physician: appointment.treatingPhysician,
@@ -108,9 +119,13 @@ const toRow = (appointment: Appointment) => ({
 });
 
 export async function fetchAppointments() {
-  const { data, error } = await supabase.from("appointments").select(columns).order("appointment_date").order("start_time");
-  if (error) throw error;
-  return (data as unknown as AppointmentRow[]).map(mapAppointment);
+  const query = (cols: string) => supabase.from("appointments").select(cols).order("appointment_date").order("start_time");
+  const { data, error } = await query(columns);
+  if (!error) return (data as unknown as AppointmentRow[]).map(mapAppointment);
+  if (!error.message.includes("standard_code")) throw error;
+  const fallback = await query(legacyColumns);
+  if (fallback.error) throw fallback.error;
+  return (fallback.data as unknown as AppointmentRow[]).map(mapAppointment);
 }
 
 export async function assignAppointment(id: string, profileId: string | null) {

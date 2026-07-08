@@ -77,10 +77,10 @@ export function BookingCalendar() {
     setError(""); setSlots([]);
     if (!resource) return;
     try {
-      setSlots(await availableSlots(resource, `${date}T00:00:00+00:00`, `${date}T23:59:59+00:00`));
+      setSlots(await availableSlots(resource, `${date}T00:00:00+00:00`, `${date}T23:59:59+00:00`, serviceType?.durationMin));
     } catch { setError("No fue posible cargar los cupos."); }
   }
-  useEffect(() => { loadSlots(); }, [resourceId, date]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadSlots(); }, [resourceId, date, serviceTypeId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function book(slot: Slot) {
     if (!resource || !serviceType || !patientId) { setError("Elige tipo de atención, paciente y cupo."); return; }

@@ -5,7 +5,7 @@ import { CATALOG_CATEGORIES, createCatalogItem, fetchCatalog, updateCatalogItem,
 
 export function CatalogManager() {
   const [catalog, setCatalog] = useState<CatalogItem[]>([]);
-  const [category, setCategory] = useState<CatalogCategory>("sucursal");
+  const [category, setCategory] = useState<CatalogCategory>("profesional");
   const [editing, setEditing] = useState<CatalogItem | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -56,11 +56,11 @@ export function CatalogManager() {
 
   return (
     <section className="card" aria-label="Parámetros de la agenda">
-      <div className="card-heading"><h3>Parámetros de la agenda</h3><span className="phase-state">Autoservicio</span></div>
-      <p>Los valores activos aparecen como opciones al agendar. Desactiva en vez de borrar para conservar el historial.</p>
+      <div className="card-heading"><h3>Otros parámetros</h3><span className="phase-state">Autoservicio</span></div>
+      <p>Profesionales, etiquetas y previsiones siguen siendo catálogos simples. La oferta clínica se administra arriba.</p>
       <div className="catalog-layout">
         <nav className="catalog-tabs" aria-label="Categorías">
-          {Object.entries(CATALOG_CATEGORIES).map(([value, label]) => (
+          {Object.entries(CATALOG_CATEGORIES).filter(([value]) => ["profesional", "etiqueta", "prevision"].includes(value)).map(([value, label]) => (
             <button key={value} type="button" className={value === category ? "active" : ""} onClick={() => setCategory(value as CatalogCategory)}>{label}</button>
           ))}
         </nav>
@@ -86,6 +86,7 @@ export function CatalogManager() {
                   : <>
                       <span>{item.code && <code>{item.code}</code>} {item.label}{item.category === "prestacion" && <small className="empty-inline"> · {item.durationMin ?? 30} min</small>}</span>
                       <span>
+                        {item.category === "profesional" && <button className="text-button" type="button" onClick={() => window.dispatchEvent(new CustomEvent("schedule-target", { detail: { kind: "practitioner", name: item.label } }))}>Horario semanal</button>}
                         <button className="text-button" type="button" onClick={() => setEditing(item)}>Editar</button>
                         <button className="text-button" type="button" onClick={() => toggleItem(item)}>{item.active ? "Desactivar" : "Activar"}</button>
                       </span>

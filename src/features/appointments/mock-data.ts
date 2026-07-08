@@ -11,11 +11,14 @@ export type Appointment = {
   endTime: string;
   status: AppointmentStatus;
   reason: string;
-  modality: "US" | "DX" | "CT" | "MR" | "MG";
+  modality: string;
   studyInstanceUid?: string;
   orthancStudyId?: string;
   branch: string;
   service: string;
+  serviceTypeId?: string;
+  serviceCategory: "consultation" | "imaging" | "laboratory" | "pathology" | "procedure";
+  practitionerRequirement: "none" | "optional" | "required";
   specialty: string;
   procedureCode: string;
   treatingPhysician: string;
@@ -46,11 +49,14 @@ export type Appointment = {
   assigneeName?: string;
   patientIdentifier?: string;
   patientPrevision?: string;
+  standardCodeSystem?: string;
+  standardCode?: string;
+  standardDisplay?: string;
 };
 
 export const emptyClinicalDetail = {
   branch: "",
-  service: "", specialty: "", procedureCode: "", treatingPhysician: "", orderDate: "",
+  service: "", serviceCategory: "procedure" as const, practitionerRequirement: "optional" as const, specialty: "", procedureCode: "", treatingPhysician: "", orderDate: "",
   anesthesia: false, contrast: false, priority: "normal" as const, paymentOrder: "", tags: "", anamnesis: "", diagnosticHypothesis: "", comment: "",
   requesterType: "interno" as const, requesterName: "", requesterRun: "", requesterEmail: "",
   pickupName: "", pickupRun: "", pickupPhone: "",

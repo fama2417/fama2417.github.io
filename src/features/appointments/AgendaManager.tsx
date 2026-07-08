@@ -6,18 +6,22 @@ import { createPatient, fetchPatients } from "@/features/patients/repository";
 import { activeOptions, fetchCatalog, type CatalogItem } from "@/features/catalog/repository";
 import { compressOrderFile } from "@/lib/compress-image";
 import { availableSlots, fetchHolidays, fetchSchedules, scheduleError, type Holiday, type RoomSchedule } from "@/features/schedule/repository";
+import {
+  fetchBranches, fetchBranchServices, fetchCompatibleResources, searchAvailableServiceTypes,
+  type Location as BranchLocation, type ResourceChoice, type ServiceType,
+} from "@/features/scheduling/repository";
 import { emptyClinicalDetail, type Appointment } from "./mock-data";
 import { fetchAppointments, saveAppointment, setAppointmentStatus, uploadOrderFile } from "./repository";
 import { APPOINTMENT_STATUSES, appointmentStatusLabels, type AppointmentStatus } from "./status";
 import { appointmentError } from "./validation";
 
 const today = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Santiago" });
-const emptyDraft = (date: string): Appointment => ({ id: "", patientId: "", patientName: "", practitionerName: "", locationName: "", date, startTime: "", endTime: "", status: "scheduled", reason: "", modality: "US", ...emptyClinicalDetail });
-const modalities = ["US", "DX", "CT", "MR", "MG"] as const;
+const emptyDraft = (date: string): Appointment => ({ id: "", patientId: "", patientName: "", practitionerName: "", locationName: "", date, startTime: "", endTime: "", status: "scheduled", reason: "", modality: "OT", ...emptyClinicalDetail });
 const emptyNewPatient = { identifier: "", identifierType: "run" as Patient["identifierType"], name: "", birthDate: "", sex: "unknown" as Patient["sex"], prevision: "", phone: "", consent: false };
 const normalizePatient = (value: string) => value.toLocaleLowerCase("es-CL").replace(/[^a-z0-9áéíóúñ]/g, "");
 
-const steps = ["Paciente", "Reserva", "Detalles y adjuntos"] as const;
+const steps = ["Paciente", "Examen y horario", "Detalles"] as const;
+const displayDate = (value: string) => new Intl.DateTimeFormat("es-CL", { dateStyle: "full", timeZone: "America/Santiago" }).format(new Date(`${value}T12:00:00-04:00`));
 
 export function AgendaManager() {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
@@ -34,10 +38,19 @@ export function AgendaManager() {
   const [manualTime, setManualTime] = useState(false);
   const [schedules, setSchedules] = useState<RoomSchedule[]>([]);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
+  const [branches, setBranches] = useState<BranchLocation[]>([]);
+  const [branchServices, setBranchServices] = useState<{ id: string; name: string }[]>([]);
+  const [branchId, setBranchId] = useState("");
+  const [serviceId, setServiceId] = useState("");
+  const [procedureQuery, setProcedureQuery] = useState("");
+  const [procedureMatches, setProcedureMatches] = useState<ServiceType[]>([]);
+  const [selectedServiceType, setSelectedServiceType] = useState<ServiceType | null>(null);
+  const [resourceChoices, setResourceChoices] = useState<ResourceChoice[]>([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [pendingStatus, setPendingStatus] = useState<{ id: string; status: AppointmentStatus; reason: string } | null>(null);
 
   useEffect(() => {
     Promise.all([fetchAppointments(), fetchPatients(), fetchCatalog()]).then(([nextAppointments, nextPatients, nextCatalog]) => {
@@ -47,6 +60,7 @@ export function AgendaManager() {
     }).catch(() => setError("No fue posible cargar la agenda.")).finally(() => setLoading(false));
     fetchSchedules().then(setSchedules).catch(() => undefined);
     fetchHolidays().then(setHolidays).catch(() => undefined);
+    fetchBranches().then(setBranches).catch(() => setError("No fue posible cargar las sucursales."));
   }, []);
 
   const options = useMemo(() => ({
@@ -63,6 +77,8 @@ export function AgendaManager() {
   const visibleAppointments = useMemo(() => appointments
     .filter((item) => item.date === date && (practitioner === "all" || item.practitionerName === practitioner) && (location === "all" || item.locationName === location))
     .sort((a, b) => a.startTime.localeCompare(b.startTime)), [appointments, date, practitioner, location]);
+  const waiting = visibleAppointments.filter((item) => item.status === "arrived" || item.status === "in_progress").length;
+  const completed = visibleAppointments.filter((item) => item.status === "completed").length;
 
   const selectedPatient = patients.find((item) => item.id === draft?.patientId);
   const patientMatches = useMemo(() => {
@@ -72,13 +88,13 @@ export function AgendaManager() {
   }, [patientQuery, patients, selectedPatient]);
   const set = <Key extends keyof Appointment>(field: Key, value: Appointment[Key]) => setDraft((current) => current && { ...current, [field]: value });
 
-  const procedureDuration = options.prestacion.find((item) => item.label === draft?.reason)?.durationMin ?? 30;
+  const procedureDuration = selectedServiceType?.durationMin ?? options.prestacion.find((item) => item.label === draft?.reason)?.durationMin ?? 30;
   const dayHoliday = holidays.find((item) => item.date === draft?.date);
   const slots = useMemo(() => {
     if (!draft || dayHoliday) return [];
     const nowMin = draft.date === today() ? new Date().getHours() * 60 + new Date().getMinutes() : undefined;
-    return availableSlots(draft.date, draft.locationName, procedureDuration, schedules, appointments, { excludeId: draft.id, nowMin });
-  }, [draft?.date, draft?.locationName, procedureDuration, schedules, appointments, dayHoliday, draft?.id]);
+    return availableSlots(draft.date, draft.locationName, procedureDuration, schedules, appointments, { excludeId: draft.id, nowMin, practitionerName: draft.practitionerName || undefined });
+  }, [draft?.date, draft?.locationName, draft?.practitionerName, procedureDuration, schedules, appointments, dayHoliday, draft?.id]);
 
   function openDraft(base: Appointment) {
     setDraft(base);
@@ -87,14 +103,55 @@ export function AgendaManager() {
     setPendingOrder(null);
     setNewPatient(null);
     setPatientQuery(base.patientId ? `${base.patientName} · ${base.patientIdentifier ?? ""}` : "");
+    setBranchId(branches.find((branch) => branch.name === base.branch)?.id ?? "");
+    setServiceId("");
+    setProcedureQuery(base.reason);
+    setSelectedServiceType(null);
+    setResourceChoices(base.locationName ? [{ id: "current", name: base.locationName, kind: "location" }] : []);
     setError("");
     setNotice("");
   }
 
-  function pickProcedure(label: string) {
-    const item = options.prestacion.find((entry) => entry.label === label);
-    // Nueva duración ⇒ los bloques se regeneran; se limpia la hora elegida para re-seleccionar.
-    setDraft((current) => current && { ...current, reason: label, procedureCode: item?.code ?? "", startTime: "", endTime: "" });
+  useEffect(() => {
+    if (!branchId) { setBranchServices([]); setServiceId(""); return; }
+    fetchBranchServices(branchId).then((items) => {
+      setBranchServices(items);
+      setServiceId(items.find((item) => item.name === draft?.service)?.id ?? "");
+    }).catch(() => setBranchServices([]));
+  }, [branchId, draft?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!branchId || !serviceId || selectedServiceType || procedureQuery.trim().length === 1) { setProcedureMatches([]); return; }
+    searchAvailableServiceTypes(branchId, serviceId, procedureQuery).then(setProcedureMatches).catch((cause) => { setProcedureMatches([]); setError(cause instanceof Error ? cause.message : "No fue posible buscar prestaciones."); });
+  }, [branchId, serviceId, procedureQuery, selectedServiceType]);
+
+  async function chooseServiceType(type: ServiceType) {
+    setSelectedServiceType(type);
+    setProcedureQuery(type.name);
+    setProcedureMatches([]);
+    setDraft((current) => current && { ...current, serviceTypeId: type.id, reason: type.name, procedureCode: type.code, serviceCategory: type.category, practitionerRequirement: type.practitionerRequirement, modality: (type.modality || "OT") as Appointment["modality"], standardCodeSystem: type.standardCodeSystem, standardCode: type.standardCode, standardDisplay: type.standardDisplay, practitionerName: type.practitionerRequirement === "none" ? "" : current.practitionerName, startTime: "", endTime: "", locationName: "" });
+    try {
+      const choices = await fetchCompatibleResources(branchId, type.id);
+      setResourceChoices(choices);
+      if (choices.length === 1) set("locationName", choices[0].name);
+    } catch { setResourceChoices([]); }
+  }
+
+  function chooseBranch(id: string) {
+    const branch = branches.find((item) => item.id === id);
+    setBranchId(id); setServiceId(""); setSelectedServiceType(null); setProcedureQuery(""); setResourceChoices([]);
+    setDraft((current) => current && { ...current, branch: branch?.name ?? "", service: "", reason: "", procedureCode: "", locationName: "", startTime: "", endTime: "" });
+  }
+
+  function chooseService(id: string) {
+    const service = branchServices.find((item) => item.id === id);
+    setServiceId(id); setSelectedServiceType(null); setProcedureQuery(""); setResourceChoices([]);
+    setDraft((current) => current && { ...current, service: service?.name ?? "", reason: "", procedureCode: "", locationName: "", startTime: "", endTime: "" });
+  }
+
+  function changeProcedureQuery(value: string) {
+    setProcedureQuery(value); setSelectedServiceType(null); setResourceChoices([]);
+    setDraft((current) => current && { ...current, reason: "", procedureCode: "", locationName: "", startTime: "", endTime: "" });
   }
 
   function pickSlot(start: string, end: string) {
@@ -144,7 +201,7 @@ export function AgendaManager() {
     event.preventDefault();
     if (!draft) return;
     if (!draft.patientId) { setStep(0); return setError("Selecciona o crea el paciente."); }
-    if (!draft.practitionerName || !draft.reason || !draft.locationName) { setStep(1); return setError("Completa profesional, prestación y sala."); }
+    if (!draft.branch || !draft.service || !draft.reason || !draft.locationName || (draft.practitionerRequirement === "required" && !draft.practitionerName)) { setStep(1); return setError("Completa sucursal, servicio, prestación, recurso y los participantes obligatorios."); }
     if (!draft.startTime || !draft.endTime) { setStep(1); return setError("Selecciona un horario disponible."); }
     const patient = patients.find((item) => item.id === draft.patientId);
     const exists = Boolean(draft.id);
@@ -172,8 +229,7 @@ export function AgendaManager() {
     }
   }
 
-  async function changeStatus(id: string, status: AppointmentStatus) {
-    const reason = ["cancelled", "no_show"].includes(status) ? window.prompt("Motivo del cambio de estado:") ?? "" : "";
+  async function changeStatus(id: string, status: AppointmentStatus, reason = "") {
     try {
       await setAppointmentStatus(id, status, reason);
       setAppointments((current) => current.map((item) => item.id === id ? { ...item, status, statusReason: reason } : item));
@@ -182,10 +238,21 @@ export function AgendaManager() {
     }
   }
 
+  function requestStatus(id: string, status: AppointmentStatus) {
+    if (["cancelled", "no_show"].includes(status)) setPendingStatus({ id, status, reason: "" });
+    else changeStatus(id, status);
+  }
+
   return (
-    <>
-      <div className="page-header"><div><p className="eyebrow">Agenda operativa</p><h2>Reserva de exámenes</h2><p>Los listados de opciones se administran en Configuración → Parámetros de la agenda.</p></div><button className="button primary" type="button" onClick={() => draft ? setDraft(null) : openDraft(emptyDraft(date))}>{draft ? "Cerrar" : "Nueva reserva"}</button></div>
+    <div className="agenda-page">
+      <div className="page-header agenda-header"><div><p className="eyebrow">Agenda clínica</p><h2>{displayDate(date)}</h2><p>Reserva, confirma y acompaña cada examen desde una sola vista.</p></div><button className="button primary agenda-new" type="button" onClick={() => draft ? setDraft(null) : openDraft(emptyDraft(date))}>{draft ? "Cerrar reserva" : "+ Nueva reserva"}</button></div>
       {error && !draft && <p className="notice" role="alert">{error}</p>}
+
+      {!draft && <section className="agenda-summary" aria-label="Resumen del día">
+        <span><strong>{visibleAppointments.length}</strong> citas</span>
+        <span><strong>{waiting}</strong> en atención</span>
+        <span><strong>{completed}</strong> atendidas</span>
+      </section>}
 
       {draft && (
         <form className="booking-form" onSubmit={submitAppointment}>
@@ -236,14 +303,13 @@ export function AgendaManager() {
             <fieldset className="booking-section">
               <legend>Reserva</legend>
               <div className="booking-grid">
-                <label>Sucursal<select value={draft.branch} onChange={(event) => set("branch", event.target.value)}><option value="">—</option>{options.sucursal.map((item) => <option key={item.id} value={item.label}>{item.label}</option>)}</select></label>
-                <label>Servicio<select value={draft.service} onChange={(event) => set("service", event.target.value)}><option value="">—</option>{options.servicio.map((item) => <option key={item.id} value={item.label}>{item.label}</option>)}</select></label>
-                <label>Especialidad<select value={draft.specialty} onChange={(event) => set("specialty", event.target.value)}><option value="">—</option>{options.especialidad.map((item) => <option key={item.id} value={item.label}>{item.label}</option>)}</select></label>
-                <label>Profesional *<select value={draft.practitionerName} onChange={(event) => set("practitionerName", event.target.value)}><option value="">Seleccionar…</option>{options.profesional.map((item) => <option key={item.id} value={item.label}>{item.label}</option>)}</select></label>
-                <label>Modalidad *<select value={draft.modality} onChange={(event) => set("modality", event.target.value as Appointment["modality"])}>{modalities.map((code) => <option key={code} value={code}>{code}</option>)}</select></label>
-                <label className="span-2">Prestación *<select value={draft.reason} onChange={(event) => pickProcedure(event.target.value)}><option value="">Seleccionar…</option>{options.prestacion.map((item) => <option key={item.id} value={item.label}>{item.code ? `${item.code} · ` : ""}{item.label}</option>)}</select></label>
-                <label>Sala / equipo *<select value={draft.locationName} onChange={(event) => set("locationName", event.target.value)}><option value="">Seleccionar…</option>{options.sala.map((item) => <option key={item.id} value={item.label}>{item.label}</option>)}</select></label>
+                <label className="span-2">Sucursal *<select value={branchId} onChange={(event) => chooseBranch(event.target.value)}><option value="">Seleccionar…</option>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>
+                <label className="span-2">Servicio *<select value={serviceId} onChange={(event) => chooseService(event.target.value)} disabled={!branchId}><option value="">Seleccionar…</option>{branchServices.map((service) => <option key={service.id} value={service.id}>{service.name}</option>)}</select></label>
+                <div className="span-2 procedure-picker"><label>Prestación *<input type="search" value={procedureQuery} onChange={(event) => changeProcedureQuery(event.target.value)} placeholder={serviceId ? "Filtra por nombre o código" : "Selecciona primero sucursal y servicio"} disabled={!serviceId} autoComplete="off" /></label>{serviceId && !selectedServiceType && <div className="procedure-browser"><small>{procedureQuery ? "Resultados" : "Prestaciones disponibles"}</small>{procedureMatches.map((type) => <button type="button" key={type.id} onClick={() => chooseServiceType(type)}><span><strong>{type.name}</strong><small>{type.code || "Sin código"} · {type.durationMin} min</small></span><span>Elegir →</span></button>)}{!procedureMatches.length && <span className="empty-inline">No hay coincidencias.</span>}</div>}{selectedServiceType && <div className="selected-procedure"><span><strong>{selectedServiceType.name}</strong><small>{selectedServiceType.code || "Sin código"} · {selectedServiceType.durationMin} min</small></span><button className="text-button" type="button" onClick={() => changeProcedureQuery("")}>Cambiar</button></div>}</div>
+                <label>Recurso compatible *<select value={draft.locationName} onChange={(event) => set("locationName", event.target.value)} disabled={!selectedServiceType && !draft.id}><option value="">Seleccionar…</option>{resourceChoices.map((resource) => <option key={resource.id} value={resource.name}>{resource.name}</option>)}</select></label>
                 <label>Fecha *<input required type="date" value={draft.date} onChange={(event) => set("date", event.target.value)} /></label>
+                {draft.practitionerRequirement !== "none" && <label>Profesional {draft.practitionerRequirement === "required" ? "*" : "(opcional)"}<select value={draft.practitionerName} onChange={(event) => set("practitionerName", event.target.value)}><option value="">Seleccionar…</option>{options.profesional.map((item) => <option key={item.id} value={item.label}>{item.label}</option>)}</select></label>}
+                {draft.reason && <div className="service-rule-summary"><span>{draft.serviceCategory === "consultation" ? "Consulta" : draft.serviceCategory === "imaging" ? "Imagenología" : draft.serviceCategory === "laboratory" ? "Laboratorio" : draft.serviceCategory === "pathology" ? "Anatomía patológica" : "Procedimiento"}</span>{draft.modality !== "OT" && <span>Modalidad {draft.modality}</span>}</div>}
 
                 <div className="slot-picker span-2">
                   <span className="slot-picker-head">Horarios disponibles <small>· {procedureDuration} min por bloque</small>{draft.startTime && <em> · seleccionado {draft.startTime}–{draft.endTime}</em>}</span>
@@ -252,7 +318,7 @@ export function AgendaManager() {
                     : dayHoliday
                     ? <p className="empty-inline">Feriado{dayHoliday.label ? ` (${dayHoliday.label})` : ""}: la sala no atiende.</p>
                     : slots.length
-                    ? <div className="slot-grid">{slots.map((slot) => <button type="button" key={slot.start} className={`slot ${draft.startTime === slot.start ? "active" : ""}`} onClick={() => pickSlot(slot.start, slot.end)}>{slot.start}</button>)}</div>
+                    ? <div className="time-picker">{[{ label: "Mañana", items: slots.filter((slot) => slot.start < "12:00") }, { label: "Tarde", items: slots.filter((slot) => slot.start >= "12:00") }].filter((period) => period.items.length).map((period) => <div className="time-period" key={period.label}><small>{period.label}</small><div>{period.items.map((slot) => <button type="button" key={slot.start} className={draft.startTime === slot.start ? "active" : ""} onClick={() => pickSlot(slot.start, slot.end)}><strong>{slot.start}</strong><span>– {slot.end}</span></button>)}</div></div>)}</div>
                     : <p className="empty-inline">Sin bloques libres ese día. Ajusta el horario de la sala en Configuración o usa horario manual.</p>}
                   <button type="button" className="text-button" onClick={() => setManualTime((value) => !value)}>{manualTime ? "Ocultar horario manual" : "Otro horario (manual)"}</button>
                 </div>
@@ -296,24 +362,25 @@ export function AgendaManager() {
           <footer className="booking-actions">
             {step > 0 && <button className="button secondary" type="button" onClick={() => setStep(step - 1)}>← Anterior</button>}
             {step < steps.length - 1 && <button className="button secondary" type="button" onClick={() => setStep(step + 1)}>Siguiente →</button>}
-            <button className="button primary" type="submit" disabled={saving}>{draft.id ? "Actualizar reserva" : "Crear reserva"}</button>
+            {step === steps.length - 1 && <button className="button primary" type="submit" disabled={saving}>{draft.id ? "Actualizar reserva" : "Crear reserva"}</button>}
             {error && <p className="form-error" role="alert">{error}</p>}
             {notice && !error && <p className="form-notice" role="status">{notice}</p>}
           </footer>
         </form>
       )}
 
-      <section className="toolbar" aria-label="Filtros de agenda">
+      <section className="toolbar agenda-toolbar" aria-label="Filtros de agenda">
         <label>Fecha<input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
         <label>Profesional<select value={practitioner} onChange={(event) => setPractitioner(event.target.value)}><option value="all">Todos</option>{options.profesional.map((item) => <option key={item.id} value={item.label}>{item.label}</option>)}</select></label>
         <label>Sala / equipo<select value={location} onChange={(event) => setLocation(event.target.value)}><option value="all">Todas</option>{options.sala.map((item) => <option key={item.id} value={item.label}>{item.label}</option>)}</select></label>
+        <button className="button secondary" type="button" onClick={() => setDate(today())}>Hoy</button>
       </section>
 
       <section className="schedule-list">
-        {visibleAppointments.map((appointment) => <article className="appointment-card" key={appointment.id}><div className="time-block"><strong>{appointment.startTime}</strong><span>{appointment.endTime}</span></div><div><h3>{appointment.patientName}{appointment.priority === "urgente" && <span className="status status-cancelled" style={{ marginLeft: 8 }}>Urgente</span>}</h3><p>{appointment.modality} · {appointment.reason}</p><span>{appointment.patientIdentifier && `ID ${appointment.patientIdentifier} · `}{appointment.practitionerName} · {appointment.locationName}{appointment.tags && ` · ${appointment.tags.split(",").join(", ")}`}</span></div><div className="appointment-actions"><select className={`status status-${appointment.status}`} aria-label={`Estado de ${appointment.patientName}`} value={appointment.status} onChange={(event) => changeStatus(appointment.id, event.target.value as AppointmentStatus)}>{APPOINTMENT_STATUSES.map((status) => <option key={status} value={status}>{appointmentStatusLabels[status]}</option>)}</select><button className="text-button" type="button" onClick={() => openDraft(appointment)}>Editar</button></div></article>)}
-        {!loading && !visibleAppointments.length && <p className="empty-state card">No hay citas para estos filtros.</p>}
+        {visibleAppointments.map((appointment) => <article className={`appointment-card appointment-${appointment.status}`} key={appointment.id}><div className="time-block"><strong>{appointment.startTime}</strong><span>{appointment.endTime}</span></div><div className="appointment-main"><h3>{appointment.patientName}{appointment.priority === "urgente" && <span className="status status-cancelled">Urgente</span>}</h3><p>{appointment.modality} · {appointment.reason}</p><span>{appointment.patientIdentifier && `ID ${appointment.patientIdentifier} · `}{appointment.practitionerName} · {appointment.locationName}{appointment.tags && ` · ${appointment.tags.split(",").join(", ")}`}</span></div><div className="appointment-actions"><select className={`status status-${appointment.status}`} aria-label={`Estado de ${appointment.patientName}`} value={appointment.status} onChange={(event) => requestStatus(appointment.id, event.target.value as AppointmentStatus)}>{APPOINTMENT_STATUSES.map((status) => <option key={status} value={status}>{appointmentStatusLabels[status]}</option>)}</select><button className="text-button" type="button" onClick={() => openDraft(appointment)}>Editar cita</button>{pendingStatus?.id === appointment.id && <div className="status-reason"><input aria-label="Motivo del cambio" autoFocus required value={pendingStatus.reason} onChange={(event) => setPendingStatus({ ...pendingStatus, reason: event.target.value })} placeholder="Motivo obligatorio" /><button className="text-button danger" type="button" disabled={!pendingStatus.reason.trim()} onClick={async () => { await changeStatus(appointment.id, pendingStatus.status, pendingStatus.reason.trim()); setPendingStatus(null); }}>Confirmar</button><button className="text-button" type="button" onClick={() => setPendingStatus(null)}>Cancelar</button></div>}</div></article>)}
+        {!loading && !visibleAppointments.length && <div className="empty-state card"><strong>Sin citas para esta selección</strong><span>Cambia los filtros o crea una nueva reserva.</span></div>}
         {loading && <p className="empty-state card">Cargando agenda…</p>}
       </section>
-    </>
+    </div>
   );
 }
