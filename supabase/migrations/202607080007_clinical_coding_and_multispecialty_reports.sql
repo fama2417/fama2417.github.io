@@ -3,7 +3,10 @@ alter table public.service_types
   add column standard_code_system text not null default 'LOCAL',
   add column standard_code text not null default '',
   add column standard_display text not null default '',
-  add constraint service_types_standard_system_check check (standard_code_system in ('LOCAL','LOINC','SNOMEDCT','ICD-10','ICD-11'));
+  add constraint service_types_standard_system_check check (standard_code_system in ('LOCAL','LOINC','SNOMEDCT','ICD-10','ICD-11')),
+  add constraint service_types_standard_code_check check (
+    standard_code_system = 'LOCAL' or (length(trim(standard_code)) > 0 and length(trim(standard_display)) > 0)
+  );
 
 update public.service_types
 set standard_code = code,
@@ -26,16 +29,38 @@ alter table public.radiology_reports
     report_code_system in ('LOCAL','LOINC','SNOMEDCT','ICD-10','ICD-11')
     and finding_code_system in ('LOCAL','LOINC','SNOMEDCT','ICD-10','ICD-11')
     and diagnosis_code_system in ('LOCAL','LOINC','SNOMEDCT','ICD-10','ICD-11')
+  ),
+  add constraint radiology_reports_optional_codes_check check (
+    (
+      (length(trim(finding_code)) = 0 and length(trim(finding_code_display)) = 0)
+      or (length(trim(finding_code)) > 0 and length(trim(finding_code_display)) > 0)
+    )
+    and (
+      (length(trim(diagnosis_code)) = 0 and length(trim(diagnosis_code_display)) = 0)
+      or (length(trim(diagnosis_code)) > 0 and length(trim(diagnosis_code_display)) > 0)
+    )
   );
+
+update public.appointments a
+set service_type_id = st.id
+from public.service_types st
+where a.service_type_id is null
+  and st.tenant_id = a.tenant_id
+  and (st.code = a.procedure_code or st.name = a.reason);
 
 update public.radiology_reports r
 set report_category = a.service_category,
     report_code_system = coalesce(nullif(st.standard_code_system, ''), 'LOCAL'),
-    report_code = coalesce(nullif(st.standard_code, ''), a.procedure_code, ''),
-    report_code_display = coalesce(nullif(st.standard_display, ''), a.reason, '')
+    report_code = coalesce(nullif(st.standard_code, ''), nullif(a.procedure_code, ''), a.service_type_id::text, a.id::text),
+    report_code_display = coalesce(nullif(st.standard_display, ''), nullif(a.reason, ''), 'Prestación clínica')
 from public.appointments a
 left join public.service_types st on st.id = a.service_type_id
 where r.appointment_id = a.id;
+
+alter table public.radiology_reports
+  add constraint radiology_reports_required_report_code_check check (
+    status <> 'final' or (length(trim(report_code)) > 0 and length(trim(report_code_display)) > 0)
+  );
 
 alter table public.report_templates
   add column category text not null default 'imaging',
@@ -84,3 +109,5 @@ language sql stable set search_path = '' as $$
 $$;
 grant execute on function public.search_available_service_types(uuid, uuid, text) to authenticated;
 grant execute on function public.search_master_service_types(uuid, text) to authenticated;
+
+notify pgrst, 'reload schema';

@@ -83,23 +83,14 @@ export const searchMasterServiceTypes = async (serviceId: string, term = "") => 
   return (data as Record<string, unknown>[]).map(mapServiceType);
 };
 
-const missingCodingColumns = (caught: unknown) => caught instanceof Error && caught.message.includes("standard_code");
-const withoutCoding = (row: Record<string, unknown>) => {
-  const { standard_code_system, standard_code, standard_display, ...rest } = row;
-  void standard_code_system; void standard_code; void standard_display;
-  return rest;
-};
-
 export async function createMasterServiceType(serviceId: string, input: { code: string; name: string; durationMin: number; category: ServiceCategory; modality: string; practitionerRequirement: PractitionerRequirement; standardCodeSystem: string; standardCode: string; standardDisplay: string }) {
   const row = { healthcare_service_id: serviceId, code: input.code, name: input.name, duration_min: input.durationMin, category: input.category, modality: input.modality, practitioner_requirement: input.practitionerRequirement, standard_code_system: input.standardCodeSystem || "LOCAL", standard_code: input.standardCode, standard_display: input.standardDisplay };
-  try { return await insert1("service_types", row); }
-  catch (caught) { if (!missingCodingColumns(caught)) throw caught; return insert1("service_types", withoutCoding(row)); }
+  return insert1("service_types", row);
 }
 
 export async function updateMasterServiceType(id: string, input: Pick<ServiceType, "code" | "name" | "durationMin" | "category" | "modality" | "practitionerRequirement" | "standardCodeSystem" | "standardCode" | "standardDisplay">) {
   const row = { code: input.code, name: input.name, duration_min: input.durationMin, category: input.category, modality: input.modality, practitioner_requirement: input.practitionerRequirement, standard_code_system: input.standardCodeSystem || "LOCAL", standard_code: input.standardCode, standard_display: input.standardDisplay };
-  try { await patch("service_types", id, row); }
-  catch (caught) { if (!missingCodingColumns(caught)) throw caught; await patch("service_types", id, withoutCoding(row)); }
+  await patch("service_types", id, row);
 }
 
 export const countTestServiceTypes = async () => {
@@ -160,8 +151,7 @@ export const createDevice = (r: { organizationId: string; locationId?: string | 
   insert1("devices", { organization_id: r.organizationId, location_id: r.locationId ?? null, name: r.name, modality: r.modality ?? "" });
 type ServiceTypeCoding = Pick<ServiceType, "standardCodeSystem" | "standardCode" | "standardDisplay">;
 export const createServiceType = (r: Omit<ServiceType, "id" | "active" | keyof ServiceTypeCoding> & Partial<ServiceTypeCoding>) =>
-  insert1("service_types", { code: r.code, name: r.name, duration_min: r.durationMin, capacity: r.capacity, requires_contrast: r.requiresContrast, requires_anesthesia: r.requiresAnesthesia, prep_instructions: r.prepInstructions, category: r.category, modality: r.modality, practitioner_requirement: r.practitionerRequirement, standard_code_system: r.standardCodeSystem ?? "LOCAL", standard_code: r.standardCode ?? "", standard_display: r.standardDisplay ?? "" })
-    .catch((caught) => { if (!missingCodingColumns(caught)) throw caught; return insert1("service_types", { code: r.code, name: r.name, duration_min: r.durationMin, capacity: r.capacity, requires_contrast: r.requiresContrast, requires_anesthesia: r.requiresAnesthesia, prep_instructions: r.prepInstructions, category: r.category, modality: r.modality, practitioner_requirement: r.practitionerRequirement }); });
+  insert1("service_types", { code: r.code, name: r.name, duration_min: r.durationMin, capacity: r.capacity, requires_contrast: r.requiresContrast, requires_anesthesia: r.requiresAnesthesia, prep_instructions: r.prepInstructions, category: r.category, modality: r.modality, practitioner_requirement: r.practitionerRequirement, standard_code_system: r.standardCodeSystem ?? "LOCAL", standard_code: r.standardCode ?? "", standard_display: r.standardDisplay ?? "" });
 
 // --- Recurso agendable: crea el recurso + componentes (composite) + tipos de atención permitidos ---
 export async function createResource(input: {
@@ -199,8 +189,7 @@ export const updatePractitioner = (id: string, p: { fullName: string; profession
 export const updateRole = (id: string, p: { specialty: string; locationId: string | null; healthcareServiceId: string | null; active: boolean }) => patch("practitioner_roles", id, { specialty: p.specialty, location_id: p.locationId, healthcare_service_id: p.healthcareServiceId, active: p.active });
 export const updateDevice = (id: string, p: { name: string; modality: string; locationId: string | null; active: boolean }) => patch("devices", id, { name: p.name, modality: p.modality, location_id: p.locationId, active: p.active });
 export const updateServiceType = (id: string, p: Omit<ServiceType, "id" | keyof ServiceTypeCoding> & Partial<ServiceTypeCoding>) =>
-  patch("service_types", id, { code: p.code, name: p.name, duration_min: p.durationMin, capacity: p.capacity, requires_contrast: p.requiresContrast, requires_anesthesia: p.requiresAnesthesia, prep_instructions: p.prepInstructions, active: p.active, category: p.category, modality: p.modality, practitioner_requirement: p.practitionerRequirement, standard_code_system: p.standardCodeSystem ?? "LOCAL", standard_code: p.standardCode ?? "", standard_display: p.standardDisplay ?? "" })
-    .catch((caught) => { if (!missingCodingColumns(caught)) throw caught; return patch("service_types", id, { code: p.code, name: p.name, duration_min: p.durationMin, capacity: p.capacity, requires_contrast: p.requiresContrast, requires_anesthesia: p.requiresAnesthesia, prep_instructions: p.prepInstructions, active: p.active, category: p.category, modality: p.modality, practitioner_requirement: p.practitionerRequirement }); });
+  patch("service_types", id, { code: p.code, name: p.name, duration_min: p.durationMin, capacity: p.capacity, requires_contrast: p.requiresContrast, requires_anesthesia: p.requiresAnesthesia, prep_instructions: p.prepInstructions, active: p.active, category: p.category, modality: p.modality, practitioner_requirement: p.practitionerRequirement, standard_code_system: p.standardCodeSystem ?? "LOCAL", standard_code: p.standardCode ?? "", standard_display: p.standardDisplay ?? "" });
 
 export const fetchResourceComponents = async (compositeId: string) => {
   const { data, error } = await supabase.from("schedulable_resource_components").select("member_id").eq("composite_id", compositeId);

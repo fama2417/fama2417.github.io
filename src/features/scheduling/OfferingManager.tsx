@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { CODE_SYSTEMS } from "@/features/clinical/coding";
+import { CODE_SYSTEMS, codeHref, codingError } from "@/features/clinical/coding";
 import {
   countTestServiceTypes, createMasterServiceType, deleteLocationResource, fetchAssignedServiceTypeIds, fetchBranches,
   fetchBranchServices, fetchLocations, fetchResources, fetchServices, saveLocationResource, searchMasterServiceTypes,
@@ -13,6 +13,11 @@ import { DICOM_MODALITIES } from "./modalities";
 type ResourceDraft = { id: string | null; name: string; branchId: string; serviceId: string; active: boolean };
 const categoryLabels: Record<ServiceCategory, string> = { consultation: "Consulta", imaging: "Imagenología", laboratory: "Laboratorio", pathology: "Anatomía patológica", procedure: "Procedimiento" };
 const practitionerLabels: Record<PractitionerRequirement, string> = { none: "No requiere profesional", optional: "Profesional opcional", required: "Profesional obligatorio" };
+const errorMessage = (caught: unknown, fallback: string) => {
+  const message = caught instanceof Error ? caught.message
+    : caught && typeof caught === "object" && "message" in caught ? String(caught.message) : "";
+  return message ? `${fallback} Detalle: ${message}` : fallback;
+};
 
 export function OfferingManager() {
   const [branches, setBranches] = useState<Location[]>([]);
@@ -87,22 +92,27 @@ export function OfferingManager() {
     const currentBranch = location?.kind === "room" ? location.parentId : location?.id;
     if (!currentBranch || !resource.healthcareServiceId) return;
     try { await saveLocationResource({ id: resource.id, branchId: currentBranch, serviceId: resource.healthcareServiceId, name: resource.name, active: !resource.active }); await reloadResources(); }
-    catch { setError("No fue posible cambiar el estado del recurso."); }
+    catch (caught) { setError(errorMessage(caught, "No fue posible cambiar el estado del recurso.")); }
   }
 
   async function toggle(typeId: string, enabled: boolean) {
     setError("");
     try { await setResourceServiceType(resourceId, typeId, enabled); setAssigned((current) => enabled ? [...current, typeId] : current.filter((id) => id !== typeId)); }
-    catch { setError("No fue posible actualizar la prestación del recurso."); }
+    catch (caught) { setError(errorMessage(caught, "No fue posible actualizar la prestación del recurso.")); }
   }
 
   async function toggleBranchService(id: string, enabled: boolean) {
     try { await setBranchService(branchId, id, enabled); setServices(await fetchBranchServices(branchId)); }
-    catch { setError("No fue posible actualizar los servicios de la sucursal."); }
+    catch (caught) { setError(errorMessage(caught, "No fue posible actualizar los servicios de la sucursal.")); }
   }
 
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); const form = event.currentTarget; const values = new FormData(form); setError("");
+    const standardSystem = String(values.get("standardSystem"));
+    const standardCode = String(values.get("standardCode")).trim();
+    const standardDisplay = String(values.get("standardDisplay")).trim();
+    const validation = codingError(standardSystem, standardCode, standardDisplay, "Prestación");
+    if (validation) return setError(validation);
     try {
       const id = await createMasterServiceType(serviceId, {
         code: String(values.get("code")).trim(),
@@ -111,23 +121,31 @@ export function OfferingManager() {
         category: values.get("category") as ServiceCategory,
         modality: String(values.get("modality")),
         practitionerRequirement: values.get("practitioner") as PractitionerRequirement,
-        standardCodeSystem: String(values.get("standardSystem")),
-        standardCode: String(values.get("standardCode")).trim(),
-        standardDisplay: String(values.get("standardDisplay")).trim(),
+        standardCodeSystem: standardSystem,
+        standardCode,
+        standardDisplay,
       });
       if (resourceId) await setResourceServiceType(resourceId, id, true);
       form.reset(); setTerm(""); setTypes(await searchMasterServiceTypes(serviceId));
       if (resourceId) setAssigned(await fetchAssignedServiceTypeIds(resourceId));
-    } catch { setError("No fue posible crear la prestación. Revisa que el nombre no esté repetido."); }
+    } catch (caught) { setError(errorMessage(caught, "No fue posible crear la prestación.")); }
   }
 
   async function saveType(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); if (!editingType) return;
+    const validation = codingError(editingType.standardCodeSystem || "LOCAL", editingType.standardCode, editingType.standardDisplay, "Prestación");
+    if (validation) return setError(validation);
     try { await updateMasterServiceType(editingType.id, editingType); setTypes((current) => current.map((item) => item.id === editingType.id ? editingType : item)); setEditingType(null); }
-    catch { setError("No fue posible actualizar la prestación."); }
+    catch (caught) { setError(errorMessage(caught, "No fue posible actualizar la prestación.")); }
   }
 
   const branchName = branches.find((branch) => branch.id === branchId)?.name;
+  const codeLink = (type: ServiceType) => {
+    if (!type.standardCode) return null;
+    const label = `${type.standardCodeSystem || "LOCAL"}:${type.standardCode}`;
+    const href = codeHref(type.standardCodeSystem || "LOCAL", type.standardCode);
+    return href ? <a className="coding-link" href={href} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>{label}</a> : label;
+  };
   return <section className="card" aria-label="Oferta de prestaciones">
     <div className="card-heading"><div><h3>Recursos y prestaciones</h3><p>Configura qué ofrece cada sucursal sin cargar las 600 prestaciones en la agenda.</p></div><span className="phase-state">{testCount} prestaciones de prueba</span></div>
     {error && <p className="form-error" role="alert">{error}</p>}{message && <p className="notice" role="status">{message}</p>}
@@ -166,7 +184,7 @@ export function OfferingManager() {
           <label className="wide-field">Nombre estándar<input value={editingType.standardDisplay} onChange={(event) => setEditingType({ ...editingType, standardDisplay: event.target.value })} placeholder="Nombre oficial si existe" /></label>
           <div className="form-actions"><button className="button primary" type="submit">Guardar cambios</button><button className="button secondary" type="button" onClick={() => setEditingType(null)}>Cancelar</button></div>
         </form> : <div className="offering-type-row">
-          <label><input type="checkbox" checked={assigned.includes(type.id)} disabled={!resourceId} onChange={(event) => toggle(type.id, event.target.checked)} /><span><strong>{type.name}</strong><small>{categoryLabels[type.category]} · {type.durationMin} min{type.modality && ` · ${type.modality}`} · {practitionerLabels[type.practitionerRequirement]}{type.standardCode && ` · ${type.standardCodeSystem || "LOCAL"}:${type.standardCode}`}</small></span></label>
+          <label><input type="checkbox" checked={assigned.includes(type.id)} disabled={!resourceId} onChange={(event) => toggle(type.id, event.target.checked)} /><span><strong>{type.name}</strong><small>{categoryLabels[type.category]} · {type.durationMin} min{type.modality && ` · ${type.modality}`} · {practitionerLabels[type.practitionerRequirement]}{type.standardCode && <> · {codeLink(type)}</>}</small></span></label>
           <button className="text-button" type="button" onClick={() => setEditingType(type)}>Editar reglas</button>
         </div>}
       </li>)}

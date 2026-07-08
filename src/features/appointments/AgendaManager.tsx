@@ -129,7 +129,7 @@ export function AgendaManager() {
     setSelectedServiceType(type);
     setProcedureQuery(type.name);
     setProcedureMatches([]);
-    setDraft((current) => current && { ...current, reason: type.name, procedureCode: type.code, serviceCategory: type.category, practitionerRequirement: type.practitionerRequirement, modality: (type.modality || "OT") as Appointment["modality"], practitionerName: type.practitionerRequirement === "none" ? "" : current.practitionerName, startTime: "", endTime: "", locationName: "" });
+    setDraft((current) => current && { ...current, serviceTypeId: type.id, reason: type.name, procedureCode: type.code, serviceCategory: type.category, practitionerRequirement: type.practitionerRequirement, modality: (type.modality || "OT") as Appointment["modality"], standardCodeSystem: type.standardCodeSystem, standardCode: type.standardCode, standardDisplay: type.standardDisplay, practitionerName: type.practitionerRequirement === "none" ? "" : current.practitionerName, startTime: "", endTime: "", locationName: "" });
     try {
       const choices = await fetchCompatibleResources(branchId, type.id);
       setResourceChoices(choices);

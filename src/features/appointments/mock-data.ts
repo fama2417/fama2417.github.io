@@ -16,6 +16,7 @@ export type Appointment = {
   orthancStudyId?: string;
   branch: string;
   service: string;
+  serviceTypeId?: string;
   serviceCategory: "consultation" | "imaging" | "laboratory" | "pathology" | "procedure";
   practitionerRequirement: "none" | "optional" | "required";
   specialty: string;
