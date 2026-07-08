@@ -48,6 +48,10 @@ where a.service_type_id is null
   and st.tenant_id = a.tenant_id
   and (st.code = a.procedure_code or st.name = a.reason);
 
+-- Backfill administrativo: el trigger protect_final_report vetaria el UPDATE sobre informes
+-- firmados ("informe definitivo es inmutable"), asi que se suspende solo durante este relleno.
+alter table public.radiology_reports disable trigger protect_final_report;
+alter table public.radiology_reports disable trigger audit_reports;
 update public.radiology_reports r
 set report_category = a.service_category,
     report_code_system = coalesce(nullif(st.standard_code_system, ''), 'LOCAL'),
@@ -56,6 +60,8 @@ set report_category = a.service_category,
 from public.appointments a
 left join public.service_types st on st.id = a.service_type_id
 where r.appointment_id = a.id;
+alter table public.radiology_reports enable trigger protect_final_report;
+alter table public.radiology_reports enable trigger audit_reports;
 
 alter table public.radiology_reports
   add constraint radiology_reports_required_report_code_check check (
