@@ -254,7 +254,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--primary); outlin
 .integration-links a { color: var(--primary); font-weight: 700; }
 code { background: var(--surface-muted); border-radius: 4px; padding: 2px 6px; }
 
-.table-card { overflow: auto; }
+.table-card { max-width: 100%; overflow: auto; }
 table { border-collapse: collapse; width: 100%; }
 th, td { border-bottom: 1px solid var(--border); padding: 11px 14px; text-align: left; }
 th { background: #0a1a1d; color: var(--primary); font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; }
@@ -279,10 +279,14 @@ tr.row-link:hover td { background: var(--surface-muted); }
 .slot-picker-head { color: var(--muted); font-size: 0.85rem; }
 .slot-picker-head small { color: var(--muted); }
 .slot-picker-head em { color: var(--primary); font-style: normal; font-weight: 700; }
-.slot-grid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(74px, 1fr)); }
-.slot { background: transparent; border: 1px solid var(--border); border-radius: 6px; color: var(--text); cursor: pointer; font-size: 0.9rem; font-variant-numeric: tabular-nums; padding: 10px 0; text-align: center; transition: border-color 0.12s, background 0.12s; }
-.slot:hover { border-color: var(--primary); }
-.slot.active { background: var(--primary); border-color: var(--primary); color: #04211d; font-weight: 700; }
+.time-picker { display: grid; gap: 14px; }
+.time-period { display: grid; grid-template-columns: 72px 1fr; gap: 12px; align-items: start; }
+.time-period > small { color: var(--muted); padding-top: 8px; text-transform: uppercase; letter-spacing: .08em; }
+.time-period > div { display: flex; flex-wrap: wrap; gap: 4px 18px; }
+.time-period button { display: flex; gap: 5px; align-items: baseline; background: none; border: 0; border-bottom: 2px solid transparent; color: var(--text); cursor: pointer; font-variant-numeric: tabular-nums; padding: 6px 2px; }
+.time-period button span { color: var(--muted); font-size: .76rem; }
+.time-period button:hover, .time-period button.active { border-bottom-color: var(--primary); color: var(--primary); }
+.time-period button.active span { color: var(--primary); }
 .slot-picker .text-button { justify-self: start; padding: 0; }
 .booking-actions { align-items: center; display: flex; gap: 16px; }
 .booking-actions .form-error { margin: 0; }
@@ -296,6 +300,8 @@ tr.row-link:hover td { background: var(--surface-muted); }
 .catalog-form { align-items: end; display: grid; gap: 12px; grid-template-columns: 200px 1fr auto; margin-bottom: 12px; }
 .catalog-form label { color: var(--muted); display: grid; font-size: 0.82rem; gap: 5px; }
 .catalog-form label.checkbox { align-items: center; grid-auto-flow: column; justify-content: start; }
+.clinical-form > *, .catalog-form > *, .booking-grid > *, .filter-layout > * { min-width: 0; }
+.clinical-form input, .clinical-form select, .clinical-form textarea, .catalog-form input, .catalog-form select, .catalog-form textarea, .booking-grid input, .booking-grid select, .booking-grid textarea, .filter-panel input, .filter-panel select { box-sizing: border-box; max-width: 100%; min-width: 0; width: 100%; }
 .catalog-list { display: grid; gap: 4px; list-style: none; margin: 0; padding: 0; }
 .catalog-list li { align-items: center; border-bottom: 1px solid var(--border); display: flex; gap: 12px; justify-content: space-between; padding: 8px 4px; }
 .catalog-list li.inactive > span { color: var(--muted); text-decoration: line-through; }
@@ -393,6 +399,19 @@ tr.row-link:hover td { background: var(--surface-muted); }
 .filter-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; display: grid; gap: 12px; padding: 14px; }
 .filter-panel label { color: var(--muted); display: grid; font-size: 0.82rem; gap: 5px; }
 .filter-panel .text-button { justify-self: start; padding: 0; }
+.filter-layout .table-card table { min-width: 920px; }
+.filter-layout .table-card th, .filter-layout .table-card td { max-width: 260px; vertical-align: middle; }
+.filter-layout .table-card td { overflow-wrap: anywhere; }
+.filter-layout .table-card td:has(.status), .filter-layout .table-card td:has(.alert-icons) { white-space: nowrap; }
+.filter-panel .saved-filters { display: grid; gap: 8px; min-width: 0; }
+.filter-panel .saved-filters input { font-size: .82rem; }
+.service-category { border: 1px solid var(--border); border-radius: 999px; display: inline-block; font-size: .76rem; padding: 4px 8px; white-space: nowrap; }
+.service-category-imaging { border-color: color-mix(in srgb, var(--primary) 45%, var(--border)); color: var(--primary); }
+.muted-value { color: var(--muted); font-size: .82rem; }
+.status-change-dialog { display: grid; gap: 14px; max-width: 520px; width: min(520px, calc(100vw - 32px)); }
+.status-change-dialog label { color: var(--muted); display: grid; font-size: .85rem; gap: 6px; }
+.status-change-dialog textarea { min-height: 96px; resize: vertical; }
+.status-change-dialog .form-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 
 /* Ventana de informe */
 .report-workstation {
@@ -553,7 +572,9 @@ body:has(.report-workstation) .app-shell { flex: 1; min-height: 0; }
 .resource-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
 .resource-section-heading h4, .resource-section-heading p { margin: 0; }
 .resource-section-heading p { color: var(--muted); margin-top: 4px; }
-.resource-editor { padding: 18px; margin-bottom: 16px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+.resource-editor { grid-template-columns: 1.2fr 1fr 1fr; padding: 18px; margin-bottom: 16px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+.resource-editor .checkbox-label { align-self: center; grid-column: 1; padding: 8px 0; }
+.resource-editor .form-actions { grid-column: 2 / -1; justify-self: end; }
 .resource-grid { display: grid; gap: 10px; margin-bottom: 20px; }
 .resource-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 12px; }
 .resource-card > div:first-child { display: grid; gap: 3px; }
@@ -565,4 +586,23 @@ body:has(.report-workstation) .app-shell { flex: 1; min-height: 0; }
 .status-reason input { min-width: 180px; }
 .service-checks { display: grid; gap: 8px; padding-top: 12px; }
 .service-checks label, .checkbox-label { display: flex; align-items: center; gap: 8px; }
-@media (max-width: 720px) { .resource-section-heading, .resource-card { align-items: stretch; flex-direction: column; } }
+.offering-type-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; }
+.offering-type-row > label { flex: 1; }
+.service-type-editor, .service-type-create { grid-template-columns: repeat(4, minmax(150px, 1fr)); padding: 14px; width: 100%; }
+.service-type-editor .wide-field, .service-type-create .wide-field { grid-column: span 2; }
+.service-type-editor .form-actions, .service-type-create .form-actions { display: flex; gap: 10px; grid-column: 1 / -1; }
+.service-type-editor .button, .service-type-create .button { width: auto; }
+.procedure-picker { display: grid; gap: 10px; }
+.procedure-picker > label { display: grid; gap: 6px; }
+.procedure-browser { border: 1px solid var(--border); border-radius: 12px; display: grid; max-height: 280px; overflow: auto; padding: 8px; }
+.procedure-browser > small { color: var(--muted); padding: 6px 8px 8px; text-transform: uppercase; letter-spacing: .08em; }
+.procedure-browser button { align-items: center; background: none; border: 0; border-top: 1px solid var(--border); color: var(--text); cursor: pointer; display: flex; justify-content: space-between; padding: 11px 8px; text-align: left; }
+.procedure-browser button:first-of-type { border-top: 0; }
+.procedure-browser button:hover { background: color-mix(in srgb, var(--primary) 8%, transparent); }
+.procedure-browser button > span:first-child, .selected-procedure > span { display: grid; gap: 3px; }
+.procedure-browser button small, .selected-procedure small { color: var(--muted); }
+.procedure-browser button > span:last-child { color: var(--primary); font-size: .82rem; }
+.selected-procedure { align-items: center; background: color-mix(in srgb, var(--primary) 10%, transparent); border: 1px solid color-mix(in srgb, var(--primary) 35%, var(--border)); border-radius: 12px; display: flex; justify-content: space-between; padding: 12px 14px; }
+.service-rule-summary { align-self: end; display: flex; gap: 8px; flex-wrap: wrap; }
+.service-rule-summary span { background: color-mix(in srgb, var(--primary) 12%, transparent); border-radius: 999px; color: var(--primary); font-size: .8rem; padding: 7px 10px; }
+@media (max-width: 720px) { .resource-section-heading, .resource-card { align-items: stretch; flex-direction: column; } .resource-editor, .service-type-editor, .service-type-create { grid-template-columns: 1fr; } .resource-editor .form-actions, .service-type-editor .wide-field, .service-type-create .wide-field, .service-type-editor .form-actions, .service-type-create .form-actions { grid-column: 1; } }

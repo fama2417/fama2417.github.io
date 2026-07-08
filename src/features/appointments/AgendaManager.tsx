@@ -16,8 +16,7 @@ import { APPOINTMENT_STATUSES, appointmentStatusLabels, type AppointmentStatus }
 import { appointmentError } from "./validation";
 
 const today = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Santiago" });
-const emptyDraft = (date: string): Appointment => ({ id: "", patientId: "", patientName: "", practitionerName: "", locationName: "", date, startTime: "", endTime: "", status: "scheduled", reason: "", modality: "US", ...emptyClinicalDetail });
-const modalities = ["US", "DX", "CT", "MR", "MG"] as const;
+const emptyDraft = (date: string): Appointment => ({ id: "", patientId: "", patientName: "", practitionerName: "", locationName: "", date, startTime: "", endTime: "", status: "scheduled", reason: "", modality: "OT", ...emptyClinicalDetail });
 const emptyNewPatient = { identifier: "", identifierType: "run" as Patient["identifierType"], name: "", birthDate: "", sex: "unknown" as Patient["sex"], prevision: "", phone: "", consent: false };
 const normalizePatient = (value: string) => value.toLocaleLowerCase("es-CL").replace(/[^a-z0-9áéíóúñ]/g, "");
 
@@ -94,8 +93,8 @@ export function AgendaManager() {
   const slots = useMemo(() => {
     if (!draft || dayHoliday) return [];
     const nowMin = draft.date === today() ? new Date().getHours() * 60 + new Date().getMinutes() : undefined;
-    return availableSlots(draft.date, draft.locationName, procedureDuration, schedules, appointments, { excludeId: draft.id, nowMin });
-  }, [draft?.date, draft?.locationName, procedureDuration, schedules, appointments, dayHoliday, draft?.id]);
+    return availableSlots(draft.date, draft.locationName, procedureDuration, schedules, appointments, { excludeId: draft.id, nowMin, practitionerName: draft.practitionerName || undefined });
+  }, [draft?.date, draft?.locationName, draft?.practitionerName, procedureDuration, schedules, appointments, dayHoliday, draft?.id]);
 
   function openDraft(base: Appointment) {
     setDraft(base);
@@ -122,15 +121,15 @@ export function AgendaManager() {
   }, [branchId, draft?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (!branchId || !serviceId || selectedServiceType || procedureQuery.trim().length < 2) { setProcedureMatches([]); return; }
-    searchAvailableServiceTypes(branchId, serviceId, procedureQuery).then(setProcedureMatches).catch(() => setProcedureMatches([]));
+    if (!branchId || !serviceId || selectedServiceType || procedureQuery.trim().length === 1) { setProcedureMatches([]); return; }
+    searchAvailableServiceTypes(branchId, serviceId, procedureQuery).then(setProcedureMatches).catch((cause) => { setProcedureMatches([]); setError(cause instanceof Error ? cause.message : "No fue posible buscar prestaciones."); });
   }, [branchId, serviceId, procedureQuery, selectedServiceType]);
 
   async function chooseServiceType(type: ServiceType) {
     setSelectedServiceType(type);
     setProcedureQuery(type.name);
     setProcedureMatches([]);
-    setDraft((current) => current && { ...current, reason: type.name, procedureCode: type.code, startTime: "", endTime: "", locationName: "" });
+    setDraft((current) => current && { ...current, reason: type.name, procedureCode: type.code, serviceCategory: type.category, practitionerRequirement: type.practitionerRequirement, modality: (type.modality || "OT") as Appointment["modality"], practitionerName: type.practitionerRequirement === "none" ? "" : current.practitionerName, startTime: "", endTime: "", locationName: "" });
     try {
       const choices = await fetchCompatibleResources(branchId, type.id);
       setResourceChoices(choices);
@@ -202,7 +201,7 @@ export function AgendaManager() {
     event.preventDefault();
     if (!draft) return;
     if (!draft.patientId) { setStep(0); return setError("Selecciona o crea el paciente."); }
-    if (!draft.branch || !draft.service || !draft.practitionerName || !draft.reason || !draft.locationName) { setStep(1); return setError("Completa sucursal, servicio, profesional, prestación y recurso."); }
+    if (!draft.branch || !draft.service || !draft.reason || !draft.locationName || (draft.practitionerRequirement === "required" && !draft.practitionerName)) { setStep(1); return setError("Completa sucursal, servicio, prestación, recurso y los participantes obligatorios."); }
     if (!draft.startTime || !draft.endTime) { setStep(1); return setError("Selecciona un horario disponible."); }
     const patient = patients.find((item) => item.id === draft.patientId);
     const exists = Boolean(draft.id);
@@ -306,15 +305,11 @@ export function AgendaManager() {
               <div className="booking-grid">
                 <label className="span-2">Sucursal *<select value={branchId} onChange={(event) => chooseBranch(event.target.value)}><option value="">Seleccionar…</option>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>
                 <label className="span-2">Servicio *<select value={serviceId} onChange={(event) => chooseService(event.target.value)} disabled={!branchId}><option value="">Seleccionar…</option>{branchServices.map((service) => <option key={service.id} value={service.id}>{service.name}</option>)}</select></label>
-                <label className="span-2 patient-search">Prestación *
-                  <input type="search" value={procedureQuery} onChange={(event) => changeProcedureQuery(event.target.value)} placeholder={serviceId ? "Busca por código o nombre" : "Selecciona primero sucursal y servicio"} disabled={!serviceId} autoComplete="off" />
-                  {procedureMatches.length > 0 && <span className="patient-search-results">{procedureMatches.map((type) => <button type="button" key={type.id} onClick={() => chooseServiceType(type)}><strong>{type.name}</strong><small>{type.code || "Sin código"} · {type.durationMin} min</small></button>)}</span>}
-                  {serviceId && procedureQuery.trim().length > 0 && procedureQuery.trim().length < 2 && <span className="empty-inline">Escribe al menos dos caracteres.</span>}
-                </label>
+                <div className="span-2 procedure-picker"><label>Prestación *<input type="search" value={procedureQuery} onChange={(event) => changeProcedureQuery(event.target.value)} placeholder={serviceId ? "Filtra por nombre o código" : "Selecciona primero sucursal y servicio"} disabled={!serviceId} autoComplete="off" /></label>{serviceId && !selectedServiceType && <div className="procedure-browser"><small>{procedureQuery ? "Resultados" : "Prestaciones disponibles"}</small>{procedureMatches.map((type) => <button type="button" key={type.id} onClick={() => chooseServiceType(type)}><span><strong>{type.name}</strong><small>{type.code || "Sin código"} · {type.durationMin} min</small></span><span>Elegir →</span></button>)}{!procedureMatches.length && <span className="empty-inline">No hay coincidencias.</span>}</div>}{selectedServiceType && <div className="selected-procedure"><span><strong>{selectedServiceType.name}</strong><small>{selectedServiceType.code || "Sin código"} · {selectedServiceType.durationMin} min</small></span><button className="text-button" type="button" onClick={() => changeProcedureQuery("")}>Cambiar</button></div>}</div>
                 <label>Recurso compatible *<select value={draft.locationName} onChange={(event) => set("locationName", event.target.value)} disabled={!selectedServiceType && !draft.id}><option value="">Seleccionar…</option>{resourceChoices.map((resource) => <option key={resource.id} value={resource.name}>{resource.name}</option>)}</select></label>
                 <label>Fecha *<input required type="date" value={draft.date} onChange={(event) => set("date", event.target.value)} /></label>
-                <label>Profesional *<select value={draft.practitionerName} onChange={(event) => set("practitionerName", event.target.value)}><option value="">Seleccionar…</option>{options.profesional.map((item) => <option key={item.id} value={item.label}>{item.label}</option>)}</select></label>
-                <label>Modalidad *<select value={draft.modality} onChange={(event) => set("modality", event.target.value as Appointment["modality"])}>{modalities.map((code) => <option key={code} value={code}>{code}</option>)}</select></label>
+                {draft.practitionerRequirement !== "none" && <label>Profesional {draft.practitionerRequirement === "required" ? "*" : "(opcional)"}<select value={draft.practitionerName} onChange={(event) => set("practitionerName", event.target.value)}><option value="">Seleccionar…</option>{options.profesional.map((item) => <option key={item.id} value={item.label}>{item.label}</option>)}</select></label>}
+                {draft.reason && <div className="service-rule-summary"><span>{draft.serviceCategory === "consultation" ? "Consulta" : draft.serviceCategory === "imaging" ? "Imagenología" : draft.serviceCategory === "laboratory" ? "Laboratorio" : draft.serviceCategory === "pathology" ? "Anatomía patológica" : "Procedimiento"}</span>{draft.modality !== "OT" && <span>Modalidad {draft.modality}</span>}</div>}
 
                 <div className="slot-picker span-2">
                   <span className="slot-picker-head">Horarios disponibles <small>· {procedureDuration} min por bloque</small>{draft.startTime && <em> · seleccionado {draft.startTime}–{draft.endTime}</em>}</span>
@@ -323,7 +318,7 @@ export function AgendaManager() {
                     : dayHoliday
                     ? <p className="empty-inline">Feriado{dayHoliday.label ? ` (${dayHoliday.label})` : ""}: la sala no atiende.</p>
                     : slots.length
-                    ? <div className="slot-grid">{slots.map((slot) => <button type="button" key={slot.start} className={`slot ${draft.startTime === slot.start ? "active" : ""}`} onClick={() => pickSlot(slot.start, slot.end)}>{slot.start}</button>)}</div>
+                    ? <div className="time-picker">{[{ label: "Mañana", items: slots.filter((slot) => slot.start < "12:00") }, { label: "Tarde", items: slots.filter((slot) => slot.start >= "12:00") }].filter((period) => period.items.length).map((period) => <div className="time-period" key={period.label}><small>{period.label}</small><div>{period.items.map((slot) => <button type="button" key={slot.start} className={draft.startTime === slot.start ? "active" : ""} onClick={() => pickSlot(slot.start, slot.end)}><strong>{slot.start}</strong><span>– {slot.end}</span></button>)}</div></div>)}</div>
                     : <p className="empty-inline">Sin bloques libres ese día. Ajusta el horario de la sala en Configuración o usa horario manual.</p>}
                   <button type="button" className="text-button" onClick={() => setManualTime((value) => !value)}>{manualTime ? "Ocultar horario manual" : "Otro horario (manual)"}</button>
                 </div>

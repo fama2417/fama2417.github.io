@@ -3,7 +3,7 @@ import test from "node:test";
 import { availableSlots } from "./slots.ts";
 import type { RoomSchedule } from "./repository.ts";
 
-const room: RoomSchedule = { id: "s1", roomLabel: "Box 1", days: "1,2,3,4,5", openTime: "09:00", closeTime: "11:00" };
+const room: RoomSchedule = { id: "s1", roomLabel: "Box 1", targetKind: "resource", days: "1,2,3,4,5", openTime: "09:00", closeTime: "11:00" };
 // 2026-07-06 es lunes (weekday 1).
 const date = "2026-07-06";
 
@@ -23,6 +23,11 @@ test("excludeId deja libre el propio bloque al editar", () => {
   const taken = [{ id: "self", date, locationName: "Box 1", startTime: "09:30", endTime: "10:00", status: "confirmed" }];
   const starts = availableSlots(date, "Box 1", 30, [room], taken, { excludeId: "self" }).map((s) => s.start);
   assert.ok(starts.includes("09:30"));
+});
+
+test("intersecta el horario del recurso con el del profesional", () => {
+  const professional: RoomSchedule = { id: "s2", roomLabel: "Dra. Uno", targetKind: "practitioner", days: "1", openTime: "10:00", closeTime: "12:00" };
+  assert.deepEqual(availableSlots(date, "Box 1", 30, [room, professional], [], { practitionerName: "Dra. Uno" }).map((s) => s.start), ["10:00", "10:30"]);
 });
 
 test("sala sin horario cae a 08:00–18:00; sin sala/duración no hay bloques", () => {

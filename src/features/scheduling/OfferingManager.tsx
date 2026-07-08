@@ -1,13 +1,18 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { CODE_SYSTEMS } from "@/features/clinical/coding";
 import {
   countTestServiceTypes, createMasterServiceType, deleteLocationResource, fetchAssignedServiceTypeIds, fetchBranches,
   fetchBranchServices, fetchLocations, fetchResources, fetchServices, saveLocationResource, searchMasterServiceTypes,
-  setBranchService, setResourceServiceType, type HealthcareService, type Location, type SchedulableResource, type ServiceType,
+  setBranchService, setResourceServiceType, updateMasterServiceType, type HealthcareService, type Location,
+  type PractitionerRequirement, type SchedulableResource, type ServiceCategory, type ServiceType,
 } from "./repository";
+import { DICOM_MODALITIES } from "./modalities";
 
 type ResourceDraft = { id: string | null; name: string; branchId: string; serviceId: string; active: boolean };
+const categoryLabels: Record<ServiceCategory, string> = { consultation: "Consulta", imaging: "Imagenología", laboratory: "Laboratorio", pathology: "Anatomía patológica", procedure: "Procedimiento" };
+const practitionerLabels: Record<PractitionerRequirement, string> = { none: "No requiere profesional", optional: "Profesional opcional", required: "Profesional obligatorio" };
 
 export function OfferingManager() {
   const [branches, setBranches] = useState<Location[]>([]);
@@ -22,6 +27,7 @@ export function OfferingManager() {
   const [resourceId, setResourceId] = useState("");
   const [term, setTerm] = useState("");
   const [draft, setDraft] = useState<ResourceDraft | null>(null);
+  const [editingType, setEditingType] = useState<ServiceType | null>(null);
   const [pendingDelete, setPendingDelete] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -98,11 +104,27 @@ export function OfferingManager() {
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); const form = event.currentTarget; const values = new FormData(form); setError("");
     try {
-      const id = await createMasterServiceType(serviceId, String(values.get("code")).trim(), String(values.get("name")).trim(), Number(values.get("duration")) || 30);
+      const id = await createMasterServiceType(serviceId, {
+        code: String(values.get("code")).trim(),
+        name: String(values.get("name")).trim(),
+        durationMin: Number(values.get("duration")) || 30,
+        category: values.get("category") as ServiceCategory,
+        modality: String(values.get("modality")),
+        practitionerRequirement: values.get("practitioner") as PractitionerRequirement,
+        standardCodeSystem: String(values.get("standardSystem")),
+        standardCode: String(values.get("standardCode")).trim(),
+        standardDisplay: String(values.get("standardDisplay")).trim(),
+      });
       if (resourceId) await setResourceServiceType(resourceId, id, true);
       form.reset(); setTerm(""); setTypes(await searchMasterServiceTypes(serviceId));
       if (resourceId) setAssigned(await fetchAssignedServiceTypeIds(resourceId));
     } catch { setError("No fue posible crear la prestación. Revisa que el nombre no esté repetido."); }
+  }
+
+  async function saveType(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); if (!editingType) return;
+    try { await updateMasterServiceType(editingType.id, editingType); setTypes((current) => current.map((item) => item.id === editingType.id ? editingType : item)); setEditingType(null); }
+    catch { setError("No fue posible actualizar la prestación."); }
   }
 
   const branchName = branches.find((branch) => branch.id === branchId)?.name;
@@ -121,14 +143,46 @@ export function OfferingManager() {
     </form>}
     <div className="resource-grid">{resourcesInBranch.map((resource) => {
       const resourceService = allServices.find((service) => service.id === resource.healthcareServiceId)?.name ?? "Sin servicio";
-      return <article className={`resource-card ${resource.active ? "" : "inactive"}`} key={resource.id}><div><strong>{resource.name}</strong><small>{resourceService} · {resource.active ? "Activo" : "Inactivo"}</small></div><div><button className="text-button" type="button" onClick={() => { setServiceId(resource.healthcareServiceId ?? serviceId); setResourceId(resource.id); }}>Prestaciones</button><button className="text-button" type="button" onClick={() => setDraft({ id: resource.id, name: resource.name, branchId, serviceId: resource.healthcareServiceId ?? serviceId, active: resource.active })}>Editar</button><button className="text-button" type="button" onClick={() => toggleResource(resource)}>{resource.active ? "Desactivar" : "Activar"}</button>{pendingDelete === resource.id ? <><span className="delete-question">¿Eliminar?</span><button className="text-button danger" type="button" onClick={() => removeResource(resource)}>Sí, eliminar</button><button className="text-button" type="button" onClick={() => setPendingDelete("")}>Cancelar</button></> : <button className="text-button danger" type="button" onClick={() => setPendingDelete(resource.id)}>Eliminar</button>}</div></article>;
+      return <article className={`resource-card ${resource.active ? "" : "inactive"}`} key={resource.id}><div><strong>{resource.name}</strong><small>{resourceService} · {resource.active ? "Activo" : "Inactivo"}</small></div><div><button className="text-button" type="button" onClick={() => window.dispatchEvent(new CustomEvent("schedule-target", { detail: { kind: "resource", name: resource.name } }))}>Horario semanal</button><button className="text-button" type="button" onClick={() => { setServiceId(resource.healthcareServiceId ?? serviceId); setResourceId(resource.id); }}>Prestaciones</button><button className="text-button" type="button" onClick={() => setDraft({ id: resource.id, name: resource.name, branchId, serviceId: resource.healthcareServiceId ?? serviceId, active: resource.active })}>Editar</button><button className="text-button" type="button" onClick={() => toggleResource(resource)}>{resource.active ? "Desactivar" : "Activar"}</button>{pendingDelete === resource.id ? <><span className="delete-question">¿Eliminar?</span><button className="text-button danger" type="button" onClick={() => removeResource(resource)}>Sí, eliminar</button><button className="text-button" type="button" onClick={() => setPendingDelete("")}>Cancelar</button></> : <button className="text-button danger" type="button" onClick={() => setPendingDelete(resource.id)}>Eliminar</button>}</div></article>;
     })}{!resourcesInBranch.length && <p className="empty-state">Esta sucursal todavía no tiene recursos.</p>}</div>
 
     <details className="booking-advanced offering-admin"><summary>Servicios habilitados en la sucursal</summary><div className="service-checks">{allServices.filter((service) => service.organizationId === branches.find((branch) => branch.id === branchId)?.organizationId).map((service) => <label key={service.id}><input type="checkbox" checked={services.some((item) => item.id === service.id)} onChange={(event) => toggleBranchService(service.id, event.target.checked)} />{service.name}</label>)}</div></details>
 
-    <div className="offering-context clinical-form"><label>Servicio<select value={serviceId} onChange={(event) => setServiceId(event.target.value)}>{services.map((service) => <option key={service.id} value={service.id}>{service.name}</option>)}</select></label><label>Recurso<select value={resourceId} onChange={(event) => setResourceId(event.target.value)}><option value="">Seleccionar…</option>{branchResources.map((resource) => <option key={resource.id} value={resource.id}>{resource.name}</option>)}</select></label></div>
-    <div className="offering-search"><label>Buscar en el catálogo maestro<input type="search" value={term} onChange={(event) => setTerm(event.target.value)} placeholder="Código o nombre de prestación" /></label><span>{assigned.length} prestaciones activas</span></div>
-    <ul className="offering-list">{types.map((type) => <li key={type.id}><label><input type="checkbox" checked={assigned.includes(type.id)} disabled={!resourceId} onChange={(event) => toggle(type.id, event.target.checked)} /><span><strong>{type.name}</strong><small>{type.code || "Sin código"} · {type.durationMin} min</small></span></label></li>)}{!types.length && <li className="inactive"><span>{resourceId ? "Escribe dos caracteres para buscar." : "Selecciona un recurso para asignarle prestaciones."}</span></li>}</ul>
-    <details className="booking-advanced offering-create"><summary>Agregar prestación al catálogo maestro</summary><form className="catalog-form" onSubmit={create}><label>Código<input name="code" placeholder="Ej: 04.04.001" /></label><label>Nombre<input name="name" required /></label><label>Duración (min)<input name="duration" type="number" min={5} step={5} defaultValue={30} /></label><button className="button primary" type="submit" disabled={!serviceId}>Agregar</button></form></details>
+    <div className="offering-context clinical-form">
+      <label>Servicio<select value={serviceId} onChange={(event) => setServiceId(event.target.value)}>{services.map((service) => <option key={service.id} value={service.id}>{service.name}</option>)}</select></label>
+      <label>Recurso<select value={resourceId} onChange={(event) => setResourceId(event.target.value)}><option value="">Seleccionar…</option>{branchResources.map((resource) => <option key={resource.id} value={resource.id}>{resource.name}</option>)}</select></label>
+    </div>
+    <div className="offering-search"><label>Buscar en el catálogo maestro<input type="search" value={term} onChange={(event) => setTerm(event.target.value)} placeholder="Código, nombre o código estándar" /></label><span>{assigned.length} prestaciones activas</span></div>
+    <ul className="offering-list">
+      {types.map((type) => <li key={type.id}>
+        {editingType?.id === type.id ? <form className="catalog-form service-type-editor" onSubmit={saveType}>
+          <label className="wide-field">Nombre<input value={editingType.name} onChange={(event) => setEditingType({ ...editingType, name: event.target.value })} required /></label>
+          <label>Duración<input type="number" min={5} step={5} value={editingType.durationMin} onChange={(event) => setEditingType({ ...editingType, durationMin: Number(event.target.value) })} /></label>
+          <label>Tipo<select value={editingType.category} onChange={(event) => setEditingType({ ...editingType, category: event.target.value as ServiceCategory })}>{Object.entries(categoryLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          <label>Profesional<select value={editingType.practitionerRequirement} onChange={(event) => setEditingType({ ...editingType, practitionerRequirement: event.target.value as PractitionerRequirement })}>{Object.entries(practitionerLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          {editingType.category === "imaging" && <label className="wide-field">Modalidad DICOM<select value={editingType.modality} onChange={(event) => setEditingType({ ...editingType, modality: event.target.value })}><option value="">Sin definir</option>{DICOM_MODALITIES.map(([value, label]) => <option key={value} value={value}>{value} · {label}</option>)}</select></label>}
+          <label>Sistema estándar<select value={editingType.standardCodeSystem || "LOCAL"} onChange={(event) => setEditingType({ ...editingType, standardCodeSystem: event.target.value })}>{CODE_SYSTEMS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          <label>Código estándar<input value={editingType.standardCode} onChange={(event) => setEditingType({ ...editingType, standardCode: event.target.value })} placeholder="LOINC / SNOMED / CIE" /></label>
+          <label className="wide-field">Nombre estándar<input value={editingType.standardDisplay} onChange={(event) => setEditingType({ ...editingType, standardDisplay: event.target.value })} placeholder="Nombre oficial si existe" /></label>
+          <div className="form-actions"><button className="button primary" type="submit">Guardar cambios</button><button className="button secondary" type="button" onClick={() => setEditingType(null)}>Cancelar</button></div>
+        </form> : <div className="offering-type-row">
+          <label><input type="checkbox" checked={assigned.includes(type.id)} disabled={!resourceId} onChange={(event) => toggle(type.id, event.target.checked)} /><span><strong>{type.name}</strong><small>{categoryLabels[type.category]} · {type.durationMin} min{type.modality && ` · ${type.modality}`} · {practitionerLabels[type.practitionerRequirement]}{type.standardCode && ` · ${type.standardCodeSystem || "LOCAL"}:${type.standardCode}`}</small></span></label>
+          <button className="text-button" type="button" onClick={() => setEditingType(type)}>Editar reglas</button>
+        </div>}
+      </li>)}
+      {!types.length && <li className="inactive"><span>{resourceId ? "No hay prestaciones para esta búsqueda." : "Selecciona un recurso para asignarle prestaciones."}</span></li>}
+    </ul>
+    <details className="booking-advanced offering-create"><summary>Agregar prestación al catálogo maestro</summary><form className="catalog-form service-type-create" onSubmit={create}>
+      <label>Código<input name="code" placeholder="Ej: 04.04.001" /></label>
+      <label className="wide-field">Nombre<input name="name" required /></label>
+      <label>Duración (min)<input name="duration" type="number" min={5} step={5} defaultValue={30} /></label>
+      <label>Tipo<select name="category" defaultValue="procedure">{Object.entries(categoryLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+      <label>Profesional<select name="practitioner" defaultValue="optional">{Object.entries(practitionerLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+      <label className="wide-field">Modalidad DICOM (si aplica)<select name="modality" defaultValue=""><option value="">No aplica</option>{DICOM_MODALITIES.map(([value, label]) => <option key={value} value={value}>{value} · {label}</option>)}</select></label>
+      <label>Sistema estándar<select name="standardSystem" defaultValue="LOCAL">{CODE_SYSTEMS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+      <label>Código estándar<input name="standardCode" placeholder="LOINC / SNOMED / CIE si aplica" /></label>
+      <label className="wide-field">Nombre estándar<input name="standardDisplay" placeholder="Nombre oficial si existe" /></label>
+      <div className="form-actions"><button className="button primary" type="submit" disabled={!serviceId}>Agregar prestación</button></div>
+    </form></details>
   </section>;
 }

@@ -176,7 +176,7 @@ export function ParametryManager() {
           </>}
 
           {tab === "serviceTypes" && <>
-            <form className="catalog-form" onSubmit={(e) => { const f = new FormData(e.currentTarget); run(() => createServiceType({ code: String(f.get("code")).trim(), name: String(f.get("name")).trim(), durationMin: Number(f.get("dur")) || 30, capacity: Number(f.get("cap")) || 1, requiresContrast: f.get("contrast") === "on", requiresAnesthesia: f.get("anesth") === "on", prepInstructions: String(f.get("prep")).trim() }), e.currentTarget)(e); }}>
+            <form className="catalog-form" onSubmit={(e) => { const f = new FormData(e.currentTarget); run(() => createServiceType({ code: String(f.get("code")).trim(), name: String(f.get("name")).trim(), durationMin: Number(f.get("dur")) || 30, capacity: Number(f.get("cap")) || 1, requiresContrast: f.get("contrast") === "on", requiresAnesthesia: f.get("anesth") === "on", prepInstructions: String(f.get("prep")).trim(), category: "procedure", modality: "", practitionerRequirement: "optional" }), e.currentTarget)(e); }}>
               <label>Código<input name="code" placeholder="Opcional" /></label>
               <label>Nombre<input name="name" required placeholder="Ej: RM de cerebro" /></label>
               <label>Duración (min)<input name="dur" type="number" min={5} defaultValue={30} /></label>
@@ -187,7 +187,7 @@ export function ParametryManager() {
               <button className="button primary" type="submit">Agregar</button>
             </form>
             <ul className="catalog-list">{serviceTypes.map((st) => <li key={st.id} className={st.active ? "" : "inactive"}>{editing?.id === st.id
-              ? <form className="catalog-form" onSubmit={run(() => updateServiceType(st.id, { code: s("code"), name: s("name"), durationMin: Number(E.durationMin) || 30, capacity: Number(E.capacity) || 1, requiresContrast: Boolean(E.requiresContrast), requiresAnesthesia: Boolean(E.requiresAnesthesia), prepInstructions: s("prepInstructions"), active: Boolean(E.active) }))}>
+              ? <form className="catalog-form" onSubmit={run(() => updateServiceType(st.id, { code: s("code"), name: s("name"), durationMin: Number(E.durationMin) || 30, capacity: Number(E.capacity) || 1, requiresContrast: Boolean(E.requiresContrast), requiresAnesthesia: Boolean(E.requiresAnesthesia), prepInstructions: s("prepInstructions"), active: Boolean(E.active), category: st.category, modality: st.modality, practitionerRequirement: st.practitionerRequirement }))}>
                   <label>Código<input value={s("code")} onChange={(e) => set("code", e.target.value)} /></label>
                   <label>Nombre<input value={s("name")} onChange={(e) => set("name", e.target.value)} required /></label>
                   <label>Duración<input type="number" min={5} value={Number(E.durationMin) || 30} onChange={(e) => set("durationMin", Number(e.target.value))} /></label>

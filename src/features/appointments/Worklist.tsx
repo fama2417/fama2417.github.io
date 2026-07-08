@@ -13,8 +13,6 @@ import { APPOINTMENT_STATUSES, appointmentStatusLabels, type AppointmentStatus }
 
 const today = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Santiago" });
 const shiftDays = (days: number) => { const date = new Date(); date.setDate(date.getDate() + days); return date.toLocaleDateString("en-CA", { timeZone: "America/Santiago" }); };
-const modalities = ["US", "DX", "CT", "MR", "MG"] as const;
-
 const reportLabels = { none: "Sin informe", draft: "Borrador", final: "Definitivo" } as const;
 const reportClass = { none: "status-cancelled", draft: "status-arrived", final: "status-completed" } as const;
 const reportKey = (item: Appointment) => item.reportStatus ?? "none";
@@ -28,12 +26,13 @@ const presets = [
   { label: "30 días", range: () => [today(), shiftDays(29)] },
 ] as const;
 
-const COLUMNS = ["Fecha", "Hora", "Paciente", "ID Paciente", "Previsión", "Modalidad", "Prestación", "Sala", "Profesional", "Estado", "Informe", "Asignado", "Alertas"] as const;
+const COLUMNS = ["Fecha", "Hora", "Paciente", "ID Paciente", "Previsión", "Tipo", "Modalidad", "Prestación", "Sala", "Profesional", "Estado", "Informe", "Asignado", "Alertas"] as const;
 type Column = (typeof COLUMNS)[number];
-const DEFAULT_COLUMNS: Column[] = ["Hora", "Paciente", "ID Paciente", "Previsión", "Modalidad", "Prestación", "Estado", "Informe", "Asignado", "Alertas"];
+const DEFAULT_COLUMNS: Column[] = ["Hora", "Paciente", "ID Paciente", "Previsión", "Tipo", "Modalidad", "Prestación", "Estado", "Informe", "Asignado", "Alertas"];
 
-type Filters = { from: string; to: string; patient: string; modality: string; status: string; report: string; professional: string; room: string; priority: string; assignment: string; tag: string; quick: string };
-const emptyFilters = (): Filters => ({ from: today(), to: today(), patient: "", modality: "", status: "", report: "", professional: "", room: "", priority: "", assignment: "", tag: "", quick: "" });
+type Filters = { from: string; to: string; patient: string; category: string; modality: string; status: string; report: string; professional: string; room: string; priority: string; assignment: string; tag: string; quick: string };
+const emptyFilters = (): Filters => ({ from: today(), to: today(), patient: "", category: "", modality: "", status: "", report: "", professional: "", room: "", priority: "", assignment: "", tag: "", quick: "" });
+const categoryLabels: Record<Appointment["serviceCategory"], string> = { consultation: "Consulta", imaging: "Imagenología", laboratory: "Laboratorio", pathology: "Anatomía patológica", procedure: "Procedimiento" };
 const quickLabels: Record<string, string> = { pending: "Por informar", critical: "Hallazgos críticos", follow: "Seguimientos pendientes", mine: "Asignados a mí" };
 
 // ponytail: filtros guardados en localStorage (mismo patrón que las columnas); mover a tabla si se necesitan entre dispositivos
@@ -71,6 +70,8 @@ export function Worklist() {
   const [fixupPatients, setFixupPatients] = useState<Patient[]>([]);
   const [fixupTarget, setFixupTarget] = useState<{ kind: "appointment" | "patient"; id: string; label: string } | null>(null);
   const [fixupSaving, setFixupSaving] = useState(false);
+  const [filterName, setFilterName] = useState("");
+  const [statusChange, setStatusChange] = useState<{ item: Appointment; status: AppointmentStatus; reason: string } | null>(null);
 
   const set = (key: keyof Filters, value: string) => setFilters((current) => ({ ...current, [key]: value }));
 
@@ -100,7 +101,8 @@ export function Worklist() {
       const payload = await fixupApi("GET");
       setPacsFiltered(payload.filtered ?? true); setUnmatched(payload.studies ?? []);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "No fue posible revisar estudios PACS sin vincular.");
+      const message = cause instanceof Error ? cause.message : "No fue posible revisar estudios PACS sin vincular.";
+      if (!message.toLowerCase().includes("configuración del servidor")) setError(message);
     }
   }
 
@@ -113,10 +115,10 @@ export function Worklist() {
   }
 
   function saveCurrentFilters() {
-    const name = window.prompt("Nombre del filtro:")?.trim();
+    const name = filterName.trim();
     if (!name) return;
     const next = [...saved.filter((item) => item.name !== name), { name, isDefault: false, filters }];
-    setSaved(next); storeSaved(next); setSelectedSaved(name);
+    setSaved(next); storeSaved(next); setSelectedSaved(name); setFilterName("");
   }
 
   function applySaved(name: string) {
@@ -139,6 +141,7 @@ export function Worklist() {
 
   const professionals = useMemo(() => [...new Set(appointments.map((item) => item.practitionerName).filter(Boolean))].sort(), [appointments]);
   const rooms = useMemo(() => [...new Set(appointments.map((item) => item.locationName).filter(Boolean))].sort(), [appointments]);
+  const modalities = useMemo(() => [...new Set(appointments.filter((item) => item.serviceCategory === "imaging" && item.modality && item.modality !== "OT").map((item) => item.modality))].sort(), [appointments]);
   const tags = useMemo(() => [...new Set(appointments.flatMap((item) => item.tags.split(",").map((tag) => tag.trim()).filter(Boolean)))].sort(), [appointments]);
   const fixupNeedle = normalize(fixupQuery);
   const fixupAppointments = useMemo(() => fixupNeedle.length < 2 ? [] : appointments.filter((item) => !item.orthancStudyId && normalize(`${item.patientName} ${item.patientIdentifier ?? ""} ${item.date}`).includes(fixupNeedle)).slice(0, 6), [appointments, fixupNeedle]);
@@ -147,22 +150,30 @@ export function Worklist() {
   const worklist = useMemo(() => appointments
     .filter((item) => (!filters.from || item.date >= filters.from) && (!filters.to || item.date <= filters.to))
     .filter((item) => `${item.patientName} ${item.patientIdentifier ?? ""}`.toLowerCase().includes(filters.patient.toLowerCase()))
-    .filter((item) => (!filters.modality || item.modality === filters.modality) && (!filters.status || item.status === filters.status) && (!filters.report || reportKey(item) === filters.report))
+    .filter((item) => (!filters.category || item.serviceCategory === filters.category) && (!filters.modality || item.modality === filters.modality) && (!filters.status || item.status === filters.status) && (!filters.report || reportKey(item) === filters.report))
     .filter((item) => (!filters.professional || item.practitionerName === filters.professional) && (!filters.room || item.locationName === filters.room) && (!filters.priority || item.priority === filters.priority))
     .filter((item) => !filters.assignment || (filters.assignment === "mias" ? item.assignedTo === uid : !item.assignedTo))
     .filter((item) => !filters.tag || item.tags.split(",").map((tag) => tag.trim()).includes(filters.tag))
     .filter((item) => !filters.quick
-      || (filters.quick === "pending" && item.studyInstanceUid && item.reportStatus !== "final")
+      || (filters.quick === "pending" && item.reportStatus !== "final")
       || (filters.quick === "critical" && item.criticalFinding)
       || (filters.quick === "follow" && item.actionablePending)
       || (filters.quick === "mine" && item.assignedTo === uid))
     .sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`)), [appointments, filters, uid]);
 
   async function changeStatus(item: Appointment, status: AppointmentStatus) {
-    const reason = ["cancelled", "no_show"].includes(status) ? window.prompt("Motivo del cambio de estado:") ?? "" : "";
+    if (["cancelled", "no_show"].includes(status)) {
+      setStatusChange({ item, status, reason: "" });
+      return;
+    }
+    await persistStatus(item, status, "");
+  }
+
+  async function persistStatus(item: Appointment, status: AppointmentStatus, reason: string) {
     try {
       await setAppointmentStatus(item.id, status, reason);
       setAppointments((current) => current.map((entry) => entry.id === item.id ? { ...entry, status, statusReason: reason } : entry));
+      setStatusChange(null);
     } catch {
       setError("No fue posible actualizar el estado.");
     }
@@ -210,8 +221,8 @@ export function Worklist() {
   }
 
   function exportCsv() {
-    const header = ["Fecha", "Hora", "Paciente", "ID Paciente", "Previsión", "Modalidad", "Prestación", "Código", "Sala", "Profesional", "Estado", "Motivo", "Informe", "Asignado", "Prioridad"];
-    const lines = worklist.map((item) => [item.date, item.startTime, item.patientName, item.patientIdentifier ?? "", item.patientPrevision ?? "", item.modality, item.reason, item.procedureCode, item.locationName, item.practitionerName, appointmentStatusLabels[item.status], item.statusReason, reportLabels[reportKey(item)], item.assigneeName ?? "", item.priority]
+    const header = ["Fecha", "Hora", "Paciente", "ID Paciente", "Previsión", "Tipo", "Modalidad", "Prestación", "Código", "Recurso", "Profesional", "Estado", "Motivo", "Informe", "Asignado", "Prioridad"];
+    const lines = worklist.map((item) => [item.date, item.startTime, item.patientName, item.patientIdentifier ?? "", item.patientPrevision ?? "", categoryLabels[item.serviceCategory], item.serviceCategory === "imaging" && item.modality !== "OT" ? item.modality : "", item.reason, item.procedureCode, item.locationName, item.practitionerName, appointmentStatusLabels[item.status], item.statusReason, reportLabels[reportKey(item)], item.assigneeName ?? "", item.priority]
       .map(csvCell).join(";"));
     const blob = new Blob(["﻿" + [header.join(";"), ...lines].join("\n")], { type: "text/csv;charset=utf-8" });
     const link = document.createElement("a");
@@ -228,10 +239,11 @@ export function Worklist() {
       case "Paciente": return item.patientName;
       case "ID Paciente": return item.patientIdentifier || "—";
       case "Previsión": return item.patientPrevision || "—";
-      case "Modalidad": return item.modality;
+      case "Tipo": return <span className={`service-category service-category-${item.serviceCategory}`}>{categoryLabels[item.serviceCategory]}</span>;
+      case "Modalidad": return item.serviceCategory === "imaging" && item.modality !== "OT" ? item.modality : "—";
       case "Prestación": return item.reason;
-      case "Sala": return item.locationName;
-      case "Profesional": return item.practitionerName;
+      case "Sala": return item.locationName || "—";
+      case "Profesional": return item.practitionerName || "No requerido";
       case "Estado": return <select className={`status status-${item.status}`} value={item.status} title={item.statusReason || undefined} onClick={(event) => event.stopPropagation()} onChange={(event) => changeStatus(item, event.target.value as AppointmentStatus)} aria-label={`Estado de ${item.patientName}`}>{APPOINTMENT_STATUSES.map((value) => <option key={value} value={value}>{appointmentStatusLabels[value]}</option>)}</select>;
       case "Informe": return <span className={`status ${reportClass[reportKey(item)]}`}>{reportLabels[reportKey(item)]}</span>;
       case "Asignado": return role === "admin" && radiologists.length
@@ -250,7 +262,7 @@ export function Worklist() {
   };
 
   return <>
-    <div className="page-header"><div><p className="eyebrow">Lista de trabajo</p><h2>Estudios agendados</h2><p>Abre un paciente para redactar el informe radiológico junto a sus imágenes.</p></div>
+    <div className="page-header"><div><p className="eyebrow">Lista de trabajo</p><h2>Atenciones agendadas</h2><p>Filtra consultas, procedimientos y estudios desde una sola vista.</p></div>
       <div className="integration-links">
         <button className="text-button" type="button" onClick={exportCsv}>Exportar CSV</button>
         <span className="column-picker">
@@ -276,7 +288,8 @@ export function Worklist() {
             </select>
           </label>
           <div className="preset-row">
-            <button className="tag" type="button" onClick={saveCurrentFilters}>Guardar actual</button>
+            <input aria-label="Nombre del filtro" value={filterName} onChange={(event) => setFilterName(event.target.value)} placeholder="Nombre del filtro" />
+            <button className="tag" type="button" disabled={!filterName.trim()} onClick={saveCurrentFilters}>Guardar actual</button>
             {selectedSaved && <button className="tag" type="button" onClick={toggleDefault} title="Se aplica al abrir la worklist">{saved.find((item) => item.name === selectedSaved)?.isDefault ? "Quitar predet." : "Predeterminado"}</button>}
             {selectedSaved && <button className="tag" type="button" onClick={deleteSaved}>Eliminar</button>}
           </div>
@@ -285,11 +298,12 @@ export function Worklist() {
         <label>Desde<input type="date" value={filters.from} onChange={(event) => set("from", event.target.value)} /></label>
         <label>Hasta<input type="date" value={filters.to} onChange={(event) => set("to", event.target.value)} /></label>
         <div className="preset-row">{presets.map((preset) => <button key={preset.label} className="tag" type="button" onClick={() => { const [nextFrom, nextTo] = preset.range(); setFilters((current) => ({ ...current, from: nextFrom, to: nextTo })); }}>{preset.label}</button>)}</div>
+        <label>Tipo de atención<select value={filters.category} onChange={(event) => set("category", event.target.value)}><option value="">Todos</option>{Object.entries(categoryLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
         <label>Modalidad<select value={filters.modality} onChange={(event) => set("modality", event.target.value)}><option value="">Todas</option>{modalities.map((code) => <option key={code} value={code}>{code}</option>)}</select></label>
         <label>Estado de la cita<select value={filters.status} onChange={(event) => set("status", event.target.value)}><option value="">Todos</option>{Object.entries(appointmentStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
         <label>Estado del informe<select value={filters.report} onChange={(event) => set("report", event.target.value)}><option value="">Todos</option>{Object.entries(reportLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
         <label>Profesional<select value={filters.professional} onChange={(event) => set("professional", event.target.value)}><option value="">Todos</option>{professionals.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
-        <label>Sala<select value={filters.room} onChange={(event) => set("room", event.target.value)}><option value="">Todas</option>{rooms.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
+        <label>Recurso<select value={filters.room} onChange={(event) => set("room", event.target.value)}><option value="">Todos</option>{rooms.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
         <label>Prioridad<select value={filters.priority} onChange={(event) => set("priority", event.target.value)}><option value="">Todas</option><option value="normal">Normal</option><option value="urgente">Urgente</option></select></label>
         <label>Vista rápida<select value={filters.quick} onChange={(event) => set("quick", event.target.value)}><option value="">Todas</option>{Object.entries(quickLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
         <label>Asignación<select value={filters.assignment} onChange={(event) => set("assignment", event.target.value)}><option value="">Todas</option><option value="mias">Asignadas a mí</option><option value="sin">Sin asignar</option></select></label>
@@ -306,6 +320,14 @@ export function Worklist() {
         {loading && <p className="empty-state">Cargando worklist…</p>}
       </section>
     </div>
+    {statusChange && <div className="appointment-info-backdrop" role="dialog" aria-modal="true" aria-label="Motivo del cambio de estado" onClick={(event) => { if (event.target === event.currentTarget) setStatusChange(null); }}>
+      <form className="appointment-info status-change-dialog" onSubmit={(event) => { event.preventDefault(); persistStatus(statusChange.item, statusChange.status, statusChange.reason.trim()); }}>
+        <div className="card-heading"><div><p className="eyebrow">Cambio de estado</p><h3>{appointmentStatusLabels[statusChange.status]}</h3></div><button className="text-button" type="button" onClick={() => setStatusChange(null)}>Cerrar ✕</button></div>
+        <p>{statusChange.item.patientName} · {statusChange.item.reason}</p>
+        <label>Motivo<textarea value={statusChange.reason} onChange={(event) => setStatusChange({ ...statusChange, reason: event.target.value })} required autoFocus /></label>
+        <div className="form-actions"><button className="button primary" type="submit" disabled={!statusChange.reason.trim()}>Confirmar cambio</button><button className="button secondary" type="button" onClick={() => setStatusChange(null)}>Cancelar</button></div>
+      </form>
+    </div>}
     {fixup && <div className="appointment-info-backdrop" role="dialog" aria-modal="true" aria-label="FixUp de estudio PACS" onClick={(event) => { if (event.target === event.currentTarget) setFixup(null); }}>
       <div className="appointment-info fixup-modal">
         <div className="card-heading"><div><p className="eyebrow">FixUp PACS</p><h3>{fixup.patientName}</h3></div><button className="text-button" type="button" onClick={() => setFixup(null)}>Cerrar ✕</button></div>

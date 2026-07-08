@@ -86,6 +86,7 @@ export function CatalogManager() {
                   : <>
                       <span>{item.code && <code>{item.code}</code>} {item.label}{item.category === "prestacion" && <small className="empty-inline"> · {item.durationMin ?? 30} min</small>}</span>
                       <span>
+                        {item.category === "profesional" && <button className="text-button" type="button" onClick={() => window.dispatchEvent(new CustomEvent("schedule-target", { detail: { kind: "practitioner", name: item.label } }))}>Horario semanal</button>}
                         <button className="text-button" type="button" onClick={() => setEditing(item)}>Editar</button>
                         <button className="text-button" type="button" onClick={() => toggleItem(item)}>{item.active ? "Desactivar" : "Activar"}</button>
                       </span>

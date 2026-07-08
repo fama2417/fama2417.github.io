@@ -12,8 +12,8 @@ const roleLabels: Record<Role, string> = { admin: "Administrador", operator: "Op
 const today = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Santiago" });
 
 const modules: { href: string; icon: string; title: string; description: string; roles: Role[] }[] = [
-  { href: "/agenda", icon: "📅", title: "Agenda", description: "Programar, editar y confirmar citas de imagenología.", roles: ["admin", "operator"] },
-  { href: "/worklist", icon: "🩺", title: "Lista de trabajo", description: "Informar estudios junto a sus imágenes y asignar casos.", roles: ["admin", "operator", "radiologist"] },
+  { href: "/agenda", icon: "📅", title: "Agenda", description: "Programar, editar y confirmar atenciones.", roles: ["admin", "operator"] },
+  { href: "/worklist", icon: "🩺", title: "Lista de trabajo", description: "Filtrar atenciones, reportar y asignar casos.", roles: ["admin", "operator", "radiologist"] },
   { href: "/pacientes", icon: "👤", title: "Pacientes", description: "Registro clínico y trazabilidad de datos personales.", roles: ["admin"] },
   { href: "/configuracion", icon: "⚙️", title: "Configuración", description: "Institución, usuarios, plantillas y parámetros de la agenda.", roles: ["admin"] },
   { href: "/privacidad", icon: "🔒", title: "Privacidad", description: "Política de tratamiento de datos personales (Ley 19.628).", roles: ["admin", "radiologist"] },
@@ -47,11 +47,10 @@ export function HomeDashboard() {
 
   const stats = useMemo<Stat[]>(() => {
     const day = today();
-    const withStudy = appointments.filter((item) => item.studyInstanceUid);
-    const pending = withStudy.filter((item) => item.reportStatus !== "final");
+    const pending = appointments.filter((item) => item.reportStatus !== "final");
     const base: Stat[] = [
       { label: "Citas de hoy", value: appointments.filter((item) => item.date === day).length, hint: "Agendadas para la fecha actual", view: "today" },
-      { label: "Estudios por informar", value: pending.length, hint: "Con imágenes vinculadas y sin informe definitivo", view: "pending", tone: pending.length ? "warning" : undefined },
+      { label: "Reportes por cerrar", value: pending.length, hint: "Atenciones sin reporte definitivo", view: "pending", tone: pending.length ? "warning" : undefined },
       { label: "Hallazgos críticos", value: appointments.filter((item) => item.criticalFinding).length, hint: "Marcados en informes", view: "critical", tone: appointments.some((item) => item.criticalFinding) ? "danger" : undefined },
       { label: "Seguimientos pendientes", value: appointments.filter((item) => item.actionablePending).length, hint: "Recomendaciones accionables abiertas", view: "follow" },
     ];

@@ -1,6 +1,6 @@
 import { supabase } from "@/lib/supabase-client";
 
-export type RoomSchedule = { id: string; roomLabel: string; days: string; openTime: string; closeTime: string };
+export type RoomSchedule = { id: string; roomLabel: string; targetKind: "resource" | "practitioner"; days: string; openTime: string; closeTime: string };
 export type Holiday = { id: string; date: string; label: string };
 
 export const WEEKDAYS = [
@@ -9,13 +9,13 @@ export const WEEKDAYS = [
 ];
 
 export async function fetchSchedules() {
-  const { data, error } = await supabase.from("room_schedules").select("id, room_label, days, open_time, close_time").order("room_label");
+  const { data, error } = await supabase.from("room_schedules").select("id, room_label, target_kind, days, open_time, close_time").order("room_label");
   if (error) throw error;
-  return data.map((row) => ({ id: row.id, roomLabel: row.room_label, days: row.days, openTime: row.open_time.slice(0, 5), closeTime: row.close_time.slice(0, 5) })) as RoomSchedule[];
+  return data.map((row) => ({ id: row.id, roomLabel: row.room_label, targetKind: row.target_kind, days: row.days, openTime: row.open_time.slice(0, 5), closeTime: row.close_time.slice(0, 5) })) as RoomSchedule[];
 }
 
 export async function upsertSchedule(schedule: Omit<RoomSchedule, "id"> & { id?: string }) {
-  const row = { room_label: schedule.roomLabel, days: schedule.days, open_time: schedule.openTime, close_time: schedule.closeTime };
+  const row = { room_label: schedule.roomLabel, target_kind: schedule.targetKind, days: schedule.days, open_time: schedule.openTime, close_time: schedule.closeTime };
   const query = schedule.id
     ? supabase.from("room_schedules").update(row).eq("id", schedule.id)
     : supabase.from("room_schedules").insert(row);
@@ -48,13 +48,15 @@ export async function removeHoliday(id: string) {
 export { availableSlots } from "./slots";
 
 /** Devuelve el motivo de bloqueo si la cita queda fuera de horario o cae en feriado; vacío si es válida. */
-export function scheduleError(candidate: { date: string; startTime: string; endTime: string; locationName: string }, schedules: RoomSchedule[], holidays: Holiday[]) {
+export function scheduleError(candidate: { date: string; startTime: string; endTime: string; locationName: string; practitionerName?: string }, schedules: RoomSchedule[], holidays: Holiday[]) {
   const holiday = holidays.find((item) => item.date === candidate.date);
   if (holiday) return `La fecha corresponde a un feriado${holiday.label ? ` (${holiday.label})` : ""}.`;
-  const schedule = schedules.find((item) => item.roomLabel === candidate.locationName);
-  if (!schedule) return "";
   const weekday = String(((new Date(`${candidate.date}T12:00:00`).getDay() + 6) % 7) + 1);
-  if (!schedule.days.split(",").includes(weekday)) return "La sala no atiende ese día de la semana.";
-  if (candidate.startTime < schedule.openTime || candidate.endTime > schedule.closeTime) return `La sala atiende de ${schedule.openTime} a ${schedule.closeTime}.`;
+  for (const [kind, name, label] of [["resource", candidate.locationName, "El recurso"], ["practitioner", candidate.practitionerName, "El profesional"]] as const) {
+    const schedule = schedules.find((item) => item.targetKind === kind && item.roomLabel === name);
+    if (!schedule) continue;
+    if (!schedule.days.split(",").includes(weekday)) return `${label} no atiende ese día de la semana.`;
+    if (candidate.startTime < schedule.openTime || candidate.endTime > schedule.closeTime) return `${label} atiende de ${schedule.openTime} a ${schedule.closeTime}.`;
+  }
   return "";
 }

@@ -8,7 +8,9 @@ export type HealthcareService = { id: string; organizationId: string; name: stri
 export type Practitioner = { id: string; fullName: string; professionalRegistration: string; active: boolean };
 export type PractitionerRole = { id: string; practitionerId: string; organizationId: string; locationId: string | null; healthcareServiceId: string | null; specialty: string; active: boolean };
 export type Device = { id: string; organizationId: string; locationId: string | null; name: string; modality: string; active: boolean };
-export type ServiceType = { id: string; code: string; name: string; durationMin: number; capacity: number; requiresContrast: boolean; requiresAnesthesia: boolean; prepInstructions: string; active: boolean };
+export type ServiceCategory = "consultation" | "imaging" | "laboratory" | "pathology" | "procedure";
+export type PractitionerRequirement = "none" | "optional" | "required";
+export type ServiceType = { id: string; code: string; name: string; durationMin: number; capacity: number; requiresContrast: boolean; requiresAnesthesia: boolean; prepInstructions: string; active: boolean; category: ServiceCategory; modality: string; practitionerRequirement: PractitionerRequirement; standardCodeSystem: string; standardCode: string; standardDisplay: string };
 
 export type ResourceKind = "professional" | "device" | "location" | "service" | "composite";
 // Etiquetas amigables para la UI (los nombres internos siguen a FHIR).
@@ -40,7 +42,7 @@ export const fetchServices = () => rows<HealthcareService>("healthcare_services"
 export const fetchPractitioners = () => rows<Practitioner>("practitioners", "id, full_name, professional_registration, active", (r) => ({ id: r.id, fullName: r.full_name, professionalRegistration: r.professional_registration, active: r.active } as Practitioner), "full_name");
 export const fetchPractitionerRoles = () => rows<PractitionerRole>("practitioner_roles", "id, practitioner_id, organization_id, location_id, healthcare_service_id, specialty, active", (r) => ({ id: r.id, practitionerId: r.practitioner_id, organizationId: r.organization_id, locationId: r.location_id, healthcareServiceId: r.healthcare_service_id, specialty: r.specialty, active: r.active } as PractitionerRole), "created_at");
 export const fetchDevices = () => rows<Device>("devices", "id, organization_id, location_id, name, modality, active", (r) => ({ id: r.id, organizationId: r.organization_id, locationId: r.location_id, name: r.name, modality: r.modality, active: r.active } as Device));
-export const fetchServiceTypes = () => rows<ServiceType>("service_types", "id, code, name, duration_min, capacity, requires_contrast, requires_anesthesia, prep_instructions, active", (r) => ({ id: r.id, code: r.code, name: r.name, durationMin: r.duration_min, capacity: r.capacity, requiresContrast: r.requires_contrast, requiresAnesthesia: r.requires_anesthesia, prepInstructions: r.prep_instructions, active: r.active } as ServiceType));
+export const fetchServiceTypes = () => rows<ServiceType>("service_types", "id, code, name, duration_min, capacity, requires_contrast, requires_anesthesia, prep_instructions, active, category, modality, practitioner_requirement, standard_code_system, standard_code, standard_display", mapServiceType);
 export const fetchResources = () => rows<SchedulableResource>("schedulable_resources", "id, organization_id, location_id, healthcare_service_id, kind, name, practitioner_role_id, device_id, active", (r) => ({ id: r.id, organizationId: r.organization_id, locationId: r.location_id, healthcareServiceId: r.healthcare_service_id, kind: r.kind, name: r.name, practitionerRoleId: r.practitioner_role_id, deviceId: r.device_id, active: r.active } as SchedulableResource));
 
 export const fetchBranches = async () => {
@@ -58,7 +60,9 @@ export const fetchBranchServices = async (branchId: string) => {
 const mapServiceType = (r: Record<string, unknown>): ServiceType => ({
   id: r.id as string, code: String(r.code ?? ""), name: String(r.name ?? ""), durationMin: Number(r.duration_min ?? 30),
   capacity: Number(r.capacity ?? 1), requiresContrast: Boolean(r.requires_contrast), requiresAnesthesia: Boolean(r.requires_anesthesia),
-  prepInstructions: String(r.prep_instructions ?? ""), active: r.active !== false,
+  prepInstructions: String(r.prep_instructions ?? ""), active: r.active !== false, category: (r.category ?? "procedure") as ServiceCategory,
+  modality: String(r.modality ?? ""), practitionerRequirement: (r.practitioner_requirement ?? "optional") as PractitionerRequirement,
+  standardCodeSystem: String(r.standard_code_system ?? ""), standardCode: String(r.standard_code ?? ""), standardDisplay: String(r.standard_display ?? ""),
 });
 
 export const searchAvailableServiceTypes = async (branchId: string, serviceId: string, term: string) => {
@@ -79,8 +83,24 @@ export const searchMasterServiceTypes = async (serviceId: string, term = "") => 
   return (data as Record<string, unknown>[]).map(mapServiceType);
 };
 
-export const createMasterServiceType = (serviceId: string, code: string, name: string, durationMin: number) =>
-  insert1("service_types", { healthcare_service_id: serviceId, code, name, duration_min: durationMin });
+const missingCodingColumns = (caught: unknown) => caught instanceof Error && caught.message.includes("standard_code");
+const withoutCoding = (row: Record<string, unknown>) => {
+  const { standard_code_system, standard_code, standard_display, ...rest } = row;
+  void standard_code_system; void standard_code; void standard_display;
+  return rest;
+};
+
+export async function createMasterServiceType(serviceId: string, input: { code: string; name: string; durationMin: number; category: ServiceCategory; modality: string; practitionerRequirement: PractitionerRequirement; standardCodeSystem: string; standardCode: string; standardDisplay: string }) {
+  const row = { healthcare_service_id: serviceId, code: input.code, name: input.name, duration_min: input.durationMin, category: input.category, modality: input.modality, practitioner_requirement: input.practitionerRequirement, standard_code_system: input.standardCodeSystem || "LOCAL", standard_code: input.standardCode, standard_display: input.standardDisplay };
+  try { return await insert1("service_types", row); }
+  catch (caught) { if (!missingCodingColumns(caught)) throw caught; return insert1("service_types", withoutCoding(row)); }
+}
+
+export async function updateMasterServiceType(id: string, input: Pick<ServiceType, "code" | "name" | "durationMin" | "category" | "modality" | "practitionerRequirement" | "standardCodeSystem" | "standardCode" | "standardDisplay">) {
+  const row = { code: input.code, name: input.name, duration_min: input.durationMin, category: input.category, modality: input.modality, practitioner_requirement: input.practitionerRequirement, standard_code_system: input.standardCodeSystem || "LOCAL", standard_code: input.standardCode, standard_display: input.standardDisplay };
+  try { await patch("service_types", id, row); }
+  catch (caught) { if (!missingCodingColumns(caught)) throw caught; await patch("service_types", id, withoutCoding(row)); }
+}
 
 export const countTestServiceTypes = async () => {
   const { count, error } = await supabase.from("service_types").select("id", { count: "exact", head: true }).like("name", "[Prueba]%");
@@ -138,8 +158,10 @@ export const createPractitionerRole = (r: { practitionerId: string; organization
   insert1("practitioner_roles", { practitioner_id: r.practitionerId, organization_id: r.organizationId, location_id: r.locationId ?? null, healthcare_service_id: r.healthcareServiceId ?? null, specialty: r.specialty ?? "" });
 export const createDevice = (r: { organizationId: string; locationId?: string | null; name: string; modality?: string }) =>
   insert1("devices", { organization_id: r.organizationId, location_id: r.locationId ?? null, name: r.name, modality: r.modality ?? "" });
-export const createServiceType = (r: Omit<ServiceType, "id" | "active">) =>
-  insert1("service_types", { code: r.code, name: r.name, duration_min: r.durationMin, capacity: r.capacity, requires_contrast: r.requiresContrast, requires_anesthesia: r.requiresAnesthesia, prep_instructions: r.prepInstructions });
+type ServiceTypeCoding = Pick<ServiceType, "standardCodeSystem" | "standardCode" | "standardDisplay">;
+export const createServiceType = (r: Omit<ServiceType, "id" | "active" | keyof ServiceTypeCoding> & Partial<ServiceTypeCoding>) =>
+  insert1("service_types", { code: r.code, name: r.name, duration_min: r.durationMin, capacity: r.capacity, requires_contrast: r.requiresContrast, requires_anesthesia: r.requiresAnesthesia, prep_instructions: r.prepInstructions, category: r.category, modality: r.modality, practitioner_requirement: r.practitionerRequirement, standard_code_system: r.standardCodeSystem ?? "LOCAL", standard_code: r.standardCode ?? "", standard_display: r.standardDisplay ?? "" })
+    .catch((caught) => { if (!missingCodingColumns(caught)) throw caught; return insert1("service_types", { code: r.code, name: r.name, duration_min: r.durationMin, capacity: r.capacity, requires_contrast: r.requiresContrast, requires_anesthesia: r.requiresAnesthesia, prep_instructions: r.prepInstructions, category: r.category, modality: r.modality, practitioner_requirement: r.practitionerRequirement }); });
 
 // --- Recurso agendable: crea el recurso + componentes (composite) + tipos de atención permitidos ---
 export async function createResource(input: {
@@ -176,7 +198,9 @@ export const updateService = (id: string, p: { name: string; specialty: string; 
 export const updatePractitioner = (id: string, p: { fullName: string; professionalRegistration: string; active: boolean }) => patch("practitioners", id, { full_name: p.fullName, professional_registration: p.professionalRegistration, active: p.active });
 export const updateRole = (id: string, p: { specialty: string; locationId: string | null; healthcareServiceId: string | null; active: boolean }) => patch("practitioner_roles", id, { specialty: p.specialty, location_id: p.locationId, healthcare_service_id: p.healthcareServiceId, active: p.active });
 export const updateDevice = (id: string, p: { name: string; modality: string; locationId: string | null; active: boolean }) => patch("devices", id, { name: p.name, modality: p.modality, location_id: p.locationId, active: p.active });
-export const updateServiceType = (id: string, p: Omit<ServiceType, "id">) => patch("service_types", id, { code: p.code, name: p.name, duration_min: p.durationMin, capacity: p.capacity, requires_contrast: p.requiresContrast, requires_anesthesia: p.requiresAnesthesia, prep_instructions: p.prepInstructions, active: p.active });
+export const updateServiceType = (id: string, p: Omit<ServiceType, "id" | keyof ServiceTypeCoding> & Partial<ServiceTypeCoding>) =>
+  patch("service_types", id, { code: p.code, name: p.name, duration_min: p.durationMin, capacity: p.capacity, requires_contrast: p.requiresContrast, requires_anesthesia: p.requiresAnesthesia, prep_instructions: p.prepInstructions, active: p.active, category: p.category, modality: p.modality, practitioner_requirement: p.practitionerRequirement, standard_code_system: p.standardCodeSystem ?? "LOCAL", standard_code: p.standardCode ?? "", standard_display: p.standardDisplay ?? "" })
+    .catch((caught) => { if (!missingCodingColumns(caught)) throw caught; return patch("service_types", id, { code: p.code, name: p.name, duration_min: p.durationMin, capacity: p.capacity, requires_contrast: p.requiresContrast, requires_anesthesia: p.requiresAnesthesia, prep_instructions: p.prepInstructions, active: p.active, category: p.category, modality: p.modality, practitioner_requirement: p.practitionerRequirement }); });
 
 export const fetchResourceComponents = async (compositeId: string) => {
   const { data, error } = await supabase.from("schedulable_resource_components").select("member_id").eq("composite_id", compositeId);
