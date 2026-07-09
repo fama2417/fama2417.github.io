@@ -515,7 +515,16 @@ body:has(.report-workstation) .app-shell { flex: 1; min-height: 0; }
 .workflow-entry select { padding: 5px 8px; }
 .ai-panel-actions, .ai-finding-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; }
 .ai-finding-list { display: grid; gap: 8px; }
+.ai-finding-summary { color: var(--muted); font-size: 0.82rem; margin: 0; }
+.ai-finding-group { display: grid; gap: 8px; }
+.ai-finding-group h4 { align-items: center; color: var(--muted); display: flex; font-size: 0.78rem; gap: 8px; margin: 8px 0 0; text-transform: uppercase; }
+.ai-finding-group h4 span, .ai-finding-term, .ai-finding-badges span { background: rgba(255, 255, 255, 0.06); border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font-size: 0.72rem; padding: 2px 7px; }
+.ai-finding-card { gap: 7px; }
+.ai-finding-card-header { align-items: flex-start; display: flex; gap: 8px; justify-content: space-between; }
 .ai-finding-card strong { overflow-wrap: anywhere; }
+.ai-finding-badges { display: flex; flex-wrap: wrap; gap: 5px; }
+.ai-finding-source summary { color: var(--report-accent); cursor: pointer; font-weight: 700; }
+.ai-finding-source span { color: var(--muted); display: block; margin-top: 4px; overflow-wrap: anywhere; }
 .ai-finding-card .ai-finding-actions { margin-top: 4px; }
 
 /* Informes anteriores del mismo paciente */

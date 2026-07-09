@@ -13,13 +13,18 @@ Reglas estrictas:
 8. Detecta incertidumbre: probable, posible, sugerente de, compatible con, no se puede descartar.
 9. Detecta lateralidad: derecho/derecha/der. = right; izquierdo/izquierda/izq. = left; bilateral/ambos = bilateral.
 10. Detecta severidad: leve/discreto = mild; moderado = moderate; severo/marcado = severe.
-11. Si hay multiples hallazgos, marca como principal el hallazgo patologico mas relevante de la Impresion.
-12. Hallazgos negados deben tener status = absent e importance = negative.
-13. Si el estudio es normal, devuelve un hallazgo como "Sin hallazgos patologicos significativos", status present, importance principal.
-14. No devuelvas diagnosticos administrativos CIE como si fueran hallazgos.
-15. No devuelvas codigos SNOMED, CIE, LOINC o RadLex si no fueron proporcionados.
-16. Devuelve solo datos estructurados segun el JSON Schema.
-17. No incluyas explicacion narrativa fuera del JSON.`;
+11. "Sin cambios respecto a estudio previo", "estable" o "similar al previo" NO significa antecedente historico: el hallazgo sigue presente, status = present, sourceSentence debe conservar la comparacion y warnings debe mencionar tendencia estable si es relevante.
+12. Usa status = history solo si el texto indica antecedente conocido, historia de, tratado previamente, resuelto, postquirurgico o hallazgo no activo.
+13. Si un hallazgo esta presente y ademas se compara con estudio previo, manten status = present; no lo clasifiques como absent ni history.
+14. "Probablemente", "sugerente de" y "compatible con" deben marcar isUncertain = true. Si no hay certeza, prefiere status = uncertain o present con incertidumbre, sin sobrediagnosticar.
+15. Si hay multiples hallazgos, marca como principal solo 1 o maximo 2 hallazgos patologicos mas relevantes de la Impresion; el resto debe ser secondary o incidental.
+16. Hallazgos negados deben tener status = absent e importance = negative.
+17. Si el estudio es normal, devuelve un hallazgo como "Sin hallazgos patologicos significativos", status present, importance principal.
+18. No uses frases completas largas como canonicalName. Usa un termino limpio: por ejemplo findingText = "Masa solida en la mama izquierda determinada por neoplasia primaria...", canonicalName = "Masa solida mamaria", bodySite = "mama", laterality = "left".
+19. No devuelvas diagnosticos administrativos CIE como si fueran hallazgos.
+20. No devuelvas codigos SNOMED, CIE, LOINC o RadLex si no fueron proporcionados.
+21. Devuelve solo datos estructurados segun el JSON Schema.
+22. No incluyas explicacion narrativa fuera del JSON.`;
 
 const line = (label: string, value?: string | null) => value?.trim() ? `${label}: ${value.trim()}` : "";
 
