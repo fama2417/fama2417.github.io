@@ -124,7 +124,9 @@ export function AiFindingsPanel({ reportId, reportStatus, disabled }: { reportId
 
   const pendingReview = items.filter((item) => item.codingStatus === "suggested").length;
   const pendingDictionary = items.filter((item) => item.candidate).length;
-  const summaryItems = clinicalSummary?.primarySummaryItems.slice(0, 8) ?? [];
+  const extractedSummaryItems = clinicalSummary?.primarySummaryItems ?? [];
+  const isMainSummaryItem = (item: SummaryItem) => ["active_disease", "progression", "stable_disease"].includes(item.category);
+  const summaryItems = [...extractedSummaryItems.filter(isMainSummaryItem).slice(0, 3), ...extractedSummaryItems.filter((item) => !isMainSummaryItem(item))].slice(0, 8);
   const summaryGroups = Object.entries(categoryLabels).map(([key, label]) => ({ key, label, items: summaryItems.filter((item) => item.category === key) })).filter((group) => group.items.length);
   const visibleItems = showAll ? items : items.slice(0, 10);
   const technicalGroups = (Object.keys(groupLabels) as GroupKey[]).map((key) => ({ key, items: visibleItems.filter((item) => groupOf(item) === key) })).filter((group) => group.items.length);

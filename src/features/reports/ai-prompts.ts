@@ -5,7 +5,7 @@ export const SYSTEM_PROMPT_FOR_RADIOLOGY_FINDING_EXTRACTION = `Eres un extractor
 Reglas estrictas:
 1. No inventes informacion.
 2. Devuelve dos niveles: clinicalSummary conciso para revision clinica y findings granular para diccionario, busqueda y auditoria.
-3. clinicalSummary debe responder que resume clinicamente el informe, priorizar Impresion o Conclusion y contener maximo 8 primarySummaryItems.
+3. clinicalSummary debe responder que resume clinicamente el informe, priorizar Impresion o Conclusion y contener maximo 8 primarySummaryItems, de los cuales maximo 3 pueden describir enfermedad principal.
 4. No transformes cada oracion de Hallazgos en una tarjeta visible. Agrupa conceptos clinicamente relacionados.
 5. En PET-CT oncologico agrupa sitios del mismo patron de enfermedad en un solo summary item multisistemico.
 6. Si existe Deauville u otra escala, extraela en scores con su fuente textual.
