@@ -14,7 +14,8 @@ import { emptyClinicalDetail, type Appointment } from "./mock-data";
 import { fetchAppointments, saveAppointment, setAppointmentStatus, uploadOrderFile } from "./repository";
 import { APPOINTMENT_STATUSES, appointmentStatusLabels, type AppointmentStatus } from "./status";
 import { appointmentError } from "./validation";
-import { CODE_SYSTEMS, codeHref, codingError } from "@/features/clinical/coding";
+import { CODE_SYSTEMS, codingError } from "@/features/clinical/coding";
+import { CodePicker } from "@/features/clinical/CodePicker";
 
 const today = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Santiago" });
 const emptyDraft = (date: string): Appointment => ({ id: "", patientId: "", patientName: "", practitionerName: "", locationName: "", date, startTime: "", endTime: "", status: "scheduled", reason: "", modality: "OT", ...emptyClinicalDetail });
@@ -350,8 +351,8 @@ export function AgendaManager() {
                 <label className="span-2">Anamnesis<textarea value={draft.anamnesis} onChange={(event) => set("anamnesis", event.target.value)} placeholder="Antecedentes clínicos relevantes para el examen" /></label>
                 <label className="span-2">Hipótesis diagnóstica<textarea value={draft.diagnosticHypothesis} onChange={(event) => set("diagnosticHypothesis", event.target.value)} /></label>
                 <label>Sistema del diagnóstico<select value={draft.reasonCodeSystem || "ICD-10"} onChange={(event) => set("reasonCodeSystem", event.target.value)}>{CODE_SYSTEMS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-                <label>Código diagnóstico<input value={draft.reasonCode} onChange={(event) => set("reasonCode", event.target.value)} placeholder="Ej: R10.4" /></label>
-                <label>Nombre estándar{codeHref(draft.reasonCodeSystem, draft.reasonCode) && <a className="coding-link" href={codeHref(draft.reasonCodeSystem, draft.reasonCode)} target="_blank" rel="noreferrer">Ver código oficial ↗</a>}<input value={draft.reasonCodeDisplay} onChange={(event) => set("reasonCodeDisplay", event.target.value)} placeholder="Ej: Dolor abdominal" /></label>
+                <CodePicker system={draft.reasonCodeSystem || "ICD-10"} code={draft.reasonCode} display={draft.reasonCodeDisplay}
+                  onChange={(code, display) => setDraft((current) => current ? { ...current, reasonCode: code, reasonCodeDisplay: display } : current)} />
                 <label className="span-2">Comentario<textarea value={draft.comment} onChange={(event) => set("comment", event.target.value)} /></label>
               </div>
               {draft.id && (

@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { CODE_SYSTEMS, codeHref, codingError } from "@/features/clinical/coding";
+import { CodePicker } from "@/features/clinical/CodePicker";
 import type { Appointment } from "@/features/appointments/mock-data";
 import { fetchAppointments, orderFileUrl } from "@/features/appointments/repository";
 import { appointmentStatusLabels } from "@/features/appointments/status";
@@ -330,10 +331,6 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
     ? `/api/pacs/handoff?next=${encodeURIComponent(`/ohif/viewer?StudyInstanceUIDs=${appointment.studyInstanceUid}`)}` : viewer;
   const detail: [string, string][] = [["Anamnesis", appointment.anamnesis || "—"], ["Hipótesis diagnóstica", appointment.diagnosticHypothesis || "—"], ...appointmentDetail(appointment).filter(([, value]) => value)];
   const acknowledgedCommunication = communications.findLast((item) => item.urgency === "critical" && item.acknowledged);
-  const codingAnchor = (system: string, code: string) => {
-    const href = codeHref(system, code);
-    return href ? <a className="coding-link" href={href} target="_blank" rel="noreferrer">Ver código oficial ↗</a> : null;
-  };
 
   return <div className="report-workstation">
     <header className="report-workstation-header">
@@ -371,17 +368,14 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
             <summary><span className="collapsible-icon">#</span>Codificación estándar</summary>
             <div className="clinical-form">
               <label>Sistema reporte/prestación<select value={report.reportCodeSystem || "LOCAL"} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, reportCodeSystem: event.target.value }))}>{CODE_SYSTEMS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-              <label>Código reporte/prestación<input value={report.reportCode} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, reportCode: event.target.value }))} placeholder="LOINC / código local" /></label>
-              <label className="span-2">Nombre estándar<input value={report.reportCodeDisplay} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, reportCodeDisplay: event.target.value }))} placeholder="Nombre oficial o local" /></label>
-              {codingAnchor(report.reportCodeSystem, report.reportCode)}
+              <CodePicker system={report.reportCodeSystem || "LOCAL"} code={report.reportCode} display={report.reportCodeDisplay} disabled={report.status === "final"}
+                onChange={(code, display) => setReport((current) => ({ ...current, reportCode: code, reportCodeDisplay: display }))} />
               <label>Hallazgo principal<select value={report.findingCodeSystem || "SNOMEDCT"} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, findingCodeSystem: event.target.value }))}>{CODE_SYSTEMS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-              <label>Código hallazgo<input value={report.findingCode} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, findingCode: event.target.value }))} placeholder="SNOMED CT si aplica" /></label>
-              <label className="span-2">Texto hallazgo<input value={report.findingCodeDisplay} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, findingCodeDisplay: event.target.value }))} /></label>
-              {codingAnchor(report.findingCodeSystem, report.findingCode)}
+              <CodePicker system={report.findingCodeSystem || "SNOMEDCT"} code={report.findingCode} display={report.findingCodeDisplay} disabled={report.status === "final"}
+                onChange={(code, display) => setReport((current) => ({ ...current, findingCode: code, findingCodeDisplay: display }))} />
               <label>Diagnóstico administrativo<select value={report.diagnosisCodeSystem || "ICD-10"} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, diagnosisCodeSystem: event.target.value }))}>{CODE_SYSTEMS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-              <label>Código diagnóstico<input value={report.diagnosisCode} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, diagnosisCode: event.target.value }))} placeholder="CIE-10 / CIE-11" /></label>
-              <label className="span-2">Texto diagnóstico<input value={report.diagnosisCodeDisplay} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, diagnosisCodeDisplay: event.target.value }))} /></label>
-              {codingAnchor(report.diagnosisCodeSystem, report.diagnosisCode)}
+              <CodePicker system={report.diagnosisCodeSystem || "ICD-10"} code={report.diagnosisCode} display={report.diagnosisCodeDisplay} disabled={report.status === "final"}
+                onChange={(code, display) => setReport((current) => ({ ...current, diagnosisCode: code, diagnosisCodeDisplay: display }))} />
             </div>
           </details>
 

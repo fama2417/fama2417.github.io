@@ -1,0 +1,25 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { codeColumns, detectDelimiter, parseDelimited } from "./csv.ts";
+
+test("parsea CSV con comillas, comas internas y CRLF", () => {
+  const rows = parseDelimited('code,name\r\n"R10.4","Dolor abdominal, otro"\r\nA00,"Cólera"');
+  assert.deepEqual(rows, [["code", "name"], ["R10.4", "Dolor abdominal, otro"], ["A00", "Cólera"]]);
+});
+
+test("comilla escapada dentro de campo", () => {
+  assert.deepEqual(parseDelimited('a,b\n"x ""y""",z'), [["a", "b"], ['x "y"', "z"]]);
+});
+
+test("detecta TSV y punto y coma", () => {
+  assert.equal(detectDelimiter("a\tb"), "\t");
+  assert.equal(detectDelimiter("a;b"), ";");
+  assert.deepEqual(parseDelimited("code\tterm\n123\tHemoglobina"), [["code", "term"], ["123", "Hemoglobina"]]);
+});
+
+test("codeColumns reconoce encabezados LOINC, SNOMED y genéricos", () => {
+  assert.deepEqual(codeColumns(["LOINC_NUM", "COMPONENT", "LONG_COMMON_NAME"]), { code: 0, display: 2 });
+  assert.deepEqual(codeColumns(["id", "effectiveTime", "conceptId", "term"]), { code: 2, display: 3 }); // conceptId gana sobre id (RF2)
+  assert.deepEqual(codeColumns(["Código", "Descripción"]), { code: 0, display: 1 });
+  assert.deepEqual(codeColumns(["foo", "bar"]), { code: 0, display: 1 });
+});

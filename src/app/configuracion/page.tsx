@@ -1,6 +1,7 @@
 import { AppShell } from "@/components/AppShell";
 import { RequireRole } from "@/components/RequireRole";
 import { CatalogManager } from "@/features/catalog/CatalogManager";
+import { TerminologyManager } from "@/features/clinical/TerminologyManager";
 import { TemplatesManager } from "@/features/reports/TemplatesManager";
 import { ScheduleManager } from "@/features/schedule/ScheduleManager";
 import { OfferingManager } from "@/features/scheduling/OfferingManager";
@@ -25,6 +26,7 @@ export default function SettingsPage() {
         <div>
           <InstitutionSettings />
           <UsersManager />
+          <TerminologyManager />
           <TemplatesManager />
           <TenantsManager />
           <section className="grid two-columns">
