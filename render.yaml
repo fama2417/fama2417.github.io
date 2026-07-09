@@ -25,9 +25,9 @@ services:
       - key: AI_MAX_INPUT_CHARS
         value: "12000"
       - key: AI_MAX_OUTPUT_TOKENS
-        value: "1200"
+        value: "4000"
       - key: AI_TIMEOUT_MS
-        value: "25000"
+        value: "45000"
       - key: AI_MAX_REPORTS_PER_DAY
         value: "100"
       - key: AI_MONTHLY_BUDGET_USD
