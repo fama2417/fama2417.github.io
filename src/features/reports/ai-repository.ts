@@ -181,10 +181,10 @@ const mapExtractedFinding = (row: any) => ({
   extractionMethod: row.extraction_method,
   codingStatus: row.coding_status,
   dictionary: row.finding ? { id: row.finding.id, localCode: row.finding.local_code, canonicalName: row.finding.canonical_name } : null,
-  candidate: row.candidate ? { id: row.candidate.id, rawText: row.candidate.raw_text, status: row.candidate.status } : null,
+  candidate: row.candidate ? { id: row.candidate.id, rawText: row.candidate.raw_text, suggestedCanonicalName: row.candidate.suggested_canonical_name, status: row.candidate.status } : null,
 });
 
-const extractedColumns = "id, report_id, finding_text, normalized_text, status, importance, source_section, source_sentence, body_site, laterality, severity, confidence, extraction_method, coding_status, finding:finding_dictionary(id, local_code, canonical_name), candidate:finding_candidates(id, raw_text, status)";
+const extractedColumns = "id, report_id, finding_text, normalized_text, status, importance, source_section, source_sentence, body_site, laterality, severity, confidence, extraction_method, coding_status, finding:finding_dictionary(id, local_code, canonical_name), candidate:finding_candidates(id, raw_text, suggested_canonical_name, status)";
 
 export async function listExtractedFindings(supabase: AiSupabase, reportId: string) {
   const { data, error } = await supabase.from("extracted_findings").select(extractedColumns).eq("report_id", reportId).order("confidence", { ascending: false }).order("created_at", { ascending: false });
