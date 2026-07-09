@@ -21,7 +21,7 @@ services:
       - key: OPENAI_FALLBACK_MODEL
         value: gpt-5.4-mini
       - key: AI_EXTRACTION_ENABLED
-        value: "false"
+        value: "true"
       - key: AI_MAX_INPUT_CHARS
         value: "12000"
       - key: AI_MAX_OUTPUT_TOKENS
