@@ -25,9 +25,12 @@ const statusLabels: Record<string, string> = { present: "Presente", absent: "Aus
 const importanceLabels: Record<string, string> = { principal: "Principal", secondary: "Secundario", incidental: "Incidental", negative: "Negativo", not_relevant: "No relevante" };
 const lateralityLabels: Record<string, string> = { right: "Derecha", left: "Izquierda", bilateral: "Bilateral", midline: "Linea media", unknown: "No especificada" };
 const severityLabels: Record<string, string> = { mild: "Leve", moderate: "Moderada", severe: "Severa", unknown: "No especificada" };
-const codingLabels: Record<string, string> = { suggested: "Sugerido", confirmed: "Confirmado", corrected: "Corregido", rejected: "Rechazado", not_required: "No requerido" };
+const reviewLabels: Record<string, string> = { suggested: "Sugerido", confirmed: "Confirmado", corrected: "Corregido", rejected: "Rechazado", not_required: "No requerido" };
+const dictionaryLabels: Record<string, string> = { known: "Diccionario", new_candidate: "Nuevo termino", pending_dictionary: "Pendiente diccionario" };
+const codeLabels: Record<string, string> = { unmapped: "Sin codificacion", suggested: "Codigo sugerido", confirmed: "Codigo confirmado", not_applicable: "No aplica" };
 const groupLabels = { principal: "Hallazgos principales", secondary: "Hallazgos secundarios", incidental: "Hallazgos incidentales", negative: "Hallazgos negativos / ausentes", reviewed: "Hallazgos rechazados o corregidos" } as const;
 type GroupKey = keyof typeof groupLabels;
+type Derived = { reviewStatus: string; dictionaryStatus: string; codeStatus: string; clinicalBadges: string[] };
 
 async function authHeaders() {
   const { data } = await supabase.auth.getSession();
@@ -44,6 +47,24 @@ const apiMessage = (status: number, error?: string) => {
 
 const titleOf = (item: Item) => item.dictionary?.canonicalName || item.candidate?.suggestedCanonicalName || (item.findingText.length > 92 ? `${item.findingText.slice(0, 89)}...` : item.findingText);
 const pendingItems = (items: Item[]) => items.filter((item) => item.codingStatus === "suggested");
+const derive = (item: Item): Derived => {
+  const text = `${item.findingText} ${item.sourceSentence}`.toLowerCase();
+  const clinicalBadges = [
+    /neoplas|tumor|masa|metasta|adenopat|cancer|carcinoma|oncolo/.test(text) && "Oncologico",
+    item.importance === "incidental" && "Incidental",
+    /seguimiento|control|recomienda|recomendacion/.test(text) && "Seguimiento",
+    /critico|urgente|inmediata|emergente/.test(text) && "Critico",
+    /sin cambios|estable|similar al previo|respecto a estudio previo/.test(text) && "Estable",
+    /progres|aument|crecim|mayor/.test(text) && "Progresion",
+    /regres|disminu|reducc|menor/.test(text) && "Regresion",
+  ].filter(Boolean) as string[];
+  return {
+    reviewStatus: item.codingStatus,
+    dictionaryStatus: item.dictionary ? "known" : item.candidate ? "pending_dictionary" : "new_candidate",
+    codeStatus: item.dictionary ? (item.codingStatus === "confirmed" ? "confirmed" : "suggested") : "unmapped",
+    clinicalBadges,
+  };
+};
 const groupOf = (item: Item): GroupKey => {
   if (item.codingStatus === "rejected" || item.codingStatus === "corrected") return "reviewed";
   if (item.status === "absent" || item.importance === "negative") return "negative";
@@ -119,8 +140,8 @@ export function AiFindingsPanel({ reportId, reportStatus, disabled }: { reportId
     total: items.length,
     confirmed: items.filter((item) => item.codingStatus === "confirmed").length,
     pending: pendingItems(items).length,
-    rejected: items.filter((item) => item.codingStatus === "rejected").length,
-    candidates: items.filter((item) => item.candidate).length,
+    pendingDictionary: items.filter((item) => derive(item).dictionaryStatus === "pending_dictionary").length,
+    unmapped: items.filter((item) => derive(item).codeStatus === "unmapped").length,
   };
   const groups = (Object.keys(groupLabels) as GroupKey[]).map((key) => ({ key, items: items.filter((item) => groupOf(item) === key) })).filter((group) => group.items.length > 0);
 
@@ -134,13 +155,16 @@ export function AiFindingsPanel({ reportId, reportStatus, disabled }: { reportId
       <button className="text-button" type="button" onClick={load} disabled={!reportId || loading}>Actualizar</button>
       {!locked && summary.pending > 0 && <button className="text-button" type="button" onClick={confirmAllPending} disabled={!!acting}>Confirmar todos los pendientes</button>}
     </div>
-    {items.length > 0 && <p className="ai-finding-summary">{summary.total} hallazgos sugeridos - {summary.confirmed} confirmados - {summary.pending} pendientes - {summary.rejected} rechazados - {summary.candidates} nuevos terminos</p>}
+    {items.length > 0 && <p className="ai-finding-summary">Total {summary.total} - {summary.pending} pendientes de revision - {summary.confirmed} confirmados - {summary.pendingDictionary} pendientes diccionario - {summary.unmapped} sin codificacion</p>}
+    {items.length > 0 && <p className="empty-inline">La codificacion SNOMED/CIE-11 se realizara en el diccionario, no en esta vista.</p>}
     {error && <p className="notice" role="alert">{error}</p>}
     {loading ? <p className="empty-inline">Cargando hallazgos sugeridos...</p> : items.length === 0 ? <p className="empty-inline">Sin hallazgos sugeridos todavia.</p> : <div className="ai-finding-list">
       {/* Future use: reviewed structured findings can feed advanced search, statistics, optional coding, follow-up, and dictionary admin without changing original report text. */}
       {groups.map((group) => <section className="ai-finding-group" key={group.key}>
         <h4>{groupLabels[group.key]} <span>{group.items.length}</span></h4>
-        {group.items.map((item) => <article className="workflow-entry ai-finding-card" key={item.id}>
+        {group.items.map((item) => {
+          const status = derive(item);
+          return <article className="workflow-entry ai-finding-card" key={item.id}>
           <div className="ai-finding-card-header">
             <strong title={item.findingText}>{titleOf(item)}</strong>
             {item.candidate && <span className="ai-finding-term">Nuevo termino - Pendiente diccionario</span>}
@@ -148,21 +172,26 @@ export function AiFindingsPanel({ reportId, reportStatus, disabled }: { reportId
           <div className="ai-finding-badges">
             <span>{statusLabels[item.status] ?? item.status}</span>
             <span>{importanceLabels[item.importance] ?? item.importance}</span>
-            <span>{codingLabels[item.codingStatus] ?? item.codingStatus}</span>
+            <span>{reviewLabels[status.reviewStatus] ?? status.reviewStatus}</span>
+            <span>{dictionaryLabels[status.dictionaryStatus]}</span>
+            <span>{codeLabels[status.codeStatus]}</span>
             <span>{Math.round(Number(item.confidence) * 100)}%</span>
           </div>
+          {status.clinicalBadges.length > 0 && <div className="ai-clinical-badges">{status.clinicalBadges.map((badge) => <span key={badge}>{badge}</span>)}</div>}
           <span>{[item.bodySite, item.laterality && lateralityLabels[item.laterality], item.severity && severityLabels[item.severity]].filter(Boolean).join(" - ") || "Sin localizacion especifica"}</span>
           {item.dictionary && <span>Diccionario: {item.dictionary.canonicalName} ({item.dictionary.localCode})</span>}
           <details className="ai-finding-source">
             <summary>Ver fuente</summary>
             <span>{item.sourceSection}: {item.sourceSentence}</span>
           </details>
+          <button className="text-button disabled-link" type="button" disabled>Mapeo terminologico pendiente</button>
           {!locked && <div className="ai-finding-actions">
-            <button className="text-button" type="button" disabled={acting === item.id || acting === "confirm-all"} onClick={() => patch(item, { action: "confirm" })}>Confirmar</button>
-            <button className="text-button danger" type="button" disabled={acting === item.id || acting === "confirm-all"} onClick={() => patch(item, { action: "reject", reason: window.prompt("Motivo del rechazo (opcional)") ?? "" })}>Rechazar</button>
+            {status.reviewStatus !== "confirmed" && status.reviewStatus !== "rejected" && <button className="text-button" type="button" disabled={acting === item.id || acting === "confirm-all"} onClick={() => patch(item, { action: "confirm" })}>Confirmar</button>}
+            {status.reviewStatus !== "rejected" && <button className="text-button danger" type="button" disabled={acting === item.id || acting === "confirm-all"} onClick={() => patch(item, { action: "reject", reason: window.prompt("Motivo del rechazo (opcional)") ?? "" })}>Rechazar</button>}
             <button className="text-button" type="button" disabled={acting === item.id || acting === "confirm-all"} onClick={() => { const correctedText = window.prompt("Texto corregido", item.findingText)?.trim(); if (correctedText) patch(item, { action: "correct", correctedText }); }}>Corregir</button>
           </div>}
-        </article>)}
+        </article>;
+        })}
       </section>)}
     </div>}
   </details>;
