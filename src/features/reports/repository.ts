@@ -5,6 +5,7 @@ import { effectiveTenantId } from "@/lib/tenant";
 export type Signer = { name: string; registration: string };
 
 export type RadiologyReport = {
+  id?: string;
   appointmentId: string;
   reportCategory: "consultation" | "imaging" | "laboratory" | "pathology" | "procedure";
   reportCodeSystem: string;
@@ -55,6 +56,7 @@ export type ReportFollowUp = {
 };
 
 type ReportRow = {
+  id: string;
   appointment_id: string; report_category: RadiologyReport["reportCategory"]; report_code_system: string; report_code: string; report_code_display: string;
   finding_code_system: string; finding_code: string; finding_code_display: string; diagnosis_code_system: string; diagnosis_code: string; diagnosis_code_display: string;
   clinical_indication: string; technique: string; comparison: string; findings: string; impression: string;
@@ -62,9 +64,10 @@ type ReportRow = {
   clinical_question_answered: boolean; signed_at: string | null; signed_by: string | null; signer_name: string; signer_registration: string; updated_at: string;
 };
 
-const reportColumns = "appointment_id, report_category, report_code_system, report_code, report_code_display, finding_code_system, finding_code, finding_code_display, diagnosis_code_system, diagnosis_code, diagnosis_code_display, clinical_indication, technique, comparison, findings, impression, status, critical_finding, critical_finding_type, identity_confirmed, clinical_question_answered, signed_at, signed_by, signer_name, signer_registration, updated_at";
-const legacyReportColumns = "appointment_id, clinical_indication, technique, comparison, findings, impression, status, critical_finding, critical_finding_type, identity_confirmed, clinical_question_answered, signed_at, signed_by, signer_name, signer_registration, updated_at";
+const reportColumns = "id, appointment_id, report_category, report_code_system, report_code, report_code_display, finding_code_system, finding_code, finding_code_display, diagnosis_code_system, diagnosis_code, diagnosis_code_display, clinical_indication, technique, comparison, findings, impression, status, critical_finding, critical_finding_type, identity_confirmed, clinical_question_answered, signed_at, signed_by, signer_name, signer_registration, updated_at";
+const legacyReportColumns = "id, appointment_id, clinical_indication, technique, comparison, findings, impression, status, critical_finding, critical_finding_type, identity_confirmed, clinical_question_answered, signed_at, signed_by, signer_name, signer_registration, updated_at";
 const mapReport = (row: ReportRow): RadiologyReport => ({
+  id: row.id,
   appointmentId: row.appointment_id,
   reportCategory: row.report_category ?? "imaging",
   reportCodeSystem: row.report_code_system ?? "",
