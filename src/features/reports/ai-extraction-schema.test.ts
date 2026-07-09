@@ -6,6 +6,17 @@ import { AiFindingExtractionResultSchema } from "./ai-extraction-schema.ts";
 const valid = {
   reportLanguage: "es",
   procedureContext: { modality: "CT", bodyRegion: "abdomen", suggestedReportingGroup: "CT_ABDOMEN_PELVIS", confidence: 0.8 },
+  clinicalSummary: {
+    modalityContext: "CT",
+    clinicalContext: null,
+    globalAssessment: { status: "not_applicable", text: "Colelitiasis.", confidence: 0.9 },
+    scores: [],
+    primarySummaryItems: [{
+      title: "Colelitiasis", summary: "Colelitiasis sin complicaciones.", category: "active_disease", sites: ["vesicula"],
+      trend: "not_applicable", sourceSection: "impression", sourceSentences: ["Colelitiasis."], confidence: 0.9,
+    }],
+    warnings: [],
+  },
   findings: [{
     findingText: "Colelitiasis.",
     canonicalName: "Colelitiasis",
@@ -29,6 +40,7 @@ const valid = {
 test("valida salida estructurada de IA", () => {
   assert.equal(AiFindingExtractionResultSchema.safeParse(valid).success, true);
   assert.equal(AiFindingExtractionResultSchema.safeParse({ ...valid, findings: [{ ...valid.findings[0], findingText: "" }] }).success, false);
+  assert.equal(AiFindingExtractionResultSchema.safeParse({ ...valid, clinicalSummary: { ...valid.clinicalSummary, primarySummaryItems: Array(9).fill(valid.clinicalSummary.primarySummaryItems[0]) } }).success, false);
 });
 
 test("parsea respuesta IA desde output_text y oculta errores crudos", () => {

@@ -5,7 +5,7 @@ import { aiConfig, canRunAiExtraction, estimateAiCost, type AiSupabase } from ".
 import { AiFindingExtractionResultSchema } from "./ai-extraction-schema.ts";
 import { buildRadiologyFindingExtractionPrompt, SYSTEM_PROMPT_FOR_RADIOLOGY_FINDING_EXTRACTION } from "./ai-prompts.ts";
 import { sanitizeReportForAi } from "./ai-sanitizer.ts";
-import { getReportForAiExtraction, insertAiUsageLog, persistAiExtractionResult } from "./ai-repository.ts";
+import { getReportAiSummary, getReportForAiExtraction, insertAiUsageLog, listExtractedFindings, persistAiExtractionResult } from "./ai-repository.ts";
 
 type Usage = { inputTokens: number | null; outputTokens: number | null; totalTokens: number | null };
 
@@ -45,6 +45,10 @@ export async function extractRadiologyFindingsWithAi(reportId: string, options: 
   let context;
   try {
     context = await getReportForAiExtraction(reportId, supabase);
+    const [existingSummary, existingFindings] = await Promise.all([getReportAiSummary(supabase, reportId), listExtractedFindings(supabase, reportId)]);
+    if (!options.force && (existingSummary || existingFindings.length)) {
+      return { ok: true as const, findings: existingFindings, clinicalSummary: existingSummary, usage: null, warnings: [], reused: true };
+    }
     const budget = await canRunAiExtraction({ tenantId: context.tenantId, reportId, supabase });
     if (!budget.allowed) return { ok: false as const, error: budget.reason ?? "AI extraction blocked." };
 
@@ -69,7 +73,7 @@ export async function extractRadiologyFindingsWithAi(reportId: string, options: 
       store: false,
     } as any, { timeout: config.timeoutMs });
     const parsed = parseAiExtractionResponse(response);
-    const saved = await persistAiExtractionResult(supabase, reportId, parsed, context);
+    const saved = await persistAiExtractionResult(supabase, reportId, parsed, context, options.force === true);
     const usage = usageOf(response);
     const estimatedCost = await estimateAiCost({ model: config.model, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, supabase });
     await insertAiUsageLog(supabase, {
@@ -86,7 +90,7 @@ export async function extractRadiologyFindingsWithAi(reportId: string, options: 
       success: true,
       error_message: budget.warning ?? (sanitized.warnings.join("; ") || null),
     });
-    return { ok: true as const, findings: saved, usage: { model: config.model, ...usage, estimatedCostUsd: estimatedCost }, warnings: [...sanitized.warnings, budget.warning].filter(Boolean) };
+    return { ok: true as const, findings: saved, clinicalSummary: parsed.clinicalSummary, usage: { model: config.model, ...usage, estimatedCostUsd: estimatedCost }, warnings: [...sanitized.warnings, budget.warning].filter(Boolean), reused: false };
   } catch (cause) {
     if (context) {
       await insertAiUsageLog(supabase, {
