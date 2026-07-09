@@ -35,3 +35,16 @@ test("usa minimos seguros para salida y timeout de IA", () => {
   if (beforeOutput === undefined) delete process.env.AI_MAX_OUTPUT_TOKENS; else process.env.AI_MAX_OUTPUT_TOKENS = beforeOutput;
   if (beforeTimeout === undefined) delete process.env.AI_TIMEOUT_MS; else process.env.AI_TIMEOUT_MS = beforeTimeout;
 });
+
+test("habilita IA en Render si existe OPENAI_API_KEY", () => {
+  const beforeEnabled = process.env.AI_EXTRACTION_ENABLED;
+  const beforeRender = process.env.RENDER;
+  const beforeKey = process.env.OPENAI_API_KEY;
+  process.env.AI_EXTRACTION_ENABLED = "false";
+  process.env.RENDER = "true";
+  process.env.OPENAI_API_KEY = "test-key";
+  assert.equal(aiConfig().enabled, true);
+  if (beforeEnabled === undefined) delete process.env.AI_EXTRACTION_ENABLED; else process.env.AI_EXTRACTION_ENABLED = beforeEnabled;
+  if (beforeRender === undefined) delete process.env.RENDER; else process.env.RENDER = beforeRender;
+  if (beforeKey === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = beforeKey;
+});

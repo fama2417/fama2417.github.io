@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { aiConfig } from "@/features/reports/ai-budget.ts";
 import { extractRadiologyFindingsWithAi } from "@/features/reports/ai-extraction.ts";
 import { requireAiRouteUser } from "@/features/reports/ai-route-auth.ts";
 
@@ -10,7 +11,7 @@ const errorStatus = (message: string) => {
 };
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ reportId: string }> }) {
-  if (process.env.AI_EXTRACTION_ENABLED !== "true") return NextResponse.json({ error: "AI extraction is disabled" }, { status: 403 });
+  if (!aiConfig().enabled) return NextResponse.json({ error: "AI extraction is disabled" }, { status: 403 });
   if (!process.env.OPENAI_API_KEY) return NextResponse.json({ error: "OpenAI API key is not configured" }, { status: 503 });
 
   const auth = await requireAiRouteUser(request, ["admin", "radiologist"]);
