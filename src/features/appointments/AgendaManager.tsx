@@ -14,6 +14,8 @@ import { emptyClinicalDetail, type Appointment } from "./mock-data";
 import { fetchAppointments, saveAppointment, setAppointmentStatus, uploadOrderFile } from "./repository";
 import { APPOINTMENT_STATUSES, appointmentStatusLabels, type AppointmentStatus } from "./status";
 import { appointmentError } from "./validation";
+import { CODE_SYSTEMS, codingError } from "@/features/clinical/coding";
+import { CodePicker } from "@/features/clinical/CodePicker";
 
 const today = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Santiago" });
 const emptyDraft = (date: string): Appointment => ({ id: "", patientId: "", patientName: "", practitionerName: "", locationName: "", date, startTime: "", endTime: "", status: "scheduled", reason: "", modality: "OT", ...emptyClinicalDetail });
@@ -203,6 +205,8 @@ export function AgendaManager() {
     if (!draft.patientId) { setStep(0); return setError("Selecciona o crea el paciente."); }
     if (!draft.branch || !draft.service || !draft.reason || !draft.locationName || (draft.practitionerRequirement === "required" && !draft.practitionerName)) { setStep(1); return setError("Completa sucursal, servicio, prestación, recurso y los participantes obligatorios."); }
     if (!draft.startTime || !draft.endTime) { setStep(1); return setError("Selecciona un horario disponible."); }
+    const reasonCoding = codingError(draft.reasonCodeSystem, draft.reasonCode, draft.reasonCodeDisplay, "Diagnóstico de la cita");
+    if (reasonCoding) { setStep(2); return setError(reasonCoding); }
     const patient = patients.find((item) => item.id === draft.patientId);
     const exists = Boolean(draft.id);
     const candidate = { ...draft, id: draft.id || crypto.randomUUID(), patientName: patient?.name ?? "" };
@@ -346,6 +350,9 @@ export function AgendaManager() {
                 <div className="booking-tags"><span>Etiquetas de cita</span><div>{options.etiqueta.map((item) => <button key={item.id} type="button" className={`tag ${draft.tags.split(",").includes(item.label) ? "active" : ""}`} onClick={() => toggleTag(item.label)}>{item.label}</button>)}{!options.etiqueta.length && <span className="empty-inline">Sin etiquetas configuradas.</span>}</div></div>
                 <label className="span-2">Anamnesis<textarea value={draft.anamnesis} onChange={(event) => set("anamnesis", event.target.value)} placeholder="Antecedentes clínicos relevantes para el examen" /></label>
                 <label className="span-2">Hipótesis diagnóstica<textarea value={draft.diagnosticHypothesis} onChange={(event) => set("diagnosticHypothesis", event.target.value)} /></label>
+                <label>Sistema del diagnóstico<select value={draft.reasonCodeSystem || "ICD-10"} onChange={(event) => set("reasonCodeSystem", event.target.value)}>{CODE_SYSTEMS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+                <CodePicker system={draft.reasonCodeSystem || "ICD-10"} code={draft.reasonCode} display={draft.reasonCodeDisplay}
+                  onChange={(code, display) => setDraft((current) => current ? { ...current, reasonCode: code, reasonCodeDisplay: display } : current)} />
                 <label className="span-2">Comentario<textarea value={draft.comment} onChange={(event) => set("comment", event.target.value)} /></label>
               </div>
               {draft.id && (

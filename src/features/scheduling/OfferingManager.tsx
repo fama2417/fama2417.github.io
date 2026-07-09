@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { CODE_SYSTEMS, codeHref, codingError } from "@/features/clinical/coding";
+import { CodePicker } from "@/features/clinical/CodePicker";
 import {
   countTestServiceTypes, createMasterServiceType, deleteLocationResource, fetchAssignedServiceTypeIds, fetchBranches,
   fetchBranchServices, fetchLocations, fetchResources, fetchServices, saveLocationResource, searchMasterServiceTypes,
@@ -37,6 +38,7 @@ export function OfferingManager() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [testCount, setTestCount] = useState(0);
+  const [newStd, setNewStd] = useState({ system: "LOCAL", code: "", display: "" });
 
   async function reloadResources() {
     const [nextLocations, nextResources] = await Promise.all([fetchLocations(), fetchResources()]);
@@ -108,9 +110,9 @@ export function OfferingManager() {
 
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); const form = event.currentTarget; const values = new FormData(form); setError("");
-    const standardSystem = String(values.get("standardSystem"));
-    const standardCode = String(values.get("standardCode")).trim();
-    const standardDisplay = String(values.get("standardDisplay")).trim();
+    const standardSystem = newStd.system;
+    const standardCode = newStd.code.trim();
+    const standardDisplay = newStd.display.trim();
     const validation = codingError(standardSystem, standardCode, standardDisplay, "Prestación");
     if (validation) return setError(validation);
     try {
@@ -126,7 +128,7 @@ export function OfferingManager() {
         standardDisplay,
       });
       if (resourceId) await setResourceServiceType(resourceId, id, true);
-      form.reset(); setTerm(""); setTypes(await searchMasterServiceTypes(serviceId));
+      form.reset(); setNewStd({ system: "LOCAL", code: "", display: "" }); setTerm(""); setTypes(await searchMasterServiceTypes(serviceId));
       if (resourceId) setAssigned(await fetchAssignedServiceTypeIds(resourceId));
     } catch (caught) { setError(errorMessage(caught, "No fue posible crear la prestación.")); }
   }
@@ -180,8 +182,8 @@ export function OfferingManager() {
           <label>Profesional<select value={editingType.practitionerRequirement} onChange={(event) => setEditingType({ ...editingType, practitionerRequirement: event.target.value as PractitionerRequirement })}>{Object.entries(practitionerLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           {editingType.category === "imaging" && <label className="wide-field">Modalidad DICOM<select value={editingType.modality} onChange={(event) => setEditingType({ ...editingType, modality: event.target.value })}><option value="">Sin definir</option>{DICOM_MODALITIES.map(([value, label]) => <option key={value} value={value}>{value} · {label}</option>)}</select></label>}
           <label>Sistema estándar<select value={editingType.standardCodeSystem || "LOCAL"} onChange={(event) => setEditingType({ ...editingType, standardCodeSystem: event.target.value })}>{CODE_SYSTEMS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-          <label>Código estándar<input value={editingType.standardCode} onChange={(event) => setEditingType({ ...editingType, standardCode: event.target.value })} placeholder="LOINC / SNOMED / CIE" /></label>
-          <label className="wide-field">Nombre estándar<input value={editingType.standardDisplay} onChange={(event) => setEditingType({ ...editingType, standardDisplay: event.target.value })} placeholder="Nombre oficial si existe" /></label>
+          <CodePicker system={editingType.standardCodeSystem || "LOCAL"} code={editingType.standardCode} display={editingType.standardDisplay}
+            onChange={(code, display) => setEditingType((current) => current ? { ...current, standardCode: code, standardDisplay: display } : current)} />
           <div className="form-actions"><button className="button primary" type="submit">Guardar cambios</button><button className="button secondary" type="button" onClick={() => setEditingType(null)}>Cancelar</button></div>
         </form> : <div className="offering-type-row">
           <label><input type="checkbox" checked={assigned.includes(type.id)} disabled={!resourceId} onChange={(event) => toggle(type.id, event.target.checked)} /><span><strong>{type.name}</strong><small>{categoryLabels[type.category]} · {type.durationMin} min{type.modality && ` · ${type.modality}`} · {practitionerLabels[type.practitionerRequirement]}{type.standardCode && <> · {codeLink(type)}</>}</small></span></label>
@@ -197,9 +199,9 @@ export function OfferingManager() {
       <label>Tipo<select name="category" defaultValue="procedure">{Object.entries(categoryLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
       <label>Profesional<select name="practitioner" defaultValue="optional">{Object.entries(practitionerLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
       <label className="wide-field">Modalidad DICOM (si aplica)<select name="modality" defaultValue=""><option value="">No aplica</option>{DICOM_MODALITIES.map(([value, label]) => <option key={value} value={value}>{value} · {label}</option>)}</select></label>
-      <label>Sistema estándar<select name="standardSystem" defaultValue="LOCAL">{CODE_SYSTEMS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-      <label>Código estándar<input name="standardCode" placeholder="LOINC / SNOMED / CIE si aplica" /></label>
-      <label className="wide-field">Nombre estándar<input name="standardDisplay" placeholder="Nombre oficial si existe" /></label>
+      <label>Sistema estándar<select value={newStd.system} onChange={(event) => setNewStd({ ...newStd, system: event.target.value })}>{CODE_SYSTEMS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+      <CodePicker system={newStd.system} code={newStd.code} display={newStd.display}
+        onChange={(code, display) => setNewStd((current) => ({ ...current, code, display }))} />
       <div className="form-actions"><button className="button primary" type="submit" disabled={!serviceId}>Agregar prestación</button></div>
     </form></details>
   </section>;

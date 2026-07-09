@@ -30,6 +30,9 @@ export type Appointment = {
   tags: string;
   anamnesis: string;
   diagnosticHypothesis: string;
+  reasonCodeSystem: string;
+  reasonCode: string;
+  reasonCodeDisplay: string;
   comment: string;
   requesterType: "interno" | "externo";
   requesterName: string;
@@ -57,7 +60,8 @@ export type Appointment = {
 export const emptyClinicalDetail = {
   branch: "",
   service: "", serviceCategory: "procedure" as const, practitionerRequirement: "optional" as const, specialty: "", procedureCode: "", treatingPhysician: "", orderDate: "",
-  anesthesia: false, contrast: false, priority: "normal" as const, paymentOrder: "", tags: "", anamnesis: "", diagnosticHypothesis: "", comment: "",
+  anesthesia: false, contrast: false, priority: "normal" as const, paymentOrder: "", tags: "", anamnesis: "", diagnosticHypothesis: "",
+  reasonCodeSystem: "ICD-10", reasonCode: "", reasonCodeDisplay: "", comment: "",
   requesterType: "interno" as const, requesterName: "", requesterRun: "", requesterEmail: "",
   pickupName: "", pickupRun: "", pickupPhone: "",
   originType: "interna" as const, originDesc: "", statusReason: "", orderFile: "",

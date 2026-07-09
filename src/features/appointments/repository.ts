@@ -6,7 +6,7 @@ type AppointmentRow = {
   start_time: string; end_time: string; status: Appointment["status"]; reason: string; modality: Appointment["modality"];
   branch?: string; service?: string; service_type_id?: string | null; service_category?: Appointment["serviceCategory"]; practitioner_requirement?: Appointment["practitionerRequirement"]; specialty?: string; procedure_code?: string; treating_physician?: string; order_date?: string | null;
   anesthesia?: boolean; contrast?: boolean; priority?: Appointment["priority"]; payment_order?: string; tags?: string;
-  anamnesis?: string; diagnostic_hypothesis?: string; comment?: string;
+  anamnesis?: string; diagnostic_hypothesis?: string; reason_code_system?: string; reason_code?: string; reason_code_display?: string; comment?: string;
   requester_type?: Appointment["requesterType"]; requester_name?: string; requester_run?: string; requester_email?: string;
   pickup_name?: string; pickup_run?: string; pickup_phone?: string;
   origin_type?: Appointment["originType"]; origin_desc?: string; status_reason?: string; order_file?: string;
@@ -19,7 +19,7 @@ type AppointmentRow = {
   service_type?: { standard_code_system?: string; standard_code?: string; standard_display?: string } | null;
 };
 
-const columns = "id, patient_id, practitioner_name, location_name, appointment_date, start_time, end_time, status, reason, modality, branch, service, service_type_id, service_category, practitioner_requirement, specialty, procedure_code, treating_physician, order_date, anesthesia, contrast, priority, payment_order, tags, anamnesis, diagnostic_hypothesis, comment, requester_type, requester_name, requester_run, requester_email, pickup_name, pickup_run, pickup_phone, origin_type, origin_desc, status_reason, order_file, assigned_to, patient:patients(full_name, identifier, prevision), study:imaging_studies(study_instance_uid, orthanc_study_id), report:radiology_reports(status, critical_finding), followups:report_follow_ups(status), assignee:profiles!appointments_assigned_to_fkey(full_name), service_type:service_types(standard_code_system, standard_code, standard_display)";
+const columns = "id, patient_id, practitioner_name, location_name, appointment_date, start_time, end_time, status, reason, modality, branch, service, service_type_id, service_category, practitioner_requirement, specialty, procedure_code, treating_physician, order_date, anesthesia, contrast, priority, payment_order, tags, anamnesis, diagnostic_hypothesis, reason_code_system, reason_code, reason_code_display, comment, requester_type, requester_name, requester_run, requester_email, pickup_name, pickup_run, pickup_phone, origin_type, origin_desc, status_reason, order_file, assigned_to, patient:patients(full_name, identifier, prevision), study:imaging_studies(study_instance_uid, orthanc_study_id), report:radiology_reports(status, critical_finding), followups:report_follow_ups(status), assignee:profiles!appointments_assigned_to_fkey(full_name), service_type:service_types(standard_code_system, standard_code, standard_display)";
 const legacyColumns = columns.replace(", service_type:service_types(standard_code_system, standard_code, standard_display)", "");
 
 const mapAppointment = (row: AppointmentRow): Appointment => ({
@@ -52,6 +52,9 @@ const mapAppointment = (row: AppointmentRow): Appointment => ({
   tags: row.tags ?? "",
   anamnesis: row.anamnesis ?? "",
   diagnosticHypothesis: row.diagnostic_hypothesis ?? "",
+  reasonCodeSystem: row.reason_code_system ?? "ICD-10",
+  reasonCode: row.reason_code ?? "",
+  reasonCodeDisplay: row.reason_code_display ?? "",
   comment: row.comment ?? "",
   requesterType: row.requester_type ?? "interno",
   requesterName: row.requester_name ?? "",
@@ -103,6 +106,9 @@ const toRow = (appointment: Appointment) => ({
   tags: appointment.tags,
   anamnesis: appointment.anamnesis,
   diagnostic_hypothesis: appointment.diagnosticHypothesis,
+  reason_code_system: appointment.reasonCodeSystem || "ICD-10",
+  reason_code: appointment.reasonCode.trim(),
+  reason_code_display: appointment.reasonCodeDisplay.trim(),
   comment: appointment.comment,
   requester_type: appointment.requesterType,
   requester_name: appointment.requesterName,
