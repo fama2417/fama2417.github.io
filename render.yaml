@@ -14,6 +14,36 @@ services:
         sync: false
       - key: NEXT_PUBLIC_OHIF_URL
         sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-5.4-nano
+      - key: OPENAI_FALLBACK_MODEL
+        value: gpt-5.4-mini
+      - key: AI_EXTRACTION_ENABLED
+        value: "false"
+      - key: AI_MAX_INPUT_CHARS
+        value: "12000"
+      - key: AI_MAX_OUTPUT_TOKENS
+        value: "1200"
+      - key: AI_TIMEOUT_MS
+        value: "25000"
+      - key: AI_MAX_REPORTS_PER_DAY
+        value: "100"
+      - key: AI_MONTHLY_BUDGET_USD
+        value: "10"
+      - key: AI_STORE_RAW_PROMPT
+        value: "false"
+      - key: AI_STORE_RAW_RESPONSE
+        value: "false"
+      - key: AI_LOG_USAGE
+        value: "true"
+      - key: AI_MIN_CONFIDENCE_TO_AUTO_SUGGEST
+        value: "0.65"
+      - key: AI_MIN_CONFIDENCE_TO_AUTO_CREATE_CANDIDATE
+        value: "0.50"
+      - key: AI_AUTO_CONFIRM_FINDINGS
+        value: "false"
 
   - type: web
     runtime: image

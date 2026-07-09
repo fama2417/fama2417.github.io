@@ -14,6 +14,7 @@ import {
   reopenReport, saveReport, updateFollowUpStatus, updateKeyImageCaption, uploadKeyImageCapture, type FollowUpStatus,
   type RadiologyReport, type ReportAddendum, type ReportCommunication, type ReportFollowUp, type ReportKeyImage,
 } from "./repository";
+import { AiFindingsPanel } from "./AiFindingsPanel";
 import { fetchTemplates, type ReportTemplate } from "./templates";
 import { profileFor } from "./profiles";
 import { validateFinalReport } from "./validation";
@@ -363,6 +364,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
             </select>}
           </div>
           {sections.map((section) => <label key={section.name}>{section.label}<textarea name={section.name} value={report[section.name]} placeholder={section.hint} onChange={(event) => setSection(section.name, event.target.value)} disabled={report.status === "final"} /></label>)}
+          <AiFindingsPanel reportId={report.id} reportStatus={report.status} disabled={!["admin", "radiologist"].includes(role)} />
 
           <details className="report-clinical-panel collapsible">
             <summary><span className="collapsible-icon">#</span>Codificación estándar</summary>

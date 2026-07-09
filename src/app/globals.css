@@ -513,6 +513,10 @@ body:has(.report-workstation) .app-shell { flex: 1; min-height: 0; }
 .workflow-entry > span { color: var(--muted); }
 .workflow-entry label { align-items: center; display: flex; gap: 8px; }
 .workflow-entry select { padding: 5px 8px; }
+.ai-panel-actions, .ai-finding-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; }
+.ai-finding-list { display: grid; gap: 8px; }
+.ai-finding-card strong { overflow-wrap: anywhere; }
+.ai-finding-card .ai-finding-actions { margin-top: 4px; }
 
 /* Informes anteriores del mismo paciente */
 .prior-reports { border-top: 1px solid var(--border); display: grid; gap: 6px; padding-top: 12px; }
