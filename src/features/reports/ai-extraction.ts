@@ -1,7 +1,8 @@
 import OpenAI from "openai";
+import { zodTextFormat } from "openai/helpers/zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { aiConfig, canRunAiExtraction, estimateAiCost, type AiSupabase } from "./ai-budget.ts";
-import { AiFindingExtractionJsonSchema, AiFindingExtractionResultSchema } from "./ai-extraction-schema.ts";
+import { AiFindingExtractionResultSchema } from "./ai-extraction-schema.ts";
 import { buildRadiologyFindingExtractionPrompt, SYSTEM_PROMPT_FOR_RADIOLOGY_FINDING_EXTRACTION } from "./ai-prompts.ts";
 import { sanitizeReportForAi } from "./ai-sanitizer.ts";
 import { getReportForAiExtraction, insertAiUsageLog, persistAiExtractionResult } from "./ai-repository.ts";
@@ -15,6 +16,12 @@ const usageOf = (response: unknown): Usage => {
     outputTokens: usage.output_tokens ?? usage.completion_tokens ?? null,
     totalTokens: usage.total_tokens ?? null,
   };
+};
+
+const publicError = (cause: unknown) => {
+  const message = cause instanceof Error ? cause.message : "";
+  if (cause instanceof SyntaxError || /json|parse|schema|validation/i.test(message)) return "No fue posible interpretar la respuesta estructurada de IA.";
+  return message || "AI extraction failed";
 };
 
 export async function extractRadiologyFindingsWithAi(reportId: string, options: { force?: boolean; supabase?: SupabaseClient<any, "public", any> } = {}) {
@@ -37,17 +44,17 @@ export async function extractRadiologyFindingsWithAi(reportId: string, options: 
 
     const prompt = buildRadiologyFindingExtractionPrompt(sanitized);
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    const response = await client.responses.create({
+    const response = await client.responses.parse({
       model: config.model,
       input: [
         { role: "system", content: SYSTEM_PROMPT_FOR_RADIOLOGY_FINDING_EXTRACTION },
         { role: "user", content: prompt },
       ],
-      text: { format: { type: "json_schema", name: "radiology_finding_extraction", schema: AiFindingExtractionJsonSchema, strict: true } },
+      text: { format: zodTextFormat(AiFindingExtractionResultSchema, "radiology_finding_extraction") },
       max_output_tokens: config.maxOutputTokens,
       store: false,
     } as any, { timeout: config.timeoutMs });
-    const parsed = AiFindingExtractionResultSchema.parse(JSON.parse(response.output_text || "{}"));
+    const parsed = AiFindingExtractionResultSchema.parse(response.output_parsed);
     const saved = await persistAiExtractionResult(supabase, reportId, parsed, context);
     const usage = usageOf(response);
     const estimatedCost = await estimateAiCost({ model: config.model, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, supabase });
@@ -79,6 +86,6 @@ export async function extractRadiologyFindingsWithAi(reportId: string, options: 
         error_message: cause instanceof Error ? cause.message : "AI extraction failed",
       }).catch(() => undefined);
     }
-    return { ok: false as const, error: cause instanceof Error ? cause.message : "AI extraction failed" };
+    return { ok: false as const, error: publicError(cause) };
   }
 }
