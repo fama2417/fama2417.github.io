@@ -9,6 +9,12 @@ import { getReportForAiExtraction, insertAiUsageLog, persistAiExtractionResult }
 
 type Usage = { inputTokens: number | null; outputTokens: number | null; totalTokens: number | null };
 
+export class AiStructuredResponseError extends Error {
+  constructor() {
+    super("No fue posible interpretar la respuesta estructurada de IA.");
+  }
+}
+
 const usageOf = (response: unknown): Usage => {
   const usage = (response as any)?.usage ?? {};
   return {
@@ -18,10 +24,18 @@ const usageOf = (response: unknown): Usage => {
   };
 };
 
-const publicError = (cause: unknown) => {
+export const publicAiError = (cause: unknown) => {
   const message = cause instanceof Error ? cause.message : "";
-  if (cause instanceof SyntaxError || /json|parse|schema|validation/i.test(message)) return "No fue posible interpretar la respuesta estructurada de IA.";
+  if (cause instanceof SyntaxError || cause instanceof AiStructuredResponseError || /json|parse|schema|validation|invalid input|invalid_type/i.test(message)) return "No fue posible interpretar la respuesta estructurada de IA.";
   return message || "AI extraction failed";
+};
+
+export const parseAiExtractionResponse = (response: unknown) => {
+  const parsed = (response as any)?.output_parsed ?? (response as any)?.output?.flatMap((item: any) => item.content ?? []).find((content: any) => content?.parsed)?.parsed;
+  if (parsed) return AiFindingExtractionResultSchema.parse(parsed);
+  const text = (response as any)?.output_text?.trim();
+  if (text) return AiFindingExtractionResultSchema.parse(JSON.parse(text));
+  throw new AiStructuredResponseError();
 };
 
 export async function extractRadiologyFindingsWithAi(reportId: string, options: { force?: boolean; supabase?: SupabaseClient<any, "public", any> } = {}) {
@@ -54,7 +68,7 @@ export async function extractRadiologyFindingsWithAi(reportId: string, options: 
       max_output_tokens: config.maxOutputTokens,
       store: false,
     } as any, { timeout: config.timeoutMs });
-    const parsed = AiFindingExtractionResultSchema.parse(response.output_parsed);
+    const parsed = parseAiExtractionResponse(response);
     const saved = await persistAiExtractionResult(supabase, reportId, parsed, context);
     const usage = usageOf(response);
     const estimatedCost = await estimateAiCost({ model: config.model, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, supabase });
@@ -86,6 +100,6 @@ export async function extractRadiologyFindingsWithAi(reportId: string, options: 
         error_message: cause instanceof Error ? cause.message : "AI extraction failed",
       }).catch(() => undefined);
     }
-    return { ok: false as const, error: publicError(cause) };
+    return { ok: false as const, error: publicAiError(cause) };
   }
 }

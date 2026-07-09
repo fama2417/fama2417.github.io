@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { parseAiExtractionResponse, publicAiError } from "./ai-extraction.ts";
 import { AiFindingExtractionResultSchema } from "./ai-extraction-schema.ts";
 
 const valid = {
@@ -28,4 +29,9 @@ const valid = {
 test("valida salida estructurada de IA", () => {
   assert.equal(AiFindingExtractionResultSchema.safeParse(valid).success, true);
   assert.equal(AiFindingExtractionResultSchema.safeParse({ ...valid, findings: [{ ...valid.findings[0], findingText: "" }] }).success, false);
+});
+
+test("parsea respuesta IA desde output_text y oculta errores crudos", () => {
+  assert.deepEqual(parseAiExtractionResponse({ output_parsed: null, output_text: JSON.stringify(valid) }), valid);
+  assert.equal(publicAiError(new Error('[{"code":"invalid_type"}]')), "No fue posible interpretar la respuesta estructurada de IA.");
 });
