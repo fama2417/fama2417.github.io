@@ -514,19 +514,32 @@ body:has(.report-workstation) .app-shell { flex: 1; min-height: 0; }
 .workflow-entry label { align-items: center; display: flex; gap: 8px; }
 .workflow-entry select { padding: 5px 8px; }
 .ai-panel-actions, .ai-finding-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; }
-.ai-finding-list { display: grid; gap: 8px; }
 .ai-finding-summary { color: var(--muted); font-size: 0.82rem; margin: 0; }
+.ai-view-switch { border-bottom: 1px solid var(--border); display: flex; gap: 4px; }
+.ai-view-switch button { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--muted); cursor: pointer; padding: 9px 12px; }
+.ai-view-switch button[aria-pressed="true"] { border-bottom-color: var(--report-accent); color: var(--text); font-weight: 700; }
+.ai-clinical-summary, .ai-technical-detail { display: grid; gap: 12px; }
+.ai-summary-header { border: 1px solid var(--border); border-radius: 6px; display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); padding: 12px; }
+.ai-summary-header div { display: grid; gap: 3px; }
+.ai-summary-header span, .ai-summary-header small { color: var(--muted); font-size: 0.74rem; }
+.ai-summary-group { display: grid; gap: 6px; }
+.ai-summary-group h4 { color: var(--muted); font-size: 0.76rem; margin: 5px 0 0; text-transform: uppercase; }
+.ai-summary-group article { align-items: start; border-top: 1px solid var(--border); display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr) auto; padding: 9px 0; }
+.ai-summary-group article > div:first-child { display: grid; gap: 3px; }
+.ai-summary-group article span, .ai-finding-row span { color: var(--muted); font-size: 0.8rem; line-height: 1.45; }
+.ai-summary-group .ai-finding-source { grid-column: 1 / -1; }
+.ai-summary-warnings summary, .ai-finding-group > summary { color: var(--muted); cursor: pointer; font-weight: 700; }
 .ai-finding-group { display: grid; gap: 8px; }
 .ai-finding-group h4 { align-items: center; color: var(--muted); display: flex; font-size: 0.78rem; gap: 8px; margin: 8px 0 0; text-transform: uppercase; }
-.ai-finding-group h4 span, .ai-finding-term, .ai-finding-badges span, .ai-clinical-badges span { background: rgba(255, 255, 255, 0.06); border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font-size: 0.72rem; padding: 2px 7px; }
-.ai-finding-card { gap: 7px; }
-.ai-finding-card-header { align-items: flex-start; display: flex; gap: 8px; justify-content: space-between; }
-.ai-finding-card strong { overflow-wrap: anywhere; }
-.ai-finding-badges, .ai-clinical-badges { display: flex; flex-wrap: wrap; gap: 5px; }
+.ai-finding-group h4 span, .ai-finding-badges span { background: rgba(255, 255, 255, 0.06); border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font-size: 0.7rem; padding: 2px 7px; }
+.ai-finding-row { align-items: start; border-top: 1px solid var(--border); display: grid; font-size: 0.82rem; gap: 7px; grid-template-columns: minmax(220px, 1fr) minmax(180px, auto); padding: 8px 0; }
+.ai-finding-row > div:first-child { display: grid; gap: 2px; }
+.ai-finding-row strong { overflow-wrap: anywhere; }
+.ai-finding-badges { display: flex; flex-wrap: wrap; gap: 5px; justify-content: flex-end; }
 .ai-finding-source summary { color: var(--report-accent); cursor: pointer; font-weight: 700; }
 .ai-finding-source span { color: var(--muted); display: block; margin-top: 4px; overflow-wrap: anywhere; }
-.disabled-link:disabled { color: var(--muted); cursor: not-allowed; opacity: .75; }
-.ai-finding-card .ai-finding-actions { margin-top: 4px; }
+.ai-finding-row .ai-finding-source, .ai-finding-row .ai-finding-actions { grid-column: 1 / -1; }
+@media (max-width: 720px) { .ai-finding-row, .ai-summary-group article { grid-template-columns: 1fr; } .ai-finding-badges { justify-content: flex-start; } }
 
 /* Informes anteriores del mismo paciente */
 .prior-reports { border-top: 1px solid var(--border); display: grid; gap: 6px; padding-top: 12px; }

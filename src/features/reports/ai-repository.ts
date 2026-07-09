@@ -1,5 +1,5 @@
 import { aiConfig, type AiSupabase } from "./ai-budget.ts";
-import type { AiFindingExtractionResult } from "./ai-extraction-schema.ts";
+import { AiClinicalSummarySchema, type AiFinding, type AiFindingExtractionResult } from "./ai-extraction-schema.ts";
 import { normalizeCandidateKey, normalizeLocalCodeName } from "./ai-normalization.ts";
 
 export type AiReportContext = {
@@ -114,16 +114,44 @@ export async function insertExtractedFinding(supabase: AiSupabase, input: Record
   return data as { id: string; finding_candidate_id: string | null };
 }
 
-export async function persistAiExtractionResult(supabase: AiSupabase, reportId: string, extractionResult: AiFindingExtractionResult, context: AiReportContext) {
+export const canCreateDictionaryCandidate = (finding: AiFinding) => finding.shouldCreateDictionaryCandidate
+  && finding.status !== "absent"
+  && !["negative", "not_relevant"].includes(finding.importance);
+
+export async function getReportAiSummary(supabase: AiSupabase, reportId: string) {
+  const { data, error } = await supabase.from("report_ai_summaries").select("summary_json, model, updated_at").eq("report_id", reportId).maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  return { ...AiClinicalSummarySchema.parse((data as any).summary_json), model: (data as any).model, updatedAt: (data as any).updated_at };
+}
+
+export async function saveReportAiSummary(supabase: AiSupabase, reportId: string, context: AiReportContext, extractionResult: AiFindingExtractionResult) {
+  const { error } = await supabase.from("report_ai_summaries").upsert({
+    tenant_id: context.tenantId,
+    report_id: reportId,
+    summary_json: extractionResult.clinicalSummary,
+    model: aiConfig().model,
+    provider: "openai",
+  }, { onConflict: "tenant_id,report_id" });
+  if (error) throw error;
+}
+
+export async function deletePriorSuggestedAiFindings(supabase: AiSupabase, reportId: string) {
+  const { error } = await supabase.from("extracted_findings").delete().eq("report_id", reportId).eq("extraction_method", "openai").eq("coding_status", "suggested");
+  if (error) throw error;
+}
+
+export async function persistAiExtractionResult(supabase: AiSupabase, reportId: string, extractionResult: AiFindingExtractionResult, context: AiReportContext, replaceSuggested = false) {
   const config = aiConfig();
   const inserted: { id: string; findingCandidateId: string | null }[] = [];
+  if (replaceSuggested) await deletePriorSuggestedAiFindings(supabase, reportId);
   for (const finding of extractionResult.findings) {
     if (finding.confidence < config.minConfidenceToAutoSuggest || !finding.findingText.trim() || !finding.canonicalName.trim()) continue;
     const normalizedCanonicalName = normalizeLocalCodeName(finding.canonicalName);
     const normalizedText = normalizeCandidateKey(finding.findingText);
     const findingId = await findDictionaryFindingByCanonicalName(supabase, context.tenantId, normalizedCanonicalName);
     let candidateId: string | null = null;
-    if (!findingId && finding.confidence >= config.minConfidenceToAutoCreateCandidate && finding.shouldCreateDictionaryCandidate) {
+    if (!findingId && finding.confidence >= config.minConfidenceToAutoCreateCandidate && canCreateDictionaryCandidate(finding)) {
       candidateId = (await findOrCreateFindingCandidate(supabase, {
         tenantId: context.tenantId,
         rawText: finding.findingText,
@@ -163,6 +191,7 @@ export async function persistAiExtractionResult(supabase: AiSupabase, reportId: 
     });
     inserted.push({ id: insertedFinding.id, findingCandidateId: insertedFinding.finding_candidate_id });
   }
+  await saveReportAiSummary(supabase, reportId, context, extractionResult);
   return inserted;
 }
 

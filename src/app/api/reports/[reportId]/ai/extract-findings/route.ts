@@ -25,7 +25,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     success: true,
     reportId,
     extractedFindings: result.findings,
-    candidatesCreated: result.findings.filter((item) => item.findingCandidateId).length,
+    candidatesCreated: result.findings.filter((item) => "findingCandidateId" in item && item.findingCandidateId).length,
+    clinicalSummary: result.clinicalSummary,
+    reused: result.reused,
     usage: result.usage,
     warnings: result.warnings,
   });
