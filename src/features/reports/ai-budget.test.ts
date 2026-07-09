@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { canRunAiExtraction } from "./ai-budget.ts";
+import { aiConfig, canRunAiExtraction } from "./ai-budget.ts";
 
 const supabase = {} as never;
 
@@ -23,4 +23,15 @@ test("bloquea extraccion si falta OPENAI_API_KEY", async () => {
   assert.equal(result.reason, "Missing OPENAI_API_KEY");
   process.env.AI_EXTRACTION_ENABLED = beforeEnabled;
   if (beforeKey === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = beforeKey;
+});
+
+test("usa minimos seguros para salida y timeout de IA", () => {
+  const beforeOutput = process.env.AI_MAX_OUTPUT_TOKENS;
+  const beforeTimeout = process.env.AI_TIMEOUT_MS;
+  process.env.AI_MAX_OUTPUT_TOKENS = "1200";
+  process.env.AI_TIMEOUT_MS = "25000";
+  assert.equal(aiConfig().maxOutputTokens, 4000);
+  assert.equal(aiConfig().timeoutMs, 45000);
+  if (beforeOutput === undefined) delete process.env.AI_MAX_OUTPUT_TOKENS; else process.env.AI_MAX_OUTPUT_TOKENS = beforeOutput;
+  if (beforeTimeout === undefined) delete process.env.AI_TIMEOUT_MS; else process.env.AI_TIMEOUT_MS = beforeTimeout;
 });
