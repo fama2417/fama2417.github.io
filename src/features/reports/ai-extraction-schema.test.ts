@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { parseAiExtractionResponse, publicAiError } from "./ai-extraction.ts";
-import { AiFindingExtractionResultSchema } from "./ai-extraction-schema.ts";
+import { AiFindingExtractionResultSchema, guardClinicalSummaryWithoutImpression } from "./ai-extraction-schema.ts";
 
 const valid = {
   reportLanguage: "es",
@@ -46,4 +46,15 @@ test("valida salida estructurada de IA", () => {
 test("parsea respuesta IA desde output_text y oculta errores crudos", () => {
   assert.deepEqual(parseAiExtractionResponse({ output_parsed: null, output_text: JSON.stringify(valid) }), valid);
   assert.equal(publicAiError(new Error('[{"code":"invalid_type"}]')), "No fue posible interpretar la respuesta estructurada de IA.");
+});
+
+test("sin impresion ni comparacion evita declarar progresion", () => {
+  const summary = AiFindingExtractionResultSchema.parse(valid).clinicalSummary;
+  const guarded = guardClinicalSummaryWithoutImpression({ ...summary, globalAssessment: { status: "progression", text: "Progresion tumoral.", confidence: 0.9 } }, false);
+  assert.equal(guarded.globalAssessment.status, "indeterminate");
+  assert.equal(guarded.globalAssessment.confidence, 0.59);
+  assert.match(guarded.warnings[0], /Resumen generado desde Hallazgos/);
+
+  const compared = guardClinicalSummaryWithoutImpression({ ...summary, primarySummaryItems: [{ ...summary.primarySummaryItems[0], sourceSentences: ["Aumento respecto al estudio previo."] }] }, false);
+  assert.equal(compared.globalAssessment.status, "not_applicable");
 });

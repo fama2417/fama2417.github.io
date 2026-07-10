@@ -33,7 +33,11 @@ Reglas estrictas:
 28. No devuelvas diagnosticos administrativos CIE como si fueran hallazgos.
 29. No devuelvas codigos SNOMED, CIE, LOINC o RadLex si no fueron proporcionados.
 30. Devuelve solo datos estructurados segun el JSON Schema.
-31. No incluyas explicacion narrativa fuera del JSON.`;
+31. Si no existe Impresion o Conclusion y tampoco hay comparacion clara, globalAssessment.status debe ser indeterminate y text debe ser "Hallazgos compatibles con enfermedad activa/secundaria, sin poder determinar progresion por falta de impresion o comparacion.". Agrega warning "Resumen generado desde Hallazgos. No se detecto seccion Impresion/Conclusion.".
+32. No declares progression sin comparacion clara: por ejemplo aumento, disminucion, lesion nueva, sin cambios o referencia explicita a un estudio previo.
+33. En clinicalContext identifica el nombre recibido como "Prestacion registrada: [nombre]". No uses la frase "segun nombre de prestacion".
+34. Si nombre/modalidad/region de la prestacion discrepa del contenido, agrega "Contenido sugerido por informe: [region detectada]" a clinicalContext y un warning que comience con "Discordancia prestacion/contenido:".
+35. No incluyas explicacion narrativa fuera del JSON.`;
 
 const line = (label: string, value?: string | null) => value?.trim() ? `${label}: ${value.trim()}` : "";
 

@@ -27,7 +27,8 @@ const importanceLabels: Record<string, string> = { principal: "Principal", secon
 const reviewLabels: Record<string, string> = { suggested: "Sugerido", confirmed: "Confirmado", corrected: "Corregido", rejected: "Rechazado", not_required: "No requerido" };
 const lateralityLabels: Record<string, string> = { right: "Derecha", left: "Izquierda", bilateral: "Bilateral", midline: "Linea media", unknown: "No especificada" };
 const severityLabels: Record<string, string> = { mild: "Leve", moderate: "Moderada", severe: "Severa", unknown: "No especificada" };
-const assessmentLabels: Record<string, string> = { progression: "Progresion", stable: "Estable", partial_response: "Respuesta parcial", complete_response: "Respuesta completa", mixed_response: "Respuesta mixta", indeterminate: "Indeterminado", not_applicable: "No aplica" };
+const assessmentLabels: Record<string, string> = { progression: "Progresión", stable: "Estable", partial_response: "Respuesta parcial", complete_response: "Respuesta completa", mixed_response: "Respuesta mixta", indeterminate: "Indeterminado", not_applicable: "No aplica", unknown: "No determinado" };
+const trendLabels: Record<string, string> = { new: "Nuevo", progression: "Progresión", stable: "Estable", decreased: "En disminución", resolved: "Resuelto", unknown: "No determinado", not_applicable: "No aplica" };
 const categoryLabels: Record<string, string> = { active_disease: "Enfermedad activa", progression: "Progresion", stable_disease: "Enfermedad estable", resolved: "Lesiones resueltas", incidental: "Incidental relevante", negative_relevant: "Negativos relevantes", recommendation: "Recomendaciones", quality_warning: "Alertas" };
 const groupLabels = { principal: "Hallazgos principales", secondary: "Hallazgos secundarios", incidental: "Hallazgos incidentales", negative: "Hallazgos negativos", reviewed: "Rechazados o corregidos" } as const;
 type GroupKey = keyof typeof groupLabels;
@@ -45,6 +46,8 @@ const apiMessage = (status: number, error?: string) => {
 };
 
 const titleOf = (item: Item) => item.dictionary?.canonicalName || item.candidate?.suggestedCanonicalName || (item.findingText.length > 92 ? `${item.findingText.slice(0, 89)}...` : item.findingText);
+const plainText = (value: string) => value.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
+const formatClinicalContext = (value: string) => value.replace(/^(.+?)\s*\(seg[uú]n nombre de prestaci[oó]n\)/i, "Prestación registrada: $1");
 const isRoutineNegative = (item: Item) => item.status === "absent" || ["negative", "not_relevant"].includes(item.importance) || /^(sin|no (se |hay|presenta|observa|identifica)|normal|conservad|permeable)/i.test(item.findingText.trim());
 const confirmableItems = (items: Item[]) => items.filter((item) => item.codingStatus === "suggested" && Number(item.confidence) >= 0.75 && !isRoutineNegative(item));
 const groupOf = (item: Item): GroupKey => {
@@ -130,6 +133,11 @@ export function AiFindingsPanel({ reportId, reportStatus, disabled }: { reportId
   const summaryGroups = Object.entries(categoryLabels).map(([key, label]) => ({ key, label, items: summaryItems.filter((item) => item.category === key) })).filter((group) => group.items.length);
   const visibleItems = showAll ? items : items.slice(0, 10);
   const technicalGroups = (Object.keys(groupLabels) as GroupKey[]).map((key) => ({ key, items: visibleItems.filter((item) => groupOf(item) === key) })).filter((group) => group.items.length);
+  const discordanceWarnings = clinicalSummary?.warnings.filter((warning) => plainText(warning).includes("discordancia")) ?? [];
+  const sourceWarnings = clinicalSummary?.warnings.filter((warning) => plainText(warning).includes("resumen generado desde hallazgos")) ?? [];
+  const bannerWarnings = [...discordanceWarnings, ...sourceWarnings];
+  const otherWarnings = clinicalSummary?.warnings.filter((warning) => !bannerWarnings.includes(warning)) ?? [];
+  const lowAssessmentConfidence = Number(clinicalSummary?.globalAssessment.confidence ?? 1) < 0.6;
 
   return <details className="report-clinical-panel collapsible ai-findings-panel" open>
     <summary><span className="collapsible-icon">IA</span>Resumen IA<span className="collapsible-count">{summaryItems.length || items.length}</span></summary>
@@ -147,9 +155,10 @@ export function AiFindingsPanel({ reportId, reportStatus, disabled }: { reportId
     </div>
     {loading ? <p className="empty-inline">Cargando extraccion IA...</p> : mode === "summary" ? <div className="ai-clinical-summary">
       {clinicalSummary ? <>
+        {bannerWarnings.map((warning) => <p className="notice" role="alert" key={warning}>{warning}</p>)}
         <header className="ai-summary-header">
-          <div><span>Contexto</span><strong>{clinicalSummary.clinicalContext || clinicalSummary.modalityContext}</strong></div>
-          <div><span>Evaluacion global</span><strong>{clinicalSummary.globalAssessment.text}</strong><small>{assessmentLabels[clinicalSummary.globalAssessment.status] ?? clinicalSummary.globalAssessment.status} - {Math.round(clinicalSummary.globalAssessment.confidence * 100)}%</small></div>
+          <div><span>Contexto</span><strong>{formatClinicalContext(clinicalSummary.clinicalContext || clinicalSummary.modalityContext)}</strong></div>
+          <div><span>Evaluación global</span><strong>{lowAssessmentConfidence ? `Evaluación orientativa: ${clinicalSummary.globalAssessment.text}` : clinicalSummary.globalAssessment.text}</strong><small>{assessmentLabels[clinicalSummary.globalAssessment.status] ?? clinicalSummary.globalAssessment.status} - {lowAssessmentConfidence ? "Baja confianza - " : ""}{Math.round(clinicalSummary.globalAssessment.confidence * 100)}%</small></div>
           {clinicalSummary.scores.map((score) => <div key={`${score.name}-${score.value}`}><span>Score</span><strong>{score.name} {score.value}</strong></div>)}
           <div><span>Detalle</span><strong>{items.length} hallazgos</strong><small>{pendingReview} pendientes - {pendingDictionary} en diccionario</small></div>
         </header>
@@ -157,11 +166,11 @@ export function AiFindingsPanel({ reportId, reportStatus, disabled }: { reportId
           <h4>{group.label}</h4>
           {group.items.map((item, index) => <article key={`${group.key}-${index}`}>
             <div><strong>{item.title}</strong><span>{item.summary}</span></div>
-            <div className="ai-finding-badges"><span>{item.trend}</span><span>{Math.round(item.confidence * 100)}%</span></div>
+            <div className="ai-finding-badges"><span>{trendLabels[item.trend] ?? item.trend}</span><span>{Math.round(item.confidence * 100)}%</span></div>
             <details className="ai-finding-source"><summary>Ver fuente</summary>{item.sourceSentences.map((source) => <span key={source}>{source}</span>)}</details>
           </article>)}
         </section>)}
-        {clinicalSummary.warnings.length > 0 && <details className="ai-summary-warnings"><summary>{clinicalSummary.warnings.length} alertas de extraccion</summary>{clinicalSummary.warnings.map((warning) => <p key={warning}>{warning}</p>)}</details>}
+        {otherWarnings.length > 0 && <details className="ai-summary-warnings"><summary>{otherWarnings.length} alertas de extracción</summary>{otherWarnings.map((warning) => <p key={warning}>{warning}</p>)}</details>}
       </> : <p className="empty-inline">{items.length ? "Este informe tiene detalle tecnico previo. Recalcula para generar el resumen clinico." : "Sin extraccion IA todavia."}</p>}
     </div> : <div className="ai-technical-detail">
       <p className="ai-finding-summary">{items.length} hallazgos tecnicos extraidos. {items.length > 10 && !showAll ? "Se muestran los 10 de mayor prioridad." : ""}</p>
