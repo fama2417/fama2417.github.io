@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { aiConfig, canRunAiExtraction, estimateAiCost, type AiSupabase } from "./ai-budget.ts";
-import { AiFindingExtractionResultSchema } from "./ai-extraction-schema.ts";
+import { AiFindingExtractionResultSchema, guardClinicalSummaryWithoutImpression } from "./ai-extraction-schema.ts";
 import { buildRadiologyFindingExtractionPrompt, SYSTEM_PROMPT_FOR_RADIOLOGY_FINDING_EXTRACTION } from "./ai-prompts.ts";
 import { sanitizeReportForAi } from "./ai-sanitizer.ts";
 import { getReportAiSummary, getReportForAiExtraction, insertAiUsageLog, listExtractedFindings, persistAiExtractionResult } from "./ai-repository.ts";
@@ -72,7 +72,8 @@ export async function extractRadiologyFindingsWithAi(reportId: string, options: 
       max_output_tokens: config.maxOutputTokens,
       store: false,
     } as any, { timeout: config.timeoutMs });
-    const parsed = parseAiExtractionResponse(response);
+    const parsedResponse = parseAiExtractionResponse(response);
+    const parsed = { ...parsedResponse, clinicalSummary: guardClinicalSummaryWithoutImpression(parsedResponse.clinicalSummary, !!sanitized.impression?.trim()) };
     const saved = await persistAiExtractionResult(supabase, reportId, parsed, context, options.force === true);
     const usage = usageOf(response);
     const estimatedCost = await estimateAiCost({ model: config.model, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, supabase });

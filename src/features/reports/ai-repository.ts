@@ -1,5 +1,5 @@
 import { aiConfig, type AiSupabase } from "./ai-budget.ts";
-import { AiClinicalSummarySchema, type AiFinding, type AiFindingExtractionResult } from "./ai-extraction-schema.ts";
+import { AiClinicalSummarySchema, guardClinicalSummaryWithoutImpression, type AiFinding, type AiFindingExtractionResult } from "./ai-extraction-schema.ts";
 import { normalizeCandidateKey, normalizeLocalCodeName } from "./ai-normalization.ts";
 
 export type AiReportContext = {
@@ -119,10 +119,15 @@ export const canCreateDictionaryCandidate = (finding: AiFinding) => finding.shou
   && !["negative", "not_relevant"].includes(finding.importance);
 
 export async function getReportAiSummary(supabase: AiSupabase, reportId: string) {
-  const { data, error } = await supabase.from("report_ai_summaries").select("summary_json, model, updated_at").eq("report_id", reportId).maybeSingle();
+  const [{ data, error }, report] = await Promise.all([
+    supabase.from("report_ai_summaries").select("summary_json, model, updated_at").eq("report_id", reportId).maybeSingle(),
+    supabase.from("radiology_reports").select("impression").eq("id", reportId).maybeSingle(),
+  ]);
   if (error) throw error;
+  if (report.error) throw report.error;
   if (!data) return null;
-  return { ...AiClinicalSummarySchema.parse((data as any).summary_json), model: (data as any).model, updatedAt: (data as any).updated_at };
+  const summary = guardClinicalSummaryWithoutImpression(AiClinicalSummarySchema.parse((data as any).summary_json), !!(report.data as any)?.impression?.trim());
+  return { ...summary, model: (data as any).model, updatedAt: (data as any).updated_at };
 }
 
 export async function saveReportAiSummary(supabase: AiSupabase, reportId: string, context: AiReportContext, extractionResult: AiFindingExtractionResult) {

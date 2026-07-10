@@ -64,4 +64,24 @@ export type AiFinding = z.infer<typeof AiFindingSchema>;
 export type AiClinicalSummary = z.infer<typeof AiClinicalSummarySchema>;
 export type AiFindingExtractionResult = z.infer<typeof AiFindingExtractionResultSchema>;
 
+const NO_IMPRESSION_WARNING = "Resumen generado desde Hallazgos. No se detectó sección Impresión/Conclusión.";
+const INDETERMINATE_WITHOUT_IMPRESSION = "Hallazgos compatibles con enfermedad activa/secundaria, sin poder determinar progresión por falta de impresión o comparación.";
+
+export function guardClinicalSummaryWithoutImpression(summary: AiClinicalSummary, hasImpression: boolean) {
+  if (hasImpression) return summary;
+  const sourceText = summary.primarySummaryItems.flatMap((item) => item.sourceSentences).join(" ");
+  const hasComparison = /compar|respecto|previo|aument|increment|disminu|reducci|nuevo|progres|regres|sin cambios|estable/i.test(sourceText);
+  return {
+    ...summary,
+    globalAssessment: hasComparison ? summary.globalAssessment : {
+      status: "indeterminate" as const,
+      text: INDETERMINATE_WITHOUT_IMPRESSION,
+      confidence: Math.min(summary.globalAssessment.confidence, 0.59),
+    },
+    warnings: summary.warnings.includes(NO_IMPRESSION_WARNING)
+      ? summary.warnings
+      : [NO_IMPRESSION_WARNING, ...summary.warnings],
+  };
+}
+
 export const AiFindingExtractionJsonSchema = z.toJSONSchema(AiFindingExtractionResultSchema) as Record<string, unknown>;
