@@ -1,5 +1,5 @@
 import { aiConfig, type AiSupabase } from "./ai-budget.ts";
-import { AiClinicalSummarySchema, guardClinicalSummaryWithoutImpression, type AiFinding, type AiFindingExtractionResult } from "./ai-extraction-schema.ts";
+import { finalizeClinicalSummary, parseStoredAiClinicalSummary, type AiFinding, type AiFindingExtractionResult } from "./ai-extraction-schema.ts";
 import { normalizeCandidateKey, normalizeLocalCodeName } from "./ai-normalization.ts";
 
 export type AiReportContext = {
@@ -126,7 +126,8 @@ export async function getReportAiSummary(supabase: AiSupabase, reportId: string)
   if (error) throw error;
   if (report.error) throw report.error;
   if (!data) return null;
-  const summary = guardClinicalSummaryWithoutImpression(AiClinicalSummarySchema.parse((data as any).summary_json), !!(report.data as any)?.impression?.trim());
+  const stored = parseStoredAiClinicalSummary((data as any).summary_json);
+  const summary = finalizeClinicalSummary(stored, { hasImpression: !!(report.data as any)?.impression?.trim(), profile: stored.reportingProfile });
   return { ...summary, model: (data as any).model, updatedAt: (data as any).updated_at };
 }
 
