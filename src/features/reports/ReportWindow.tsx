@@ -18,7 +18,7 @@ import {
 } from "./repository";
 import { AiFindingsPanel } from "./AiFindingsPanel";
 import { fetchTemplates, type ReportTemplate } from "./templates";
-import { profileFor } from "./profiles";
+import { profileFor, type ReportSection } from "./profiles";
 import { validateFinalReport } from "./validation";
 
 const fallbackOhifUrl = (process.env.NEXT_PUBLIC_OHIF_URL ?? "http://localhost:8042/ohif").replace(/\/$/, "");
@@ -45,6 +45,7 @@ const criticalFindingTypes = [
 ];
 const channelLabels: Record<ReportCommunication["channel"], string> = { phone: "Teléfono", in_person: "Presencial", secure_message: "Mensajería segura", email: "Correo", other: "Otro" };
 const followUpLabels: Record<FollowUpStatus, string> = { pending: "Pendiente", acknowledged: "Recibido", completed: "Realizado" };
+const reportSectionOrder: Record<ReportSection["name"], number> = { impression: 0, findings: 1, clinicalIndication: 2, technique: 3, comparison: 4 };
 const sections = [
   { name: "clinicalIndication", label: "Indicación clínica", hint: "Motivo del examen, antecedentes relevantes." },
   { name: "technique", label: "Técnica", hint: "Protocolo, contraste, limitaciones." },
@@ -79,6 +80,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
   const [templates, setTemplates] = useState<ReportTemplate[]>([]);
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [viewerBase, setViewerBase] = useState<string | null>(null);
+  const [editorTab, setEditorTab] = useState<"report" | "coding">("report");
   const [showDetail, setShowDetail] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -317,6 +319,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
   const profile = profileFor(appointment.serviceCategory);
   const workspaceProfile = clinicalProfileForCategory(appointment.serviceCategory);
   const sections = profile.sections;
+  const orderedSections = [...sections].sort((a, b) => reportSectionOrder[a.name] - reportSectionOrder[b.name]);
   const examLabel = `${appointment.serviceCategory === "imaging" && appointment.modality !== "OT" ? `${appointment.modality} · ` : ""}${appointment.reason}`;
   if (role === "operator") return <div className="report-workstation read-only-report">
     <header className="report-workstation-header"><div><p className="eyebrow">{profile.title}</p><h2>{appointment.patientName}</h2><p className="report-meta"><span>{appointment.date}</span><span>{examLabel}</span></p></div>{report.status === "final" && <button className="text-button" type="button" onClick={() => window.print()}>Imprimir</button>}</header>
@@ -357,7 +360,11 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
     </div>}
 
     <ClinicalWorkspace profile={workspaceProfile} editor={<section className="report-editor" aria-label="Editor de informe" onPaste={handlePaste}>
-        <div className="report-fields">
+        <nav className="ai-view-switch report-editor-tabs" aria-label="Secciones del informe">
+          <button id="report-tab" type="button" aria-controls="report-panel" aria-pressed={editorTab === "report"} onClick={() => setEditorTab("report")}>Informe</button>
+          <button id="coding-tab" type="button" aria-controls="coding-panel" aria-pressed={editorTab === "coding"} onClick={() => setEditorTab("coding")}>Codificación</button>
+        </nav>
+        <div id="report-panel" className="report-fields report-tab-panel" role="region" aria-labelledby="report-tab" hidden={editorTab !== "report"}>
           <div className="card-heading"><h3>{profile.editor}</h3>{report.status !== "final" && templates.some((template) => template.active && template.category === appointment.serviceCategory) &&
             <select defaultValue="" onChange={(event) => { applyTemplate(event.target.value); event.target.value = ""; }} aria-label="Aplicar plantilla">
               <option value="" disabled>Aplicar plantilla…</option>
@@ -365,24 +372,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
               {appointment.serviceCategory === "imaging" && templates.filter((template) => template.active && template.category === "imaging" && template.modality !== appointment.modality).map((template) => <option key={template.id} value={template.id}>{template.modality} · {template.name}</option>)}
             </select>}
           </div>
-          {sections.map((section) => <label key={section.name}>{section.label}<textarea name={section.name} value={report[section.name]} placeholder={section.hint} onChange={(event) => setSection(section.name, event.target.value)} disabled={report.status === "final"} /></label>)}
-          <AiFindingsPanel reportId={report.id} reportStatus={report.status} disabled={!["admin", "radiologist"].includes(role)} />
-
-          <details className="report-clinical-panel collapsible">
-            <summary><span className="collapsible-icon">#</span>Codificación estándar</summary>
-            <div className="clinical-form">
-              <label>Sistema reporte/prestación<select value={report.reportCodeSystem || "LOCAL"} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, reportCodeSystem: event.target.value }))}>{CODE_SYSTEMS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-              <CodePicker system={report.reportCodeSystem || "LOCAL"} code={report.reportCode} display={report.reportCodeDisplay} disabled={report.status === "final"}
-                onChange={(code, display) => setReport((current) => ({ ...current, reportCode: code, reportCodeDisplay: display }))} />
-              <label>Hallazgo principal<select value={report.findingCodeSystem || "SNOMEDCT"} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, findingCodeSystem: event.target.value }))}>{CODE_SYSTEMS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-              <CodePicker system={report.findingCodeSystem || "SNOMEDCT"} code={report.findingCode} display={report.findingCodeDisplay} disabled={report.status === "final"}
-                onChange={(code, display) => setReport((current) => ({ ...current, findingCode: code, findingCodeDisplay: display }))} />
-              <label>Diagnóstico administrativo<select value={report.diagnosisCodeSystem || "ICD-10"} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, diagnosisCodeSystem: event.target.value }))}>{CODE_SYSTEMS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-              <CodePicker system={report.diagnosisCodeSystem || "ICD-10"} code={report.diagnosisCode} display={report.diagnosisCodeDisplay} disabled={report.status === "final"}
-                onChange={(code, display) => setReport((current) => ({ ...current, diagnosisCode: code, diagnosisCodeDisplay: display }))} />
-            </div>
-          </details>
-
+          {orderedSections.map((section) => <label key={section.name}>{section.label}<textarea name={section.name} value={report[section.name]} placeholder={section.hint} onChange={(event) => setSection(section.name, event.target.value)} disabled={report.status === "final"} /></label>)}
           <div className="report-confirmations">
             <label className="consent-field"><input type="checkbox" checked={report.identityConfirmed} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, identityConfirmed: event.target.checked }))} />Confirmo la identidad del paciente y el estudio.</label>
             <label className="consent-field"><input type="checkbox" checked={report.clinicalQuestionAnswered} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, clinicalQuestionAnswered: event.target.checked }))} />Confirmo que la impresión responde la pregunta clínica.</label>
@@ -423,6 +413,8 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
             </label>}
           </details>
 
+          <AiFindingsPanel reportId={report.id} reportStatus={report.status} disabled={!["admin", "radiologist"].includes(role)} />
+
           <details className="report-clinical-panel collapsible">
             <summary><span className="collapsible-icon">📌</span>Seguimientos accionables{followUps.length > 0 && <span className="collapsible-count">{followUps.length}</span>}</summary>
             {followUps.map((item) => <div className="workflow-entry" key={item.id}><strong>{item.recommendation}</strong><span>Plazo: {new Date(`${item.dueDate}T00:00:00`).toLocaleDateString("es-CL")} · Responsable: {item.responsible}</span><label>Estado<select value={item.status} onChange={(event) => changeFollowUpStatus(item.id, event.target.value as FollowUpStatus)}>{Object.entries(followUpLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div>)}
@@ -455,6 +447,23 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
               <button className="button secondary" disabled={saving} type="submit">Firmar adenda</button>
             </form>
           </details>}
+        </div>
+
+        <div id="coding-panel" className="report-fields report-tab-panel" role="region" aria-labelledby="coding-tab" hidden={editorTab !== "coding"}>
+          <div className="card-heading"><h3>Codificación estándar</h3></div>
+          <section className="report-clinical-panel">
+            <div className="clinical-form">
+              <label>Sistema reporte/prestación<select value={report.reportCodeSystem || "LOCAL"} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, reportCodeSystem: event.target.value }))}>{CODE_SYSTEMS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+              <CodePicker system={report.reportCodeSystem || "LOCAL"} code={report.reportCode} display={report.reportCodeDisplay} disabled={report.status === "final"}
+                onChange={(code, display) => setReport((current) => ({ ...current, reportCode: code, reportCodeDisplay: display }))} />
+              <label>Hallazgo principal<select value={report.findingCodeSystem || "SNOMEDCT"} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, findingCodeSystem: event.target.value }))}>{CODE_SYSTEMS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+              <CodePicker system={report.findingCodeSystem || "SNOMEDCT"} code={report.findingCode} display={report.findingCodeDisplay} disabled={report.status === "final"}
+                onChange={(code, display) => setReport((current) => ({ ...current, findingCode: code, findingCodeDisplay: display }))} />
+              <label>Diagnóstico administrativo<select value={report.diagnosisCodeSystem || "ICD-10"} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, diagnosisCodeSystem: event.target.value }))}>{CODE_SYSTEMS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+              <CodePicker system={report.diagnosisCodeSystem || "ICD-10"} code={report.diagnosisCode} display={report.diagnosisCodeDisplay} disabled={report.status === "final"}
+                onChange={(code, display) => setReport((current) => ({ ...current, diagnosisCode: code, diagnosisCodeDisplay: display }))} />
+            </div>
+          </section>
         </div>
 
         <footer className="report-actions">

@@ -464,8 +464,10 @@ body:has(.report-workstation) .app-shell-main { min-height: 0; overflow: hidden;
 .clinical-workspace[data-has-navigator="true"] .clinical-workspace-body { grid-template-columns: minmax(380px, 38vw) minmax(180px, 230px) minmax(0, 1fr); }
 .clinical-workspace-pane { min-height: 0; min-width: 0; overflow: hidden; }
 .clinical-workspace-pane > * { height: 100%; min-height: 0; min-width: 0; }
-.report-editor { background: var(--surface); display: grid; grid-template-rows: minmax(0, 1fr) auto; min-height: 0; min-width: 0; overflow: hidden; }
+.report-editor { background: var(--surface); display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-height: 0; min-width: 0; overflow: hidden; }
 .report-fields { align-content: start; display: grid; gap: 12px; min-height: 0; min-width: 0; overflow-y: auto; overscroll-behavior: contain; padding: 18px; }
+.report-editor-tabs { flex: none; padding: 0 18px; }
+.report-tab-panel[hidden] { display: none; }
 .report-editor h3 { margin: 0 0 2px; }
 .report-editor label { color: var(--muted); display: grid; font-size: 0.85rem; gap: 5px; }
 .report-editor textarea { max-height: min(32vh, 320px); min-height: 72px; resize: vertical; }
@@ -634,6 +636,7 @@ body:has(.report-workstation) .app-shell-main { min-height: 0; overflow: hidden;
   .report-workstation-header { display: grid; gap: 10px; padding: 10px 12px; }
   .report-header-actions { justify-content: flex-start; }
   .report-fields { padding: 12px; }
+  .report-editor-tabs { padding: 0 12px; }
   .report-actions { padding: 10px 12px; }
   .ai-summary-header { grid-template-columns: minmax(0, 1fr); }
   .ai-summary-assessment { grid-column: auto; }
