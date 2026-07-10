@@ -450,13 +450,19 @@ body:has(.report-workstation) { display: flex; flex-direction: column; height: 1
 body:has(.report-workstation) .app-shell { flex: 1; height: 100dvh; min-height: 0; overflow: hidden; }
 body:has(.report-workstation) .app-shell-main { min-height: 0; overflow: hidden; }
 .main-content:has(.report-workstation) { display: flex; flex-direction: column; min-height: 0; overflow: hidden; padding: 0; }
-.report-workstation-header { align-items: center; background: #0d1214; border-bottom: 1px solid var(--border); display: flex; flex: none; gap: 16px; justify-content: space-between; min-width: 0; padding: 12px 18px; }
-.report-workstation-header > div:first-child { display: grid; gap: 5px; min-width: 0; }
-.report-workstation-header h2 { font-size: 1.35rem; line-height: 1.1; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.report-workstation-header { align-items: center; background: var(--surface); border-bottom: 1px solid var(--border); display: flex; flex: none; gap: 14px; justify-content: space-between; min-width: 0; padding: 9px 18px; }
+.report-header-context { display: grid; gap: 3px; min-width: 0; }
+.report-patient-line { align-items: center; display: flex; gap: 10px; min-width: 0; }
+.report-patient-line > div { display: grid; gap: 1px; min-width: 0; }
+.report-workstation-header h2 { font-size: 1.2rem; line-height: 1.1; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .report-workstation-header .eyebrow { margin: 0; }
-.report-header-actions { align-items: center; display: flex; gap: 14px; white-space: nowrap; }
+.report-patient-id { background: var(--surface-muted); border: 1px solid var(--border); border-radius: 999px; color: var(--muted); flex: none; font-size: 0.7rem; font-weight: 700; padding: 3px 8px; }
+.report-study-name { color: var(--text); font-size: 0.82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.report-header-actions { align-items: center; display: flex; gap: 9px; white-space: nowrap; }
 .report-workstation .text-button { color: var(--report-accent); }
 .report-workstation .button.primary { background: var(--report-accent); }
+.report-workstation :is(button, a, summary):focus-visible { outline: 2px solid var(--report-accent); outline-offset: 2px; }
+.report-workstation :is(input, select, textarea):focus-visible { outline: 2px solid var(--report-accent); outline-offset: 1px; }
 .clinical-workspace { display: flex; flex: 1; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
 .clinical-workspace-tabs { display: none; }
 .clinical-workspace-body { background: var(--border); display: grid; flex: 1; gap: 1px; grid-template-columns: minmax(380px, min(42vw, 620px)) minmax(0, 1fr); min-height: 0; min-width: 0; overflow: hidden; }
@@ -465,18 +471,30 @@ body:has(.report-workstation) .app-shell-main { min-height: 0; overflow: hidden;
 .clinical-workspace-pane { min-height: 0; min-width: 0; overflow: hidden; }
 .clinical-workspace-pane > * { height: 100%; min-height: 0; min-width: 0; }
 .report-editor { background: var(--surface); display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-height: 0; min-width: 0; overflow: hidden; }
-.report-fields { align-content: start; display: grid; gap: 12px; min-height: 0; min-width: 0; overflow-y: auto; overscroll-behavior: contain; padding: 18px; }
-.report-editor-tabs { flex: none; padding: 0 18px; }
+.report-fields { align-content: start; display: grid; gap: 14px; min-height: 0; min-width: 0; overflow-y: auto; overscroll-behavior: contain; padding: 16px 18px 28px; }
+.report-editor-tabs { background: var(--surface); flex: none; gap: 2px; padding: 0 18px; }
+.report-editor-tabs button { border-radius: 6px 6px 0 0; flex: 1; font-size: 0.82rem; max-width: 160px; padding: 11px 18px 9px; }
+.report-editor-tabs button[aria-selected="true"] { background: var(--primary-soft); border-bottom-color: var(--report-accent); color: var(--text); font-weight: 800; }
 .report-tab-panel[hidden] { display: none; }
-.report-editor h3 { margin: 0 0 2px; }
+.report-editor h3 { font-size: 1rem; margin: 0 0 2px; }
 .report-editor label { color: var(--muted); display: grid; font-size: 0.85rem; gap: 5px; }
-.report-editor textarea { max-height: min(32vh, 320px); min-height: 72px; resize: vertical; }
-.report-editor textarea[name="findings"] { max-height: min(40vh, 380px); min-height: 160px; }
-.report-meta { color: var(--muted); display: flex; flex-wrap: wrap; font-size: 0.82rem; gap: 6px 18px; margin: 0; }
+.report-editor textarea { line-height: 1.45; max-height: min(32vh, 320px); min-height: 62px; resize: vertical; }
+.report-section { border-radius: 8px; gap: 7px !important; }
+.report-section-impression, .report-section-findings { background: var(--surface-muted); border: 1px solid var(--border); color: var(--text) !important; font-weight: 700; padding: 11px; }
+.report-section-impression textarea { min-height: 120px; }
+.report-section-findings textarea { max-height: min(40vh, 380px); min-height: 180px; }
+.report-section-clinicalIndication textarea, .report-section-technique textarea, .report-section-comparison textarea { min-height: 58px; }
+.report-meta { color: var(--muted); display: flex; flex-wrap: wrap; font-size: 0.72rem; gap: 4px 14px; margin: 0; }
+.report-meta > div { align-items: baseline; display: flex; gap: 5px; min-width: 0; }
+.report-meta dt { color: var(--faint); font-size: 0.64rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+.report-meta dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .report-editor-footer { display: grid; min-width: 0; }
-.report-actions { align-items: center; background: #0d1214; border-top: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 10px; padding: 12px 18px; }
-.report-signing-error { color: var(--warning); flex-basis: 100%; font-size: 0.78rem; }
-.report-updated { color: var(--muted); font-size: 0.75rem; margin-left: auto; }
+.report-actions { align-items: center; background: var(--surface); border-top: 1px solid var(--border); display: flex; gap: 14px; justify-content: space-between; padding: 10px 18px calc(10px + env(safe-area-inset-bottom)); }
+.report-save-state { display: grid; gap: 2px; min-width: 0; }
+.report-save-state > strong { font-size: 0.78rem; }
+.report-signing-error { color: var(--warning); font-size: 0.74rem; }
+.report-updated { color: var(--muted); font-size: 0.72rem; }
+.report-action-buttons { align-items: center; display: flex; flex: none; gap: 8px; }
 .report-status { border-radius: 999px; font-size: 0.75rem; font-weight: 800; padding: 5px 10px; }
 .report-status.draft { background: rgba(251, 191, 36, 0.15); color: var(--warning); }
 .report-status.final { background: rgba(52, 211, 153, 0.15); color: var(--success); }
@@ -511,7 +529,7 @@ body:has(.report-workstation) .app-shell-main { min-height: 0; overflow: hidden;
 .report-workstation .critical-type select { border-color: rgba(248, 113, 113, 0.45); }
 .report-fields .critical-field { margin: 0; }
 .report-confirmations { display: grid; gap: 8px; }
-.report-clinical-panel { border: 1px solid var(--border); border-radius: 8px; display: grid; gap: 10px; padding: 14px; }
+.report-clinical-panel { border: 1px solid var(--border); border-radius: 8px; display: grid; gap: 10px; padding: 12px 14px; }
 .report-clinical-panel.critical-panel { background: rgba(248, 113, 113, 0.06); border-color: rgba(248, 113, 113, 0.45); }
 .critical-status { align-items: center; background: var(--surface-muted); border-top: 1px solid; display: flex; gap: 12px; min-width: 0; padding: 12px 18px; }
 .critical-status.pending { border-color: var(--danger); }
@@ -525,6 +543,15 @@ body:has(.report-workstation) .app-shell-main { min-height: 0; overflow: hidden;
 .critical-status-action { margin-left: auto; }
 .critical-status-action:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
 .report-clinical-panel h4 { margin: 0; }
+.report-secondary-panel { background: transparent; border-color: var(--border-soft); }
+.report-secondary-panel > summary { color: var(--muted); font-size: 0.84rem; }
+.kin-panel { background: var(--primary-soft); border-color: var(--primary-border); }
+.kin-panel > summary { flex-wrap: wrap; }
+.kin-panel > summary::after { margin-left: 0; }
+.kin-sync-status { align-items: center; background: var(--surface); border: 1px solid var(--primary-border); border-radius: 999px; color: var(--report-accent); display: inline-flex; font-size: 0.68rem; font-weight: 700; gap: 5px; margin-left: auto; padding: 2px 7px; }
+.kin-sync-status > span { font-size: 0.55rem; }
+.report-coding-panel .coding-section { background: var(--surface-muted); padding: 16px; }
+.report-coding-panel .clinical-form { align-items: start; gap: 12px 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; }
 .report-inline-form { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .report-inline-form .span-2 { grid-column: 1 / -1; }
 .report-inline-form textarea { min-height: 64px; }
@@ -534,7 +561,11 @@ body:has(.report-workstation) .app-shell-main { min-height: 0; overflow: hidden;
 .workflow-entry label { align-items: center; display: flex; gap: 8px; }
 .workflow-entry select { padding: 5px 8px; }
 .ai-panel-actions, .ai-finding-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; }
-.ai-operation-status { background: var(--surface-muted); border: 1px solid var(--border); border-radius: 6px; display: grid; gap: 7px; padding: 10px 12px; }
+.ai-findings-panel { background: var(--surface); border-color: var(--primary-border); }
+.ai-findings-panel > summary .collapsible-icon { background: var(--primary-soft); border: 1px solid var(--primary-border); border-radius: 5px; color: var(--report-accent); font-size: 0.72rem; padding: 3px 5px; }
+.ai-operation-status { background: var(--surface-muted); border: 1px solid var(--primary-border); border-left-width: 3px; border-radius: 6px; display: grid; gap: 7px; padding: 10px 12px; }
+.ai-operation-status.success { border-color: var(--success); }
+.ai-operation-status.error { border-color: var(--danger); }
 .ai-operation-status > strong { color: var(--report-accent); }
 .ai-operation-status > span { color: var(--muted); font-size: 0.78rem; }
 .ai-operation-status.success > strong { color: var(--success); }
@@ -549,7 +580,7 @@ body:has(.report-workstation) .app-shell-main { min-height: 0; overflow: hidden;
 .ai-view-switch button { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--muted); cursor: pointer; padding: 9px 12px; }
 .ai-view-switch button[aria-pressed="true"] { border-bottom-color: var(--report-accent); color: var(--text); font-weight: 700; }
 .ai-clinical-summary, .ai-technical-detail { display: grid; gap: 12px; }
-.ai-summary-header { border: 1px solid var(--border); border-radius: 6px; display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(150px, 1fr)); padding: 12px; }
+.ai-summary-header { background: var(--surface-muted); border: 1px solid var(--border); border-radius: 6px; display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(150px, 1fr)); padding: 12px; }
 .ai-summary-assessment { grid-column: span 2; }
 .ai-summary-header div { display: grid; gap: 3px; }
 .ai-summary-header span, .ai-summary-header small { color: var(--muted); font-size: 0.74rem; }
@@ -607,8 +638,8 @@ body:has(.report-workstation) .app-shell-main { min-height: 0; overflow: hidden;
 .read-only-report > .notice, .read-only-report > article { margin: 0 20px 20px; }
 .exam-entry { color: var(--text); text-decoration: none; }
 .exam-entry:hover { background: rgba(255, 255, 255, 0.07); }
-.key-images-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
-.key-images-grid img { background: #000; border-radius: 6px; display: block; height: 96px; object-fit: contain; width: 100%; }
+.key-images-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+.key-images-grid img { background: #000; border-radius: 6px; display: block; height: 104px; object-fit: contain; width: 100%; }
 .key-images-grid .key-image { display: grid; gap: 4px; margin: 0; }
 .key-images-grid .key-image input { font-size: 0.75rem; padding: 4px 6px; }
 .key-images-grid .key-image figcaption { color: var(--muted); font-size: 0.75rem; }
@@ -630,7 +661,7 @@ body:has(.report-workstation) .app-shell-main { min-height: 0; overflow: hidden;
 @media (max-width: 1100px) {
   .report-workstation-header { align-items: flex-start; }
   .report-header-actions { flex-wrap: wrap; justify-content: flex-end; white-space: normal; }
-  .clinical-workspace-tabs { background: #0d1214; border-bottom: 1px solid var(--border); display: flex; flex: none; gap: 4px; padding: 0 12px; }
+  .clinical-workspace-tabs { background: var(--surface); border-bottom: 1px solid var(--border); display: flex; flex: none; gap: 4px; padding: 0 12px; }
   .clinical-workspace-tabs button { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--muted); cursor: pointer; padding: 10px 12px; }
   .clinical-workspace-tabs button[aria-pressed="true"] { border-bottom-color: var(--report-accent); color: var(--text); font-weight: 700; }
   .clinical-workspace-body, .clinical-workspace[data-has-navigator="true"] .clinical-workspace-body { grid-template-columns: minmax(0, 1fr); }
@@ -656,13 +687,20 @@ body:has(.report-workstation) .app-shell-main { min-height: 0; overflow: hidden;
 }
 
 @media (max-width: 640px) {
-  .report-workstation-header { display: grid; gap: 10px; padding: 10px 12px; }
-  .report-header-actions { justify-content: flex-start; }
-  .report-fields { padding: 12px; }
+  .report-workstation-header { display: grid; gap: 8px; padding: 8px 12px; }
+  .report-patient-line { align-items: flex-start; flex-wrap: wrap; }
+  .report-header-actions { justify-content: flex-start; width: 100%; }
+  .report-meta { gap: 3px 10px; }
+  .report-fields { padding: 12px 12px 24px; }
   .report-editor-tabs { padding: 0 12px; }
+  .report-editor-tabs button { max-width: none; }
+  .report-coding-panel .clinical-form { grid-template-columns: minmax(0, 1fr); }
+  .kin-sync-status { margin-left: 0; }
   .critical-status { align-items: flex-start; flex-wrap: wrap; padding: 10px 12px; }
   .critical-status-action { margin-left: 0; width: 100%; }
-  .report-actions { padding: 10px 12px; }
+  .report-actions { align-items: stretch; display: grid; padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); }
+  .report-action-buttons { width: 100%; }
+  .report-action-buttons .button { flex: 1; justify-content: center; }
   .ai-summary-header { grid-template-columns: minmax(0, 1fr); }
   .ai-summary-assessment { grid-column: auto; }
 }
