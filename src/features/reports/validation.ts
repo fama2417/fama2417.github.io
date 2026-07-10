@@ -7,12 +7,12 @@ type FinalReport = {
   criticalFindingType: string;
 };
 
-type CriticalCommunication = { urgency: string; acknowledged: boolean; communicatedAt: string; recipient: string };
+type CriticalCommunication = { reportId: string | null; urgency: string; acknowledged: boolean; communicatedAt: string; recipient: string };
 
 export const criticalFindingTypeError = "Indica el tipo de hallazgo crítico antes de firmar.";
 
-export function criticalFindingState<T extends CriticalCommunication>(active: boolean, communications: readonly T[]) {
-  const communication = communications.findLast((item) => item.urgency === "critical" && item.acknowledged);
+export function criticalFindingState<T extends CriticalCommunication>(active: boolean, reportId: string | undefined, communications: readonly T[]) {
+  const communication = communications.findLast((item) => item.reportId === reportId && item.urgency === "critical" && item.acknowledged);
   return { status: !active ? "inactive" as const : communication ? "confirmed" as const : "pending" as const, communication };
 }
 

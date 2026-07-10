@@ -35,6 +35,7 @@ export type RadiologyReport = {
 
 export type ReportCommunication = {
   id: string;
+  reportId: string;
   urgency: "critical" | "urgent" | "unexpected";
   recipient: string;
   channel: "phone" | "in_person" | "secure_message" | "email" | "other";
@@ -143,17 +144,18 @@ export async function saveReport(report: RadiologyReport) {
   return mapReport(data as unknown as ReportRow);
 }
 
-type CommunicationRow = { id: string; urgency: ReportCommunication["urgency"]; recipient: string; channel: ReportCommunication["channel"]; communicated_at: string; acknowledged: boolean; notes: string };
-const mapCommunication = (row: CommunicationRow): ReportCommunication => ({ id: row.id, urgency: row.urgency, recipient: row.recipient, channel: row.channel, communicatedAt: row.communicated_at, acknowledged: row.acknowledged, notes: row.notes });
+type CommunicationRow = { id: string; report_id: string; urgency: ReportCommunication["urgency"]; recipient: string; channel: ReportCommunication["channel"]; communicated_at: string; acknowledged: boolean; notes: string };
+const communicationColumns = "id, report_id, urgency, recipient, channel, communicated_at, acknowledged, notes";
+const mapCommunication = (row: CommunicationRow): ReportCommunication => ({ id: row.id, reportId: row.report_id, urgency: row.urgency, recipient: row.recipient, channel: row.channel, communicatedAt: row.communicated_at, acknowledged: row.acknowledged, notes: row.notes });
 
-export async function fetchCommunications(appointmentId: string) {
-  const { data, error } = await supabase.from("report_communications").select("id, urgency, recipient, channel, communicated_at, acknowledged, notes").eq("appointment_id", appointmentId).order("communicated_at");
+export async function fetchCommunications(reportId: string) {
+  const { data, error } = await supabase.from("report_communications").select(communicationColumns).eq("report_id", reportId).order("communicated_at");
   if (error) throw error;
   return (data as CommunicationRow[]).map(mapCommunication);
 }
 
-export async function addCommunication(appointmentId: string, input: Omit<ReportCommunication, "id" | "urgency">) {
-  const { data, error } = await supabase.from("report_communications").insert({ appointment_id: appointmentId, urgency: "critical", recipient: input.recipient, channel: input.channel, communicated_at: input.communicatedAt, acknowledged: input.acknowledged, notes: input.notes }).select("id, urgency, recipient, channel, communicated_at, acknowledged, notes").single();
+export async function addCommunication(reportId: string, appointmentId: string, input: Omit<ReportCommunication, "id" | "reportId" | "urgency">) {
+  const { data, error } = await supabase.from("report_communications").insert({ report_id: reportId, appointment_id: appointmentId, urgency: "critical", recipient: input.recipient, channel: input.channel, communicated_at: input.communicatedAt, acknowledged: input.acknowledged, notes: input.notes }).select(communicationColumns).single();
   if (error) throw error;
   return mapCommunication(data as CommunicationRow);
 }
