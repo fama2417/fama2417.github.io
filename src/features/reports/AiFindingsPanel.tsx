@@ -67,6 +67,11 @@ const groupOf = (item: Item): GroupKey => {
   return "secondary";
 };
 
+function CompactClinicalText({ text }: { text: string }) {
+  if (text.length <= 220) return <strong>{text}</strong>;
+  return <><strong>{text.slice(0, 217)}...</strong><details className="ai-finding-source"><summary>Ver explicación completa</summary><span>{text}</span></details></>;
+}
+
 export function AiFindingsPanel({ reportId, reportStatus, disabled }: { reportId?: string; reportStatus?: string; disabled?: boolean }) {
   const [items, setItems] = useState<Item[]>([]);
   const [clinicalSummary, setClinicalSummary] = useState<ClinicalSummary | null>(null);
@@ -152,6 +157,7 @@ export function AiFindingsPanel({ reportId, reportStatus, disabled }: { reportId
     ? { status: clinicalSummary.globalResponse.status, text: clinicalSummary.globalResponse.explanation, confidence: clinicalSummary.globalResponse.confidence }
     : clinicalSummary?.globalAssessment;
   const lowAssessmentConfidence = Number(assessment?.confidence ?? 1) < 0.6;
+  const assessmentText = assessment ? (lowAssessmentConfidence ? `Evaluación orientativa: ${assessment.text}` : assessment.text) : "";
   const trackedLesions = clinicalSummary?.lesionTracking.filter((lesion) => /^LT[1-3]$/i.test(lesion.label) && lesion.site && lesion.sourceSentence && (lesion.currentSize || lesion.priorSize || lesion.currentSuv || lesion.priorSuv)) ?? [];
 
   return <details className="report-clinical-panel collapsible ai-findings-panel" open>
@@ -174,7 +180,7 @@ export function AiFindingsPanel({ reportId, reportStatus, disabled }: { reportId
         <header className="ai-summary-header">
           <div><span>Perfil detectado</span><strong>{profileLabels[clinicalSummary.reportingProfile] ?? clinicalSummary.reportingProfile}</strong></div>
           <div><span>Contexto</span><strong>{formatClinicalContext(clinicalSummary.clinicalContext || clinicalSummary.modalityContext)}</strong></div>
-          {assessment && <div><span>Evaluación global</span><strong>{lowAssessmentConfidence ? `Evaluación orientativa: ${assessment.text}` : assessment.text}</strong><small>{assessmentLabels[assessment.status] ?? assessment.status} - {lowAssessmentConfidence ? "Baja confianza - " : ""}{Math.round(assessment.confidence * 100)}%</small></div>}
+          {assessment && <div className="ai-summary-assessment"><span>Evaluación global</span><CompactClinicalText text={assessmentText} /><small>{assessmentLabels[assessment.status] ?? assessment.status} - {lowAssessmentConfidence ? "Baja confianza - " : ""}{Math.round(assessment.confidence * 100)}%</small></div>}
           {clinicalSummary.scores.map((score) => <div key={`${score.name}-${score.value}`}><span>Score</span><strong>{score.name} {score.value}</strong></div>)}
           <div><span>Detalle</span><strong>{items.length} hallazgos</strong><small>{pendingReview} pendientes - {pendingDictionary} en diccionario</small></div>
           {clinicalSummary.clinicalTags.length > 0 && <div><span>Etiquetas clínicas</span><div className="ai-finding-badges">{clinicalSummary.clinicalTags.map((tag) => <span key={tag}>{tagLabels[tag] ?? tag}</span>)}</div></div>}
@@ -195,6 +201,7 @@ export function AiFindingsPanel({ reportId, reportStatus, disabled }: { reportId
             <details className="ai-finding-source"><summary>Ver fuente</summary><span>{lesion.sourceSentence}</span></details>
           </article>)}
         </details>}
+        {items.length > 10 && <button className="text-button" type="button" onClick={() => setMode("detail")}>{items.length} hallazgos técnicos extraídos. Ver detalle.</button>}
         {otherWarnings.length > 0 && <details className="ai-summary-warnings"><summary>{otherWarnings.length} alertas de extracción</summary>{otherWarnings.map((warning) => <p key={warning}>{warning}</p>)}</details>}
       </> : <p className="empty-inline">{items.length ? "Este informe tiene detalle tecnico previo. Recalcula para generar el resumen clinico." : "Sin extraccion IA todavia."}</p>}
     </div> : <div className="ai-technical-detail">

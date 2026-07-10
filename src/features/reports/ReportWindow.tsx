@@ -3,6 +3,8 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { CODE_SYSTEMS, codeHref, codingError } from "@/features/clinical/coding";
 import { CodePicker } from "@/features/clinical/CodePicker";
+import { ClinicalWorkspace } from "@/features/clinical-workspace/ClinicalWorkspace";
+import { clinicalProfileForCategory } from "@/features/clinical-workspace/profiles";
 import type { Appointment } from "@/features/appointments/mock-data";
 import { fetchAppointments, orderFileUrl } from "@/features/appointments/repository";
 import { appointmentStatusLabels } from "@/features/appointments/status";
@@ -313,6 +315,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
 
   const baseKeyImages = keyImages.filter((item) => !item.addendumId);
   const profile = profileFor(appointment.serviceCategory);
+  const workspaceProfile = clinicalProfileForCategory(appointment.serviceCategory);
   const sections = profile.sections;
   const examLabel = `${appointment.serviceCategory === "imaging" && appointment.modality !== "OT" ? `${appointment.modality} · ` : ""}${appointment.reason}`;
   if (role === "operator") return <div className="report-workstation read-only-report">
@@ -353,8 +356,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
       </div>
     </div>}
 
-    <div className="report-layout">
-      <section className="report-editor" aria-label="Editor de informe" onPaste={handlePaste}>
+    <ClinicalWorkspace profile={workspaceProfile} editor={<section className="report-editor" aria-label="Editor de informe" onPaste={handlePaste}>
         <div className="report-fields">
           <div className="card-heading"><h3>{profile.editor}</h3>{report.status !== "final" && templates.some((template) => template.active && template.category === appointment.serviceCategory) &&
             <select defaultValue="" onChange={(event) => { applyTemplate(event.target.value); event.target.value = ""; }} aria-label="Aplicar plantilla">
@@ -462,9 +464,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
           {notice && <span className="form-notice" role="status">{notice}</span>}
           {report.updatedAt && <span className="report-updated">Última modificación: {new Date(report.updatedAt).toLocaleString("es-CL")}</span>}
         </footer>
-      </section>
-      <section className="viewer-pane" aria-label="Visor de imágenes">{fullScreen ? <iframe ref={viewerRef} src={fullScreen} title="Visor OHIF" allow="fullscreen" /> : <p className="empty-state">Este estudio aún no tiene imágenes vinculadas en el PACS.</p>}</section>
-    </div>
+      </section>} viewer={appointment.serviceCategory === "imaging" ? <section className="viewer-pane" aria-label="Visor de imágenes">{fullScreen ? <iframe ref={viewerRef} src={fullScreen} title="Visor OHIF" allow="fullscreen" /> : <p className="empty-state">Este estudio aún no tiene imágenes vinculadas en el PACS.</p>}</section> : undefined} />
 
     {reportAction && <div className="appointment-info-backdrop" role="dialog" aria-modal="true" aria-label={reportAction.kind === "reopen" ? "Reabrir reporte" : "Eliminar reporte"} onClick={(event) => { if (event.target === event.currentTarget) setReportAction(null); }}>
       <form className="appointment-info status-change-dialog" onSubmit={(event) => { event.preventDefault(); const reason = reportAction.reason.trim(); if (!reason) return; reportAction.kind === "reopen" ? reopen(reason) : removeReport(reason); }}>
