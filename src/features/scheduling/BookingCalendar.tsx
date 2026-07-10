@@ -11,7 +11,7 @@ import { fetchAppointments, setAppointmentStatus } from "@/features/appointments
 import { APPOINTMENT_STATUSES, appointmentStatusLabels, type AppointmentStatus } from "@/features/appointments/status";
 import type { Appointment } from "@/features/appointments/mock-data";
 import { createPatient } from "@/features/patients/repository";
-import { identifierTypeLabels, type Patient } from "@/features/patients/mock-data";
+import { identifierTypeLabels, type Patient } from "@/features/patients/types";
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const emptyNewPatient = { identifier: "", identifierType: "run" as Patient["identifierType"], name: "", birthDate: "", sex: "unknown" as Patient["sex"], phone: "", consent: false };

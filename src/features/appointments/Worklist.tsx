@@ -6,7 +6,7 @@ import { supabase } from "@/lib/supabase-client";
 import { csvCell } from "@/lib/safe-text";
 import type { UnmatchedStudy } from "@/lib/orthanc";
 import { fetchPatients } from "@/features/patients/repository";
-import type { Patient } from "@/features/patients/mock-data";
+import type { Patient } from "@/features/patients/types";
 import type { Appointment } from "./mock-data";
 import { assignAppointment, fetchAppointments, fetchRadiologists, orderFileUrl, setAppointmentStatus } from "./repository";
 import { APPOINTMENT_STATUSES, appointmentStatusLabels, type AppointmentStatus } from "./status";

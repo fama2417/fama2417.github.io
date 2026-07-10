@@ -1,5 +1,7 @@
 import { supabase } from "@/lib/supabase-client";
-import type { Patient } from "./mock-data";
+import type { Patient } from "./types";
+import type { PatientEditPatch } from "./patient-edit";
+import { patientSearchFilter } from "./search";
 
 const columns = "id, identifier, identifier_type, full_name, birth_date, sex, phone, privacy_consent_at, address, comuna, email, allergies, morbid_history, prevision";
 
@@ -17,20 +19,138 @@ function mapPatient(row: PatientRow): Patient {
   };
 }
 
-export type PatientExam = { id: string; date: string; modality: string; reason: string; status: string; reportStatus?: "draft" | "final"; hasImages: boolean };
+export type PatientExam = {
+  id: string; date: string; time: string; modality: string; reason: string; status: string;
+  reportStatus?: "draft" | "final"; hasImages: boolean;
+  anamnesis: string; diagnosticHypothesis: string; practitioner: string;
+};
 
 /** Exámenes (citas) del paciente para la ficha, del más reciente al más antiguo. */
 export async function fetchPatientExams(patientId: string): Promise<PatientExam[]> {
   const { data, error } = await supabase.from("appointments")
-    .select("id, appointment_date, modality, reason, status, study:imaging_studies(id), report:radiology_reports(status)")
+    .select("id, appointment_date, start_time, modality, reason, status, anamnesis, diagnostic_hypothesis, practitioner_name, study:imaging_studies(id), report:radiology_reports(status)")
     .eq("patient_id", patientId).order("appointment_date", { ascending: false }).order("start_time", { ascending: false });
   if (error) throw error;
-  return ((data ?? []) as unknown as { id: string; appointment_date: string; modality: string; reason: string; status: string; study: { id: string } | null; report: { status: "draft" | "final" } | null }[])
-    .map((row) => ({ id: row.id, date: row.appointment_date, modality: row.modality, reason: row.reason, status: row.status, reportStatus: row.report?.status, hasImages: !!row.study }));
+  return ((data ?? []) as unknown as { id: string; appointment_date: string; start_time: string; modality: string; reason: string; status: string; anamnesis: string; diagnostic_hypothesis: string; practitioner_name: string; study: { id: string } | null; report: { status: "draft" | "final" } | null }[])
+    .map((row) => ({
+      id: row.id, date: row.appointment_date, time: (row.start_time ?? "").slice(0, 5), modality: row.modality, reason: row.reason, status: row.status,
+      reportStatus: row.report?.status, hasImages: !!row.study,
+      anamnesis: row.anamnesis ?? "", diagnosticHypothesis: row.diagnostic_hypothesis ?? "", practitioner: row.practitioner_name ?? "",
+    }));
 }
 
-export async function fetchPatients() {
-  const { data, error } = await supabase.from("patients").select(columns).order("full_name");
+/** Sin argumentos conserva el comportamiento histórico (todos los pacientes, para pickers de agenda/worklist). */
+/** Datos mínimos del examen asociado a un seguimiento o comunicación. */
+export type PatientExamRef = { id: string; date: string; time: string; modality: string; reason: string; status: string; reportStatus?: "draft" | "final"; hasImages: boolean };
+
+type ExamRefRow = { id: string; appointment_date: string; start_time: string; modality: string; reason: string; status: string; study: { id: string } | null; report: { status: "draft" | "final" } | null };
+const examRefColumns = "id, appointment_date, start_time, modality, reason, status, study:imaging_studies(id), report:radiology_reports(status)";
+
+function mapExamRef(row: ExamRefRow): PatientExamRef {
+  return { id: row.id, date: row.appointment_date, time: (row.start_time ?? "").slice(0, 5), modality: row.modality, reason: row.reason, status: row.status, reportStatus: row.report?.status, hasImages: !!row.study };
+}
+
+export type PatientFollowUp = {
+  id: string; recommendation: string; dueDate: string; responsible: string;
+  status: "pending" | "acknowledged" | "completed"; createdAt: string; exam: PatientExamRef;
+};
+
+/** Seguimientos recomendados en informes del paciente (RLS: lectura para todo el staff del tenant). */
+export async function fetchPatientFollowUps(patientId: string): Promise<PatientFollowUp[]> {
+  const { data, error } = await supabase.from("report_follow_ups")
+    .select(`id, recommendation, due_date, responsible, status, created_at, appointment:appointments!inner(patient_id, ${examRefColumns})`)
+    .eq("appointment.patient_id", patientId).order("due_date");
+  if (error) throw error;
+  return ((data ?? []) as unknown as { id: string; recommendation: string; due_date: string; responsible: string; status: PatientFollowUp["status"]; created_at: string; appointment: ExamRefRow }[])
+    .map((row) => ({ id: row.id, recommendation: row.recommendation, dueDate: row.due_date, responsible: row.responsible, status: row.status, createdAt: row.created_at, exam: mapExamRef(row.appointment) }));
+}
+
+export type PatientCriticalCommunication = {
+  id: string; urgency: "critical" | "urgent" | "unexpected"; recipient: string; channel: string;
+  communicatedAt: string; acknowledged: boolean; notes: string; exam: PatientExamRef;
+};
+
+/** Comunicaciones de hallazgos críticos de informes del paciente, de la más reciente a la más antigua. */
+export async function fetchPatientCriticalCommunications(patientId: string): Promise<PatientCriticalCommunication[]> {
+  const { data, error } = await supabase.from("report_communications")
+    .select(`id, urgency, recipient, channel, communicated_at, acknowledged, notes, appointment:appointments!inner(patient_id, ${examRefColumns})`)
+    .eq("appointment.patient_id", patientId).order("communicated_at", { ascending: false });
+  if (error) throw error;
+  return ((data ?? []) as unknown as { id: string; urgency: PatientCriticalCommunication["urgency"]; recipient: string; channel: string; communicated_at: string; acknowledged: boolean; notes: string; appointment: ExamRefRow }[])
+    .map((row) => ({ id: row.id, urgency: row.urgency, recipient: row.recipient, channel: row.channel, communicatedAt: row.communicated_at, acknowledged: row.acknowledged, notes: row.notes ?? "", exam: mapExamRef(row.appointment) }));
+}
+
+export type PatientKeyImage = { id: string; instanceId: string; caption: string; createdAt: string; createdBy: string; exam: PatientExamRef };
+
+/** Imágenes clave (KIN) de los informes del paciente, de la más reciente a la más antigua. */
+export async function fetchPatientKeyImages(patientId: string): Promise<PatientKeyImage[]> {
+  const { data, error } = await supabase.from("report_key_images")
+    .select(`id, instance_id, caption, created_at, creator:profiles(full_name), appointment:appointments!inner(patient_id, ${examRefColumns})`)
+    .eq("appointment.patient_id", patientId).order("created_at", { ascending: false });
+  if (error) throw error;
+  return ((data ?? []) as unknown as { id: string; instance_id: string; caption: string; created_at: string; creator: { full_name: string } | null; appointment: ExamRefRow }[])
+    .map((row) => ({ id: row.id, instanceId: row.instance_id, caption: row.caption ?? "", createdAt: row.created_at, createdBy: row.creator?.full_name ?? "", exam: mapExamRef(row.appointment) }));
+}
+
+export type PatientReportAddendum = { id: string; text: string; signedAt: string; signerName: string; signerRegistration: string; exam: PatientExamRef };
+
+/** Addenda firmadas sobre informes del paciente, de la más reciente a la más antigua. */
+export async function fetchPatientReportAddenda(patientId: string): Promise<PatientReportAddendum[]> {
+  const { data, error } = await supabase.from("report_addenda")
+    .select(`id, text, signed_at, signer_name, signer_registration, appointment:appointments!inner(patient_id, ${examRefColumns})`)
+    .eq("appointment.patient_id", patientId).order("signed_at", { ascending: false });
+  if (error) throw error;
+  return ((data ?? []) as unknown as { id: string; text: string; signed_at: string; signer_name: string; signer_registration: string; appointment: ExamRefRow }[])
+    .map((row) => ({ id: row.id, text: row.text, signedAt: row.signed_at, signerName: row.signer_name ?? "", signerRegistration: row.signer_registration ?? "", exam: mapExamRef(row.appointment) }));
+}
+
+export type PatientStructuredFindingCode = { localCode: string; canonicalName: string; snomedCode?: string; snomedDisplay?: string; icd10Code?: string; icd11Code?: string; radlexCode?: string };
+
+export type PatientStructuredFinding = {
+  id: string; reportId: string; findingText: string; normalizedText: string;
+  status: string; importance: string; sourceSection: string; sourceSentence: string;
+  bodySite: string; laterality: string; severity: string;
+  confidence: number; extractionMethod: string; codingStatus: string;
+  createdAt: string; updatedAt: string;
+  code?: PatientStructuredFindingCode; exam: PatientExamRef;
+};
+
+/** Hallazgos estructurados extraídos de informes del paciente. Excluye rechazados; el filtro por rol vive en finding-display.ts. */
+export async function fetchPatientStructuredFindings(patientId: string): Promise<PatientStructuredFinding[]> {
+  const { data, error } = await supabase.from("extracted_findings")
+    .select(`id, report_id, finding_text, normalized_text, status, importance, source_section, source_sentence, body_site, laterality, severity, confidence, extraction_method, coding_status, created_at, updated_at,
+      finding:finding_dictionary(local_code, canonical_name, snomed_code, snomed_display, icd10_code, icd11_code, radlex_code),
+      report:radiology_reports!inner(appointment:appointments!inner(patient_id, ${examRefColumns}))`)
+    .eq("report.appointment.patient_id", patientId).neq("coding_status", "rejected").order("created_at", { ascending: false });
+  if (error) throw error;
+  type FindingRow = {
+    id: string; report_id: string; finding_text: string; normalized_text: string; status: string; importance: string;
+    source_section: string; source_sentence: string; body_site: string | null; laterality: string | null; severity: string | null;
+    confidence: number; extraction_method: string; coding_status: string; created_at: string; updated_at: string;
+    finding: { local_code: string; canonical_name: string; snomed_code: string | null; snomed_display: string | null; icd10_code: string | null; icd11_code: string | null; radlex_code: string | null } | null;
+    report: { appointment: ExamRefRow };
+  };
+  return ((data ?? []) as unknown as FindingRow[]).map((row) => ({
+    id: row.id, reportId: row.report_id, findingText: row.finding_text, normalizedText: row.normalized_text,
+    status: row.status, importance: row.importance, sourceSection: row.source_section, sourceSentence: row.source_sentence ?? "",
+    bodySite: row.body_site ?? "", laterality: row.laterality ?? "", severity: row.severity ?? "",
+    confidence: row.confidence ?? 0, extractionMethod: row.extraction_method, codingStatus: row.coding_status,
+    createdAt: row.created_at, updatedAt: row.updated_at,
+    code: row.finding ? {
+      localCode: row.finding.local_code, canonicalName: row.finding.canonical_name,
+      snomedCode: row.finding.snomed_code ?? undefined, snomedDisplay: row.finding.snomed_display ?? undefined,
+      icd10Code: row.finding.icd10_code ?? undefined, icd11Code: row.finding.icd11_code ?? undefined, radlexCode: row.finding.radlex_code ?? undefined,
+    } : undefined,
+    exam: mapExamRef(row.report.appointment),
+  }));
+}
+
+export async function fetchPatients(options?: { search?: string; limit?: number }) {
+  let query = supabase.from("patients").select(columns).order("full_name");
+  const filter = patientSearchFilter(options?.search);
+  if (filter) query = query.or(filter);
+  if (options?.limit) query = query.limit(options.limit);
+  const { data, error } = await query;
   if (error) throw error;
   return (data as PatientRow[]).map(mapPatient);
 }
@@ -58,6 +178,24 @@ export async function fetchPatientAudit(patientId: string): Promise<PatientAudit
     actorName: names.get(row.actor_id as string) ?? "Sistema",
     details: (row.details as Record<string, unknown> | null) ?? null,
   }));
+}
+
+/** Edición administrativa (Fase 2D): solo columnas de la allowlist, solo admin (defensa doble junto al gating de UI; RLS filtra tenant). */
+export async function updatePatient(patientId: string, patch: PatientEditPatch): Promise<Patient> {
+  const auth = await supabase.auth.getUser();
+  const profile = await supabase.from("profiles").select("role").eq("id", auth.data.user?.id ?? "").single();
+  if (profile.data?.role !== "admin") throw new Error("Solo un administrador puede editar los datos del paciente.");
+  const { data, error } = await supabase.from("patients").update({
+    phone: patch.phone,
+    email: patch.email,
+    address: patch.address,
+    comuna: patch.comuna,
+    prevision: patch.prevision,
+    allergies: patch.allergies,
+    morbid_history: patch.morbidHistory,
+  }).eq("id", patientId).select(columns).single();
+  if (error) throw error;
+  return mapPatient(data as PatientRow);
 }
 
 export async function createPatient(patient: Omit<Patient, "id">) {
