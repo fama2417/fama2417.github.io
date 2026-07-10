@@ -16,10 +16,16 @@ type SummaryItem = {
 };
 
 type ClinicalSummary = {
-  modalityContext: string; clinicalContext: string | null;
+  reportingProfile: string; modalityContext: string; clinicalContext: string | null;
+  oncologyContext: { disease: string | null; priorStudyDate: string | null; treatmentContext: string | null } | null;
+  globalResponse: { status: string; explanation: string; confidence: number } | null;
   globalAssessment: { status: string; text: string; confidence: number };
   scores: { name: string; value: string; sourceSentence: string; confidence: number }[];
-  primarySummaryItems: SummaryItem[]; warnings: string[];
+  primarySummaryItems: SummaryItem[];
+  activeDiseaseSites: string[]; resolvedSites: string[]; stableSites: string[]; incidentalFindings: string[];
+  qualityWarnings: { type: string; message: string }[]; clinicalTags: string[];
+  lesionTracking: { label: string; site: string; currentSize: string | null; priorSize: string | null; currentSuv: string | null; priorSuv: string | null; sizeTrend: string; metabolicTrend: string; sourceSentence: string }[];
+  warnings: string[];
 };
 
 const statusLabels: Record<string, string> = { present: "Presente", absent: "Ausente", uncertain: "Incierto", history: "Antecedente", recommendation: "Recomendacion" };
@@ -29,7 +35,10 @@ const lateralityLabels: Record<string, string> = { right: "Derecha", left: "Izqu
 const severityLabels: Record<string, string> = { mild: "Leve", moderate: "Moderada", severe: "Severa", unknown: "No especificada" };
 const assessmentLabels: Record<string, string> = { progression: "Progresión", stable: "Estable", partial_response: "Respuesta parcial", complete_response: "Respuesta completa", mixed_response: "Respuesta mixta", indeterminate: "Indeterminado", not_applicable: "No aplica", unknown: "No determinado" };
 const trendLabels: Record<string, string> = { new: "Nuevo", progression: "Progresión", stable: "Estable", decreased: "En disminución", resolved: "Resuelto", unknown: "No determinado", not_applicable: "No aplica" };
-const categoryLabels: Record<string, string> = { active_disease: "Enfermedad activa", progression: "Progresion", stable_disease: "Enfermedad estable", resolved: "Lesiones resueltas", incidental: "Incidental relevante", negative_relevant: "Negativos relevantes", recommendation: "Recomendaciones", quality_warning: "Alertas" };
+const categoryLabels: Record<string, string> = { active_disease: "Enfermedad activa", progression: "Progresión", stable_disease: "Enfermedad estable", resolved: "Lesiones resueltas", incidental: "Incidental relevante", negative_relevant: "Negativos relevantes", recommendation: "Recomendaciones", quality_warning: "Alertas" };
+const profileLabels: Record<string, string> = { PET_CT_ONCOLOGY: "PET-CT oncológico", CT_ABDOMEN_PELVIS: "TC abdomen y pelvis", CT_CHEST: "TC tórax", MR_BRAIN: "RM cerebro", MR_SPINE: "RM columna", BREAST_IMAGING: "Imagen mamaria", US_GENERAL: "Ecografía general", DX_GENERAL: "Radiografía general", UNKNOWN: "No determinado" };
+const tagLabels: Record<string, string> = { oncology: "Oncología", progression: "Progresión", stable: "Estable", resolved_lesions: "Lesiones resueltas", deauville_5: "Deauville 5", incidental_findings: "Hallazgos incidentales", follow_up_relevant: "Seguimiento relevante", report_quality_warning: "Alerta de calidad", procedure_content_mismatch: "Discordancia prestación/contenido", missing_impression: "Sin impresión" };
+const lesionTrendLabels: Record<string, string> = { increased: "Aumentó", decreased: "Disminuyó", stable: "Estable", unknown: "No determinado" };
 const groupLabels = { principal: "Hallazgos principales", secondary: "Hallazgos secundarios", incidental: "Hallazgos incidentales", negative: "Hallazgos negativos", reviewed: "Rechazados o corregidos" } as const;
 type GroupKey = keyof typeof groupLabels;
 
@@ -133,11 +142,17 @@ export function AiFindingsPanel({ reportId, reportStatus, disabled }: { reportId
   const summaryGroups = Object.entries(categoryLabels).map(([key, label]) => ({ key, label, items: summaryItems.filter((item) => item.category === key) })).filter((group) => group.items.length);
   const visibleItems = showAll ? items : items.slice(0, 10);
   const technicalGroups = (Object.keys(groupLabels) as GroupKey[]).map((key) => ({ key, items: visibleItems.filter((item) => groupOf(item) === key) })).filter((group) => group.items.length);
-  const discordanceWarnings = clinicalSummary?.warnings.filter((warning) => plainText(warning).includes("discordancia")) ?? [];
-  const sourceWarnings = clinicalSummary?.warnings.filter((warning) => plainText(warning).includes("resumen generado desde hallazgos")) ?? [];
-  const bannerWarnings = [...discordanceWarnings, ...sourceWarnings];
+  const qaWarnings = clinicalSummary?.qualityWarnings.map((warning) => warning.message) ?? [];
+  const qualityTypes = new Set(clinicalSummary?.qualityWarnings.map((warning) => warning.type) ?? []);
+  const discordanceWarnings = qualityTypes.has("procedure_content_mismatch") ? [] : clinicalSummary?.warnings.filter((warning) => plainText(warning).includes("discordancia")) ?? [];
+  const sourceWarnings = qualityTypes.has("missing_impression") ? [] : clinicalSummary?.warnings.filter((warning) => plainText(warning).includes("resumen generado desde hallazgos")) ?? [];
+  const bannerWarnings = [...new Set([...qaWarnings, ...discordanceWarnings, ...sourceWarnings])];
   const otherWarnings = clinicalSummary?.warnings.filter((warning) => !bannerWarnings.includes(warning)) ?? [];
-  const lowAssessmentConfidence = Number(clinicalSummary?.globalAssessment.confidence ?? 1) < 0.6;
+  const assessment = clinicalSummary?.globalResponse
+    ? { status: clinicalSummary.globalResponse.status, text: clinicalSummary.globalResponse.explanation, confidence: clinicalSummary.globalResponse.confidence }
+    : clinicalSummary?.globalAssessment;
+  const lowAssessmentConfidence = Number(assessment?.confidence ?? 1) < 0.6;
+  const trackedLesions = clinicalSummary?.lesionTracking.filter((lesion) => /^LT[1-3]$/i.test(lesion.label) && lesion.site && lesion.sourceSentence && (lesion.currentSize || lesion.priorSize || lesion.currentSuv || lesion.priorSuv)) ?? [];
 
   return <details className="report-clinical-panel collapsible ai-findings-panel" open>
     <summary><span className="collapsible-icon">IA</span>Resumen IA<span className="collapsible-count">{summaryItems.length || items.length}</span></summary>
@@ -157,10 +172,12 @@ export function AiFindingsPanel({ reportId, reportStatus, disabled }: { reportId
       {clinicalSummary ? <>
         {bannerWarnings.map((warning) => <p className="notice" role="alert" key={warning}>{warning}</p>)}
         <header className="ai-summary-header">
+          <div><span>Perfil detectado</span><strong>{profileLabels[clinicalSummary.reportingProfile] ?? clinicalSummary.reportingProfile}</strong></div>
           <div><span>Contexto</span><strong>{formatClinicalContext(clinicalSummary.clinicalContext || clinicalSummary.modalityContext)}</strong></div>
-          <div><span>Evaluación global</span><strong>{lowAssessmentConfidence ? `Evaluación orientativa: ${clinicalSummary.globalAssessment.text}` : clinicalSummary.globalAssessment.text}</strong><small>{assessmentLabels[clinicalSummary.globalAssessment.status] ?? clinicalSummary.globalAssessment.status} - {lowAssessmentConfidence ? "Baja confianza - " : ""}{Math.round(clinicalSummary.globalAssessment.confidence * 100)}%</small></div>
+          {assessment && <div><span>Evaluación global</span><strong>{lowAssessmentConfidence ? `Evaluación orientativa: ${assessment.text}` : assessment.text}</strong><small>{assessmentLabels[assessment.status] ?? assessment.status} - {lowAssessmentConfidence ? "Baja confianza - " : ""}{Math.round(assessment.confidence * 100)}%</small></div>}
           {clinicalSummary.scores.map((score) => <div key={`${score.name}-${score.value}`}><span>Score</span><strong>{score.name} {score.value}</strong></div>)}
           <div><span>Detalle</span><strong>{items.length} hallazgos</strong><small>{pendingReview} pendientes - {pendingDictionary} en diccionario</small></div>
+          {clinicalSummary.clinicalTags.length > 0 && <div><span>Etiquetas clínicas</span><div className="ai-finding-badges">{clinicalSummary.clinicalTags.map((tag) => <span key={tag}>{tagLabels[tag] ?? tag}</span>)}</div></div>}
         </header>
         {summaryGroups.map((group) => <section className="ai-summary-group" key={group.key}>
           <h4>{group.label}</h4>
@@ -170,6 +187,14 @@ export function AiFindingsPanel({ reportId, reportStatus, disabled }: { reportId
             <details className="ai-finding-source"><summary>Ver fuente</summary>{item.sourceSentences.map((source) => <span key={source}>{source}</span>)}</details>
           </article>)}
         </section>)}
+        {trackedLesions.length > 0 && <details className="ai-finding-group">
+          <summary>Seguimiento de lesiones ({trackedLesions.length})</summary>
+          {trackedLesions.map((lesion) => <article className="ai-finding-row" key={lesion.label}>
+            <div><strong>{lesion.label} - {lesion.site}</strong><span>Tamaño: {lesion.currentSize || "No determinado"} (previo: {lesion.priorSize || "No determinado"})</span><span>SUV: {lesion.currentSuv || "No determinado"} (previo: {lesion.priorSuv || "No determinado"})</span></div>
+            <div className="ai-finding-badges"><span>Tamaño {lesionTrendLabels[lesion.sizeTrend] ?? lesion.sizeTrend}</span><span>Metabolismo {lesionTrendLabels[lesion.metabolicTrend] ?? lesion.metabolicTrend}</span></div>
+            <details className="ai-finding-source"><summary>Ver fuente</summary><span>{lesion.sourceSentence}</span></details>
+          </article>)}
+        </details>}
         {otherWarnings.length > 0 && <details className="ai-summary-warnings"><summary>{otherWarnings.length} alertas de extracción</summary>{otherWarnings.map((warning) => <p key={warning}>{warning}</p>)}</details>}
       </> : <p className="empty-inline">{items.length ? "Este informe tiene detalle tecnico previo. Recalcula para generar el resumen clinico." : "Sin extraccion IA todavia."}</p>}
     </div> : <div className="ai-technical-detail">

@@ -1,4 +1,5 @@
 import type { SanitizedAiReportInput } from "./ai-sanitizer.ts";
+import type { ReportingProfile } from "./ai-extraction-schema.ts";
 
 export const SYSTEM_PROMPT_FOR_RADIOLOGY_FINDING_EXTRACTION = `Eres un extractor de hallazgos radiologicos en espanol para un sistema RIS/PACS.
 
@@ -37,16 +38,23 @@ Reglas estrictas:
 32. No declares progression sin comparacion clara: por ejemplo aumento, disminucion, lesion nueva, sin cambios o referencia explicita a un estudio previo.
 33. En clinicalContext identifica el nombre recibido como "Prestacion registrada: [nombre]". No uses la frase "segun nombre de prestacion".
 34. Si nombre/modalidad/region de la prestacion discrepa del contenido, agrega "Contenido sugerido por informe: [region detectada]" a clinicalContext y un warning que comience con "Discordancia prestacion/contenido:".
-35. No incluyas explicacion narrativa fuera del JSON.`;
+35. Usa reportingProfile para adaptar el resumen al estudio. Si es PET_CT_ONCOLOGY completa oncologyContext, globalResponse, sitios activos/resueltos/estables e incidentales.
+36. En PET-CT: aumento de tamano, numero o captacion = progression; desaparicion o ya no visible = resolved; sin cambios = stable. Agrupa sitios relacionados y extrae Deauville o RECIST si aparecen.
+37. Completa qualityWarnings con type y message solo cuando corresponda: procedure_content_mismatch, missing_impression, relevant_finding_not_in_impression, impression_findings_discordance, missing_expected_score, possible_wrong_template, possible_wrong_study, insufficient_text o low_confidence_summary.
+38. Genera clinicalTags solo desde evidencia del informe. No inventes tags ni codigos terminologicos.
+39. En lesionTracking incluye solo lesiones explicitamente rotuladas LT1, LT2 o LT3. Conserva medidas y SUV como texto, compara actual versus previo y cita sourceSentence.
+40. No incluyas estructuras normales como enfermedad activa ni como candidatos de diccionario.
+41. No incluyas explicacion narrativa fuera del JSON.`;
 
 const line = (label: string, value?: string | null) => value?.trim() ? `${label}: ${value.trim()}` : "";
 
-export function buildRadiologyFindingExtractionPrompt(input: SanitizedAiReportInput) {
+export function buildRadiologyFindingExtractionPrompt(input: SanitizedAiReportInput, reportingProfile: ReportingProfile = "UNKNOWN") {
   return [
     line("Codigo local de prestacion", input.procedureCode),
     line("Nombre de prestacion", input.procedureName),
     line("Modalidad", input.modality),
     line("Reporting group", input.reportingGroupCode),
+    line("Reporting profile asignado", reportingProfile),
     line("Indicacion clinica (solo contexto)", input.clinicalIndication),
     line("Tecnica", input.technique),
     line("Hallazgos", input.findings),

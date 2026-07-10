@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { aiConfig, canRunAiExtraction, estimateAiCost, type AiSupabase } from "./ai-budget.ts";
-import { AiFindingExtractionResultSchema, guardClinicalSummaryWithoutImpression } from "./ai-extraction-schema.ts";
+import { AiFindingExtractionResultSchema, detectReportingProfile, finalizeClinicalSummary } from "./ai-extraction-schema.ts";
 import { buildRadiologyFindingExtractionPrompt, SYSTEM_PROMPT_FOR_RADIOLOGY_FINDING_EXTRACTION } from "./ai-prompts.ts";
 import { sanitizeReportForAi } from "./ai-sanitizer.ts";
 import { getReportAiSummary, getReportForAiExtraction, insertAiUsageLog, listExtractedFindings, persistAiExtractionResult } from "./ai-repository.ts";
@@ -60,7 +60,8 @@ export async function extractRadiologyFindingsWithAi(reportId: string, options: 
     });
     if (!sanitized.findings?.trim() && !sanitized.impression?.trim()) return { ok: false as const, error: "Informe sin hallazgos ni impresion para extraer." };
 
-    const prompt = buildRadiologyFindingExtractionPrompt(sanitized);
+    const profile = detectReportingProfile(sanitized);
+    const prompt = buildRadiologyFindingExtractionPrompt(sanitized, profile.profile);
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     const response = await client.responses.parse({
       model: config.model,
@@ -73,7 +74,7 @@ export async function extractRadiologyFindingsWithAi(reportId: string, options: 
       store: false,
     } as any, { timeout: config.timeoutMs });
     const parsedResponse = parseAiExtractionResponse(response);
-    const parsed = { ...parsedResponse, clinicalSummary: guardClinicalSummaryWithoutImpression(parsedResponse.clinicalSummary, !!sanitized.impression?.trim()) };
+    const parsed = { ...parsedResponse, clinicalSummary: finalizeClinicalSummary(parsedResponse.clinicalSummary, { hasImpression: !!sanitized.impression?.trim(), profile: profile.profile, mismatch: profile.mismatch }) };
     const saved = await persistAiExtractionResult(supabase, reportId, parsed, context, options.force === true);
     const usage = usageOf(response);
     const estimatedCost = await estimateAiCost({ model: config.model, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, supabase });
