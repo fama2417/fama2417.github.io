@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { emptyPatientRecord, identifierTypeLabels, type Patient } from "@/features/patients/mock-data";
+import { emptyPatientRecord, identifierTypeLabels, type Patient } from "@/features/patients/types";
 import { createPatient, fetchPatients } from "@/features/patients/repository";
 import { activeOptions, fetchCatalog, type CatalogItem } from "@/features/catalog/repository";
 import { compressOrderFile } from "@/lib/compress-image";

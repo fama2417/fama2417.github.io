@@ -1,72 +1,46 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase-client";
-import { identifierTypeLabels, type Patient } from "./mock-data";
-import { createPatient, fetchPatients, fetchPatientAudit, fetchPatientExams, type PatientAuditEntry, type PatientExam } from "./repository";
-import { appointmentStatusLabels, type AppointmentStatus } from "@/features/appointments/status";
+import { identifierTypeLabels, sexLabels, type Patient } from "./types";
+import { createPatient, fetchPatients } from "./repository";
+import { hasMinimumPatientSearch } from "./search";
 
-const sexLabels = { female: "Femenino", male: "Masculino", other: "Otro", unknown: "No informado" };
+const PAGE_SIZE = 50;
+const STAFF_ROLES = ["admin", "operator", "radiologist"];
 const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9áéíóúñ]/g, "");
 
-const actionLabels: Record<string, string> = { INSERT: "Creación", UPDATE: "Modificación", DELETE: "Eliminación" };
-const fieldLabels: Record<string, string> = {
-  identifier: "Identificador", full_name: "Nombre", birth_date: "Fecha de nacimiento", sex: "Sexo", phone: "Teléfono",
-  identifier_type: "Tipo de identificador",
-  email: "Correo", address: "Dirección", comuna: "Comuna", prevision: "Previsión", allergies: "Alergias",
-  morbid_history: "Antecedentes mórbidos", privacy_consent_at: "Consentimiento",
-};
-
-function describeChange(entry: PatientAuditEntry) {
-  if (entry.action === "INSERT") return "Creación del registro del paciente.";
-  if (entry.action === "DELETE") return "Eliminación del registro.";
-  const changes = Object.entries(entry.details ?? {}).filter(([key]) => fieldLabels[key]);
-  if (!changes.length) return "Actualización sin cambios en datos personales.";
-  return changes.map(([key, value]) => `${fieldLabels[key]}: ${value === null || value === "" ? "—" : String(value)}`).join(" · ");
-}
-
 export function PatientsManager() {
+  const router = useRouter();
   const [patients, setPatients] = useState<Patient[]>([]);
   const [query, setQuery] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [role, setRole] = useState<string | null>(null);
-  const [selected, setSelected] = useState<Patient | null>(null);
-  const [audit, setAudit] = useState<PatientAuditEntry[]>([]);
-  const [auditError, setAuditError] = useState("");
-  const [auditLoading, setAuditLoading] = useState(false);
-  const [exams, setExams] = useState<PatientExam[]>([]);
-  const visiblePatients = useMemo(() => {
-    const needle = normalize(query);
-    return patients.filter((patient) => normalize(`${patient.identifier} ${patient.name}`).includes(needle));
-  }, [patients, query]);
 
   useEffect(() => {
     supabase.auth.getUser()
       .then(({ data }) => supabase.from("profiles").select("role").eq("id", data.user?.id ?? "").single())
-      .then(({ data }) => {
-        const nextRole = data?.role ?? "";
-        setRole(nextRole);
-        if (nextRole !== "admin") return [];
-        return fetchPatients();
-      })
-      .then(setPatients)
-      .catch(() => setError("No fue posible cargar los pacientes."))
-      .finally(() => setLoading(false));
+      .then(({ data }) => setRole(data?.role ?? ""))
+      .catch(() => { setError("No fue posible cargar los pacientes."); setLoading(false); });
   }, []);
 
-  function openPatient(patient: Patient) {
-    setSelected(patient);
-    setAudit([]); setExams([]);
-    setAuditError("");
-    setAuditLoading(true);
-    fetchPatientAudit(patient.id)
-      .then(setAudit)
-      .catch(() => setAuditError("No fue posible cargar la trazabilidad."))
-      .finally(() => setAuditLoading(false));
-    fetchPatientExams(patient.id).then(setExams).catch(() => undefined);
-  }
+  useEffect(() => {
+    if (role === null || !STAFF_ROLES.includes(role)) { if (role !== null) setLoading(false); return; }
+    // Operator/radiologist: sin lista inicial del padrón; exigen un término mínimo de búsqueda.
+    if (role !== "admin" && !hasMinimumPatientSearch(query)) { setPatients([]); setLoading(false); return; }
+    // Búsqueda server-side con debounce; límite fijo con aviso en vez de paginación por páginas.
+    const handle = setTimeout(() => {
+      setLoading(true);
+      fetchPatients({ search: query, limit: PAGE_SIZE })
+        .then((next) => { setPatients(next); setError(""); })
+        .catch(() => setError("No fue posible cargar los pacientes."))
+        .finally(() => setLoading(false));
+    }, query ? 300 : 0);
+    return () => clearTimeout(handle);
+  }, [role, query]);
 
   async function addPatient(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -101,19 +75,23 @@ export function PatientsManager() {
     }
   }
 
-  if (loading || role === null) return <p className="empty-state">Cargando pacientes…</p>;
-  if (role !== "admin") return <p className="notice" role="alert">Acceso reservado a administradores.</p>;
+  if (role === null) return <p className="empty-state">Cargando pacientes…</p>;
+  if (!STAFF_ROLES.includes(role)) return <p className="notice" role="alert">Acceso reservado al personal clínico autorizado.</p>;
+  const isAdmin = role === "admin";
+  const staffNeedsQuery = !isAdmin && !hasMinimumPatientSearch(query);
 
   return (
     <>
       <div className="page-header">
-        <div><p className="eyebrow">Registro operativo</p><h2>Pacientes</h2><p>Información protegida en Supabase mediante acceso autenticado y RLS.</p></div>
-        <button className="button primary" type="button" onClick={() => setShowForm((visible) => !visible)}>{showForm ? "Cerrar" : "Nuevo paciente"}</button>
+        {isAdmin
+          ? <div><p className="eyebrow">Registro operativo</p><h2>Pacientes</h2><p>Información protegida en Supabase mediante acceso autenticado y RLS.</p></div>
+          : <div><p className="eyebrow">Búsqueda clínica</p><h2>Pacientes</h2><p>Busca por nombre o identificador para abrir la ficha clínica del paciente.</p></div>}
+        {isAdmin && <button className="button primary" type="button" onClick={() => setShowForm((visible) => !visible)}>{showForm ? "Cerrar" : "Nuevo paciente"}</button>}
       </div>
 
       {error && !showForm && <p className="notice" role="alert">{error}</p>}
 
-      {showForm && (
+      {isAdmin && showForm && (
         <form className="card clinical-form" onSubmit={addPatient}>
           <label>Tipo de identificador<select name="identifierType" defaultValue="run">{Object.entries(identifierTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           <label>Número de identificador<input name="identifier" placeholder="RUN, pasaporte u otro" required /></label>
@@ -136,44 +114,13 @@ export function PatientsManager() {
       <section className="toolbar" aria-label="Búsqueda de pacientes"><label className="wide-field">Buscar paciente<input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nombre o identificador" type="search" /></label></section>
       <section className="table-card">
         <table><thead><tr><th>Identificador</th><th>Nombre</th><th>Fecha nacimiento</th><th>Sexo</th><th>Teléfono</th><th>Consentimiento</th></tr></thead><tbody>
-          {visiblePatients.map((patient) => <tr className="row-link" key={patient.id} tabIndex={0} onClick={() => openPatient(patient)} onKeyDown={(event) => event.key === "Enter" && openPatient(patient)}><td>{identifierTypeLabels[patient.identifierType]} · {patient.identifier}</td><td>{patient.name}</td><td>{patient.birthDate}</td><td>{sexLabels[patient.sex]}</td><td>{patient.phone || "—"}</td><td>{patient.consentAt ? <span className="status status-completed">Otorgado</span> : <span className="status status-cancelled">Pendiente</span>}</td></tr>)}
+          {!staffNeedsQuery && patients.map((patient) => <tr className="row-link" key={patient.id} tabIndex={0} onClick={() => router.push(`/pacientes/${patient.id}`)} onKeyDown={(event) => event.key === "Enter" && router.push(`/pacientes/${patient.id}`)}><td>{identifierTypeLabels[patient.identifierType]} · {patient.identifier}</td><td>{patient.name}</td><td>{patient.birthDate}</td><td>{sexLabels[patient.sex]}</td><td>{patient.phone || "—"}</td><td>{patient.consentAt ? <span className="status status-completed">Otorgado</span> : <span className="status status-cancelled">Pendiente</span>}</td></tr>)}
         </tbody></table>
-        {!loading && !visiblePatients.length && <p className="empty-state">No se encontraron pacientes.</p>}
-        {loading && <p className="empty-state">Cargando pacientes…</p>}
+        {staffNeedsQuery && <p className="empty-state">Ingresa al menos 3 caracteres para buscar un paciente.</p>}
+        {!staffNeedsQuery && !loading && !patients.length && <p className="empty-state">No se encontraron pacientes.</p>}
+        {!staffNeedsQuery && !loading && patients.length >= PAGE_SIZE && <p className="empty-state">Mostrando los primeros {PAGE_SIZE} resultados. Usa la búsqueda para acotar.</p>}
+        {!staffNeedsQuery && loading && <p className="empty-state">Cargando pacientes…</p>}
       </section>
-
-      {selected && <div className="appointment-info-backdrop" role="dialog" aria-modal="true" aria-label={`Ficha de ${selected.name}`} onClick={(event) => { if (event.target === event.currentTarget) setSelected(null); }}>
-        <div className="appointment-info patient-detail">
-          <div className="card-heading"><div><p className="eyebrow">Ficha del paciente</p><h3>{selected.name}</h3></div><button className="text-button" type="button" onClick={() => setSelected(null)}>Cerrar ✕</button></div>
-          <dl>
-            <div><dt>{identifierTypeLabels[selected.identifierType]}</dt><dd>{selected.identifier}</dd></div>
-            <div><dt>Fecha de nacimiento</dt><dd>{selected.birthDate}</dd></div>
-            <div><dt>Sexo registral</dt><dd>{sexLabels[selected.sex]}</dd></div>
-            <div><dt>Previsión</dt><dd>{selected.prevision || "—"}</dd></div>
-            <div><dt>Teléfono</dt><dd>{selected.phone || "—"}</dd></div>
-            <div><dt>Correo</dt><dd>{selected.email || "—"}</dd></div>
-            <div><dt>Dirección</dt><dd>{[selected.address, selected.comuna].filter(Boolean).join(", ") || "—"}</dd></div>
-            <div><dt>Consentimiento</dt><dd>{selected.consentAt ? new Date(selected.consentAt).toLocaleString("es-CL") : "Pendiente"}</dd></div>
-            <div><dt>Alergias</dt><dd>{selected.allergies || "Sin alergias registradas"}</dd></div>
-            <div><dt>Antecedentes mórbidos</dt><dd>{selected.morbidHistory || "Sin antecedentes registrados"}</dd></div>
-          </dl>
-          <section className="audit-list" aria-label="Exámenes del paciente">
-            <h4>Exámenes ({exams.length})</h4>
-            {exams.map((exam) => <a className="workflow-entry exam-entry" key={exam.id} href={`/informe/${exam.id}`} target="_blank" rel="noreferrer">
-              <strong>{exam.date} · {exam.modality} · {exam.reason}</strong>
-              <span>{appointmentStatusLabels[exam.status as AppointmentStatus] ?? exam.status}{exam.hasImages && " · con imágenes"}{exam.reportStatus && ` · informe ${exam.reportStatus === "final" ? "definitivo" : "borrador"}`}</span>
-            </a>)}
-            {!exams.length && <p className="empty-inline">Sin exámenes registrados.</p>}
-          </section>
-          <section className="audit-list" aria-label="Trazabilidad del paciente">
-            <h4>Trazabilidad</h4>
-            {audit.map((entry) => <div className="workflow-entry" key={entry.id}><strong>{actionLabels[entry.action] ?? entry.action}</strong><span>{new Date(entry.changedAt).toLocaleString("es-CL")} · {entry.actorName}</span><span>{describeChange(entry)}</span></div>)}
-            {auditLoading && <p className="empty-inline">Cargando trazabilidad…</p>}
-            {!auditLoading && !audit.length && !auditError && <p className="empty-inline">Sin eventos registrados.</p>}
-            {auditError && <p className="form-error" role="alert">{auditError}</p>}
-          </section>
-        </div>
-      </div>}
     </>
   );
 }
