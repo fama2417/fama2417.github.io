@@ -86,6 +86,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [aiOperationActive, setAiOperationActive] = useState(false);
   const [signatureImage, setSignatureImage] = useState<string | null>(null);
   const [keyImages, setKeyImages] = useState<ReportKeyImage[]>([]);
   const [captureUrls, setCaptureUrls] = useState<Record<string, string>>({});
@@ -189,7 +190,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
   async function persist(status: RadiologyReport["status"]) {
     if (status === "final") {
       const validation = finalReportError();
-      if (validation) return setError(validation);
+      if (validation) { setError(validation); return false; }
     }
     setSaving(true); setError(""); setNotice("");
     try {
@@ -197,9 +198,15 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
       setReport(saved);
       setNotice(status === "final" ? "Reporte firmado y bloqueado como definitivo." : "Borrador guardado.");
       if (status === "final" && appointment?.serviceCategory === "imaging") await archivePdfInPacs();
+      return true;
     } catch {
       setError(status === "final" ? "No fue posible firmar. Verifica tu perfil de administración/radiología y el registro profesional." : "No fue posible guardar el borrador.");
+      return false;
     } finally { setSaving(false); }
+  }
+
+  async function ensureDraftSavedForAi() {
+    if (saving || !await persist("draft")) throw new Error("Draft save failed");
   }
 
   async function recordCommunication(event: FormEvent<HTMLFormElement>) {
@@ -440,7 +447,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
             </label>}
           </details>
 
-          <AiFindingsPanel reportId={report.id} reportStatus={report.status} disabled={!["admin", "radiologist"].includes(role)} />
+          <AiFindingsPanel reportId={report.id} reportStatus={report.status} disabled={!["admin", "radiologist"].includes(role) || saving} ensureDraftSaved={ensureDraftSavedForAi} onOperationActiveChange={setAiOperationActive} />
 
           <details className="report-clinical-panel collapsible">
             <summary><span className="collapsible-icon">📌</span>Seguimientos accionables{followUps.length > 0 && <span className="collapsible-count">{followUps.length}</span>}</summary>
@@ -506,8 +513,8 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
             <button className="button secondary critical-status-action" type="button" onClick={showCriticalCommunication}>{criticalState.status === "pending" ? "Registrar comunicación" : "Ver registro"}</button>
           </div>}
           <footer className="report-actions">
-            {report.status === "draft" && signingError && <span className="report-signing-error" role="status">{signingError}</span>}
-            {report.status === "draft" && <><button className="button secondary" type="button" disabled={saving} onClick={() => persist("draft")}>Guardar borrador</button><button className="button primary" type="button" disabled={saving} onClick={() => persist("final")}>Firmar definitivo</button></>}
+            {report.status === "draft" && (aiOperationActive || signingError) && <span className="report-signing-error" role="status">{aiOperationActive ? "Espera a que finalice el análisis antes de firmar." : signingError}</span>}
+            {report.status === "draft" && <><button className="button secondary" type="button" disabled={saving} onClick={() => persist("draft")}>Guardar borrador</button><button className="button primary" type="button" disabled={saving || aiOperationActive} title={aiOperationActive ? "Espera a que finalice el análisis antes de firmar." : undefined} onClick={() => persist("final")}>Firmar definitivo</button></>}
             {report.status === "final" && <span>Definitivo · las correcciones se agregan como adenda.</span>}
             {report.status === "final" && role === "admin" && <><button className="button secondary" type="button" disabled={saving} onClick={() => setReportAction({ kind: "reopen", reason: "" })}>Reabrir informe</button><button className="text-button danger" type="button" disabled={saving} onClick={() => setReportAction({ kind: "delete", reason: "" })}>Eliminar informe</button></>}
             {notice && <span className="form-notice" role="status">{notice}</span>}
