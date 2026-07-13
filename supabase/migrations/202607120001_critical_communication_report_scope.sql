@@ -80,49 +80,30 @@ with check (
   )
 );
 
-create or replace function private.protect_final_report() returns trigger
+create or replace function private.validate_critical_report_communication() returns trigger
 language plpgsql security definer set search_path = ''
 as $$
 begin
-  if tg_op = 'UPDATE' and old.status = 'final' then
-    if new.status = 'draft' and (select private.current_role()) = 'admin'
-       and exists (select 1 from public.report_reopenings r
-                   where r.appointment_id = new.appointment_id and r.action = 'reopen'
-                     and r.created_at > now() - interval '1 minute') then
-      new.signed_by := null; new.signed_at := null; new.signer_name := ''; new.signer_registration := '';
-      return new;
-    end if;
-    raise exception 'El informe definitivo es inmutable; agregue una adenda o reábralo como administrador';
-  end if;
-
-  if new.status = 'final' then
-    if not coalesce((select private.current_role()) in ('admin', 'radiologist'), false) then
-      raise exception 'Solo administración o radiología pueden firmar el informe';
-    end if;
-    select p.full_name, p.professional_registration into new.signer_name, new.signer_registration
-      from public.profiles p where p.id = (select auth.uid());
-    if length(trim(new.signer_registration)) = 0 then
-      raise exception 'Configure el registro profesional antes de firmar';
-    end if;
-    if length(trim(new.findings)) = 0 or length(trim(new.impression)) = 0 then
-      raise exception 'Hallazgos e impresión son obligatorios';
-    end if;
-    if not new.identity_confirmed or not new.clinical_question_answered then
-      raise exception 'Faltan las confirmaciones clínicas';
-    end if;
-    if new.critical_finding and (length(trim(new.critical_finding_type)) = 0 or not exists (
-        select 1 from public.report_communications c
-        where c.report_id = new.id and c.appointment_id = new.appointment_id and c.tenant_id = new.tenant_id
-          and c.urgency = 'critical' and c.acknowledged)) then
-      raise exception 'El hallazgo crítico requiere comunicación confirmada';
-    end if;
-    new.signed_by := (select auth.uid()); new.signed_at := now();
+  if new.status = 'final' and new.critical_finding and not exists (
+    select 1 from public.report_communications c
+    where c.report_id = new.id
+      and c.appointment_id = new.appointment_id
+      and c.tenant_id = new.tenant_id
+      and c.urgency = 'critical'
+      and c.acknowledged
+  ) then
+    raise exception 'El hallazgo crítico requiere comunicación confirmada para este informe';
   end if;
   return new;
 end;
 $$;
 
+drop trigger if exists validate_critical_report_communication on public.radiology_reports;
+create trigger validate_critical_report_communication
+before insert or update on public.radiology_reports
+for each row execute function private.validate_critical_report_communication();
+
 revoke all on function private.validate_report_communication() from public, anon, authenticated;
-revoke all on function private.protect_final_report() from public, anon, authenticated;
+revoke all on function private.validate_critical_report_communication() from public, anon, authenticated;
 
 notify pgrst, 'reload schema';

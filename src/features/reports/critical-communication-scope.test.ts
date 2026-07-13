@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const migrationUrl = new URL("../../../supabase/migrations/202607100001_critical_communication_report_scope.sql", import.meta.url);
+const migrationUrl = new URL("../../../supabase/migrations/202607120001_critical_communication_report_scope.sql", import.meta.url);
 
 test("la migración conserva legacy y vincula solo comunicaciones inequívocas", async () => {
   const sql = await readFile(migrationUrl, "utf8");
@@ -16,11 +16,12 @@ test("la migración conserva legacy y vincula solo comunicaciones inequívocas",
 
 test("la base exige informe y cita compatibles y firma por el informe exacto", async () => {
   const sql = await readFile(migrationUrl, "utf8");
-  const signatureSql = sql.slice(sql.indexOf("create or replace function private.protect_final_report"));
+  const signatureSql = sql.slice(sql.indexOf("create or replace function private.validate_critical_report_communication"));
   assert.match(sql, /if new\.report_id is null[\s\S]*?tg_op = 'INSERT'[\s\S]*?raise exception/);
   assert.match(sql, /r\.id = new\.report_id[\s\S]*?r\.appointment_id = new\.appointment_id[\s\S]*?r\.tenant_id = new\.tenant_id/);
-  assert.match(signatureSql, /c\.report_id = new\.id[\s\S]*?c\.urgency = 'critical' and c\.acknowledged/);
+  assert.match(signatureSql, /c\.report_id = new\.id[\s\S]*?c\.urgency = 'critical'\s+and c\.acknowledged/);
   assert.doesNotMatch(signatureSql, /c\.report_id is null/);
+  assert.doesNotMatch(sql, /create or replace function private\.protect_final_report/);
 });
 
 test("el repositorio lee y crea comunicaciones con report_id", async () => {
