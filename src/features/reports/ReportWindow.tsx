@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, FormEvent, useEffect, useRef, useState } from "react";
+import { Fragment, FormEvent, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { CODE_SYSTEMS, codeHref, codingError } from "@/features/clinical/coding";
 import { CodePicker } from "@/features/clinical/CodePicker";
 import { ClinicalWorkspace } from "@/features/clinical-workspace/ClinicalWorkspace";
@@ -348,6 +348,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
   const fullScreen = appointment.studyInstanceUid && viewerBase === "/ohif"
     ? `/api/pacs/handoff?next=${encodeURIComponent(`/ohif/viewer?StudyInstanceUIDs=${appointment.studyInstanceUid}`)}` : viewer;
   const detail: [string, string][] = [["Anamnesis", appointment.anamnesis || "—"], ["Hipótesis diagnóstica", appointment.diagnosticHypothesis || "—"], ...appointmentDetail(appointment).filter(([, value]) => value)];
+  const institutionLabel = tenant?.name || appointment.branch || appointment.service;
   const criticalState = criticalFindingState(report.criticalFinding, communications);
   const acknowledgedCommunication = criticalState.communication;
   const signingError = report.status === "draft" ? finalReportError() : "";
@@ -366,6 +367,14 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
           : panel.querySelector<HTMLElement>("select");
       target?.focus();
     });
+  }
+
+  function handleEditorTabKey(event: KeyboardEvent<HTMLElement>) {
+    if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+    event.preventDefault();
+    const nextTab = editorTab === "report" ? "coding" : "report";
+    setEditorTab(nextTab);
+    requestAnimationFrame(() => document.getElementById(`${nextTab}-tab`)?.focus());
   }
 
   const criticalFindingControl = <Fragment>
@@ -388,9 +397,17 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
 
   return <div className="report-workstation">
     <header className="report-workstation-header">
-      <div><p className="eyebrow">{profile.title}</p><h2>{appointment.patientName}</h2><p className="report-meta">
-        <span>{appointment.date} {appointment.startTime}</span><span>{examLabel}</span><span>{appointment.locationName}</span><span>{appointmentStatusLabels[appointment.status]}</span>
-      </p></div>
+      <div className="report-header-context">
+        <div className="report-patient-line"><div><p className="eyebrow">{profile.title}</p><h2>{appointment.patientName}</h2></div>{appointment.patientIdentifier && <span className="report-patient-id">{appointment.patientIdentifier}</span>}</div>
+        <strong className="report-study-name">{appointment.reason}</strong>
+        <dl className="report-meta">
+          <div><dt>Fecha</dt><dd>{appointment.date} · {appointment.startTime}</dd></div>
+          {appointment.serviceCategory === "imaging" && <div><dt>Modalidad</dt><dd>{appointment.modality}</dd></div>}
+          {institutionLabel && <div><dt>Institución</dt><dd>{institutionLabel}</dd></div>}
+          {appointment.locationName && <div><dt>Ubicación</dt><dd>{appointment.locationName}</dd></div>}
+          <div><dt>Estado cita</dt><dd>{appointmentStatusLabels[appointment.status]}</dd></div>
+        </dl>
+      </div>
       <div className="report-header-actions">
         <button className="text-button" type="button" onClick={() => setShowDetail(true)}>Datos de la cita</button>
         <span className={`report-status ${report.status}`}>{report.status === "final" ? "Definitivo" : "Borrador"}</span>
@@ -407,11 +424,11 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
     </div>}
 
     <ClinicalWorkspace profile={workspaceProfile} editor={<section className="report-editor" aria-label="Editor de informe" onPaste={handlePaste}>
-        <nav className="ai-view-switch report-editor-tabs" aria-label="Secciones del informe">
-          <button id="report-tab" type="button" aria-controls="report-panel" aria-pressed={editorTab === "report"} onClick={() => setEditorTab("report")}>Informe</button>
-          <button id="coding-tab" type="button" aria-controls="coding-panel" aria-pressed={editorTab === "coding"} onClick={() => setEditorTab("coding")}>Codificación</button>
+        <nav className="ai-view-switch report-editor-tabs" role="tablist" aria-label="Secciones del informe" onKeyDown={handleEditorTabKey}>
+          <button id="report-tab" type="button" role="tab" aria-controls="report-panel" aria-selected={editorTab === "report"} tabIndex={editorTab === "report" ? 0 : -1} onClick={() => setEditorTab("report")}>Informe</button>
+          <button id="coding-tab" type="button" role="tab" aria-controls="coding-panel" aria-selected={editorTab === "coding"} tabIndex={editorTab === "coding" ? 0 : -1} onClick={() => setEditorTab("coding")}>Codificación</button>
         </nav>
-        <div id="report-panel" className="report-fields report-tab-panel" role="region" aria-labelledby="report-tab" hidden={editorTab !== "report"}>
+        <div id="report-panel" className="report-fields report-tab-panel" role="tabpanel" aria-labelledby="report-tab" hidden={editorTab !== "report"}>
           <div className="card-heading"><h3>{profile.editor}</h3>{report.status !== "final" && templates.some((template) => template.active && template.category === appointment.serviceCategory) &&
             <select defaultValue="" onChange={(event) => { applyTemplate(event.target.value); event.target.value = ""; }} aria-label="Aplicar plantilla">
               <option value="" disabled>Aplicar plantilla…</option>
@@ -420,7 +437,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
             </select>}
           </div>
           {orderedSections.map((section) => <Fragment key={section.name}>
-            <label>{section.label}<textarea name={section.name} value={report[section.name]} placeholder={section.hint} onChange={(event) => setSection(section.name, event.target.value)} disabled={report.status === "final"} /></label>
+            <label className={`report-section report-section-${section.name}`}>{section.label}<textarea name={section.name} value={report[section.name]} placeholder={section.hint} onChange={(event) => setSection(section.name, event.target.value)} disabled={report.status === "final"} /></label>
             {section.name === "impression" && criticalFindingControl}
           </Fragment>)}
           <div className="report-confirmations">
@@ -428,8 +445,8 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
             <label className="consent-field"><input type="checkbox" checked={report.clinicalQuestionAnswered} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, clinicalQuestionAnswered: event.target.checked }))} />Confirmo que la impresión responde la pregunta clínica.</label>
           </div>
 
-          <details className="report-clinical-panel collapsible" open>
-            <summary><span className="collapsible-icon">🩻</span>Imágenes clave (KIN){baseKeyImages.length > 0 && <span className="collapsible-count">{baseKeyImages.length}</span>}</summary>
+          <details className="report-clinical-panel collapsible kin-panel" open>
+            <summary><span className="collapsible-icon">🩻</span>Imágenes clave (KIN){fullScreen && <span className="kin-sync-status"><span aria-hidden="true">●</span>Sincronizado con OHIF</span>}{baseKeyImages.length > 0 && <span className="collapsible-count">{baseKeyImages.length}</span>}</summary>
             {baseKeyImages.length > 0 && <div className="key-images-grid">
               {baseKeyImages.map((item) => <figure key={item.id} className="key-image">
                 {keyImageSrc(item) && <img src={keyImageSrc(item)} alt="Imagen clave" loading="lazy" />}
@@ -449,7 +466,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
 
           <AiFindingsPanel reportId={report.id} reportStatus={report.status} disabled={!["admin", "radiologist"].includes(role) || saving} ensureDraftSaved={ensureDraftSavedForAi} onOperationActiveChange={setAiOperationActive} />
 
-          <details className="report-clinical-panel collapsible">
+          <details className="report-clinical-panel collapsible report-secondary-panel">
             <summary><span className="collapsible-icon">📌</span>Seguimientos accionables{followUps.length > 0 && <span className="collapsible-count">{followUps.length}</span>}</summary>
             {followUps.map((item) => <div className="workflow-entry" key={item.id}><strong>{item.recommendation}</strong><span>Plazo: {new Date(`${item.dueDate}T00:00:00`).toLocaleDateString("es-CL")} · Responsable: {item.responsible}</span><label>Estado<select value={item.status} onChange={(event) => changeFollowUpStatus(item.id, event.target.value as FollowUpStatus)}>{Object.entries(followUpLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div>)}
             <form className="report-inline-form" onSubmit={createFollowUp}>
@@ -460,7 +477,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
             </form>
           </details>
 
-          {priorReports.length > 0 && <details className="report-clinical-panel collapsible">
+          {priorReports.length > 0 && <details className="report-clinical-panel collapsible report-secondary-panel">
             <summary><span className="collapsible-icon">🗂️</span>Informes anteriores del paciente<span className="collapsible-count">{priorReports.length}</span></summary>
             <div className="prior-reports">{priorReports.map((prior) => <a key={prior.id} href={`/informe/${prior.id}`} target="_blank" rel="noreferrer"><span>{prior.date}</span><span className="prior-reason">{prior.modality} · {prior.reason}</span><span className={`report-status ${prior.reportStatus}`}>{prior.reportStatus === "final" ? "Definitivo" : "Borrador"}</span></a>)}</div>
           </details>}
@@ -483,9 +500,9 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
           </details>}
         </div>
 
-        <div id="coding-panel" className="report-fields report-tab-panel" role="region" aria-labelledby="coding-tab" hidden={editorTab !== "coding"}>
+        <div id="coding-panel" className="report-fields report-tab-panel report-coding-panel" role="tabpanel" aria-labelledby="coding-tab" hidden={editorTab !== "coding"}>
           <div className="card-heading"><h3>Codificación estándar</h3></div>
-          <section className="report-clinical-panel">
+          <section className="report-clinical-panel coding-section">
             <div className="clinical-form">
               <label>Sistema reporte/prestación<select value={report.reportCodeSystem || "LOCAL"} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, reportCodeSystem: event.target.value }))}>{CODE_SYSTEMS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
               <CodePicker system={report.reportCodeSystem || "LOCAL"} code={report.reportCode} display={report.reportCodeDisplay} disabled={report.status === "final"}
@@ -513,12 +530,16 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
             <button className="button secondary critical-status-action" type="button" onClick={showCriticalCommunication}>{criticalState.status === "pending" ? "Registrar comunicación" : "Ver registro"}</button>
           </div>}
           <footer className="report-actions">
-            {report.status === "draft" && (aiOperationActive || signingError) && <span className="report-signing-error" role="status">{aiOperationActive ? "Espera a que finalice el análisis antes de firmar." : signingError}</span>}
-            {report.status === "draft" && <><button className="button secondary" type="button" disabled={saving} onClick={() => persist("draft")}>Guardar borrador</button><button className="button primary" type="button" disabled={saving || aiOperationActive} title={aiOperationActive ? "Espera a que finalice el análisis antes de firmar." : undefined} onClick={() => persist("final")}>Firmar definitivo</button></>}
-            {report.status === "final" && <span>Definitivo · las correcciones se agregan como adenda.</span>}
-            {report.status === "final" && role === "admin" && <><button className="button secondary" type="button" disabled={saving} onClick={() => setReportAction({ kind: "reopen", reason: "" })}>Reabrir informe</button><button className="text-button danger" type="button" disabled={saving} onClick={() => setReportAction({ kind: "delete", reason: "" })}>Eliminar informe</button></>}
-            {notice && <span className="form-notice" role="status">{notice}</span>}
-            {report.updatedAt && <span className="report-updated">Última modificación: {new Date(report.updatedAt).toLocaleString("es-CL")}</span>}
+            <div className="report-save-state">
+              {report.status === "final" && <strong>Definitivo · las correcciones se agregan como adenda.</strong>}
+              <span className="report-updated">{saving ? "Guardando cambios…" : report.updatedAt ? `Última modificación: ${new Date(report.updatedAt).toLocaleString("es-CL")}` : "Borrador aún no guardado"}</span>
+              {notice && <span className="form-notice" role="status">{notice}</span>}
+              {report.status === "draft" && (aiOperationActive || signingError) && <span className="report-signing-error" role="status">{aiOperationActive ? "Espera a que finalice el análisis antes de firmar." : signingError}</span>}
+            </div>
+            <div className="report-action-buttons">
+              {report.status === "draft" && <><button className="button secondary" type="button" disabled={saving} onClick={() => persist("draft")}>Guardar borrador</button><button className="button primary" type="button" disabled={saving || aiOperationActive} title={aiOperationActive ? "Espera a que finalice el análisis antes de firmar." : undefined} onClick={() => persist("final")}>Firmar definitivo</button></>}
+              {report.status === "final" && role === "admin" && <><button className="button secondary" type="button" disabled={saving} onClick={() => setReportAction({ kind: "reopen", reason: "" })}>Reabrir informe</button><button className="text-button danger" type="button" disabled={saving} onClick={() => setReportAction({ kind: "delete", reason: "" })}>Eliminar informe</button></>}
+            </div>
           </footer>
         </div>
       </section>} viewer={appointment.serviceCategory === "imaging" ? <section className="viewer-pane" aria-label="Visor de imágenes">{fullScreen ? <iframe ref={viewerRef} src={fullScreen} title="Visor OHIF" allow="fullscreen" /> : <p className="empty-state">Este estudio aún no tiene imágenes vinculadas en el PACS.</p>}</section> : undefined} />
