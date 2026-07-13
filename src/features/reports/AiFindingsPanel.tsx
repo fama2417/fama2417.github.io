@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase-client";
 import type { Appointment } from "@/features/appointments/mock-data";
+import { clinicalQualitySection, clinicalReviewSection, clinicalWarningSection, type ClinicalReviewSection } from "./ai-extraction-schema.ts";
 import { isAiOperationActive, runAiExtractionWorkflow, type AiOperationState } from "./ai-extraction-workflow";
 
 type Item = {
@@ -37,12 +38,18 @@ const lateralityLabels: Record<string, string> = { right: "Derecha", left: "Izqu
 const severityLabels: Record<string, string> = { mild: "Leve", moderate: "Moderada", severe: "Severa", unknown: "No especificada" };
 const assessmentLabels: Record<string, string> = { progression: "Progresión", stable: "Estable", partial_response: "Respuesta parcial", complete_response: "Respuesta completa", mixed_response: "Respuesta mixta", indeterminate: "Indeterminado", not_applicable: "No aplica", unknown: "No determinado" };
 const trendLabels: Record<string, string> = { new: "Nuevo", progression: "Progresión", stable: "Estable", decreased: "En disminución", resolved: "Resuelto", unknown: "No determinado", not_applicable: "No aplica" };
-const categoryLabels: Record<string, string> = { active_disease: "Enfermedad activa", progression: "Progresión", stable_disease: "Enfermedad estable", resolved: "Lesiones resueltas", incidental: "Incidental relevante", negative_relevant: "Negativos relevantes", recommendation: "Recomendaciones", quality_warning: "Alertas" };
 const profileLabels: Record<string, string> = { PET_CT_ONCOLOGY: "PET-CT oncológico", CT_ABDOMEN_PELVIS: "TC abdomen y pelvis", CT_CHEST: "TC tórax", MR_BRAIN: "RM cerebro", MR_SPINE: "RM columna", BREAST_IMAGING: "Imagen mamaria", US_GENERAL: "Ecografía general", DX_GENERAL: "Radiografía general", UNKNOWN: "No determinado" };
 const tagLabels: Record<string, string> = { oncology: "Oncología", progression: "Progresión", stable: "Estable", resolved_lesions: "Lesiones resueltas", deauville_5: "Deauville 5", incidental_findings: "Hallazgos incidentales", follow_up_relevant: "Seguimiento relevante", report_quality_warning: "Alerta de calidad", procedure_content_mismatch: "Discordancia prestación/contenido", missing_impression: "Sin impresión" };
 const lesionTrendLabels: Record<string, string> = { increased: "Aumentó", decreased: "Disminuyó", stable: "Estable", unknown: "No determinado" };
 const groupLabels = { principal: "Hallazgos principales", secondary: "Hallazgos secundarios", incidental: "Hallazgos incidentales", negative: "Hallazgos negativos", reviewed: "Rechazados o corregidos" } as const;
 const documentLabels: Record<Appointment["serviceCategory"], string> = { consultation: "Consulta clínica", imaging: "Imagenología", laboratory: "Laboratorio", pathology: "Anatomía patológica", procedure: "Procedimiento" };
+const reviewSectionLabels: Record<ClinicalReviewSection, string> = { synthesis: "Síntesis clínica", coherence: "Coherencia", missing: "Información faltante", actions: "Acciones y seguimiento" };
+const reviewSectionEmpty: Record<ClinicalReviewSection, string> = {
+  synthesis: "Sin una síntesis clínica disponible.",
+  coherence: "La revisión no señaló contradicciones explícitas.",
+  missing: "La revisión no señaló información explícitamente incompleta.",
+  actions: "No se documentaron acciones o seguimientos.",
+};
 type GroupKey = keyof typeof groupLabels;
 
 async function authHeaders() {
@@ -58,7 +65,6 @@ const apiMessage = (status: number, error?: string) => {
 };
 
 const titleOf = (item: Item) => item.dictionary?.canonicalName || item.candidate?.suggestedCanonicalName || (item.findingText.length > 92 ? `${item.findingText.slice(0, 89)}...` : item.findingText);
-const plainText = (value: string) => value.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
 const formatClinicalContext = (value: string) => value.replace(/^(.+?)\s*\(seg[uú]n nombre de prestaci[oó]n\)/i, "Prestación registrada: $1");
 const isRoutineNegative = (item: Item) => item.status === "absent" || ["negative", "not_relevant"].includes(item.importance) || /^(sin|no (se |hay|presenta|observa|identifica)|normal|conservad|permeable)/i.test(item.findingText.trim());
 const confirmableItems = (items: Item[]) => items.filter((item) => item.codingStatus === "suggested" && Number(item.confidence) >= 0.75 && !isRoutineNegative(item));
@@ -221,17 +227,16 @@ export function AiFindingsPanel({ reportId, reportStatus, reportCategory, disabl
   const extractedSummaryItems = clinicalSummary?.primarySummaryItems ?? [];
   const isMainSummaryItem = (item: SummaryItem) => ["active_disease", "progression", "stable_disease"].includes(item.category);
   const summaryItems = [...extractedSummaryItems.filter(isMainSummaryItem).slice(0, 3), ...extractedSummaryItems.filter((item) => !isMainSummaryItem(item))].slice(0, 8);
-  const summaryGroups = isRadiology
-    ? Object.entries(categoryLabels).map(([key, label]) => ({ key, label, items: summaryItems.filter((item) => item.category === key) })).filter((group) => group.items.length)
-    : summaryItems.length ? [{ key: "clinical_summary", label: "Puntos clínicos clave", items: summaryItems }] : [];
   const visibleItems = showAll ? items : items.slice(0, 10);
   const technicalGroups = (Object.keys(groupLabels) as GroupKey[]).map((key) => ({ key, items: visibleItems.filter((item) => groupOf(item) === key) })).filter((group) => group.items.length);
-  const qaWarnings = clinicalSummary?.qualityWarnings.map((warning) => warning.message) ?? [];
-  const qualityTypes = new Set(clinicalSummary?.qualityWarnings.map((warning) => warning.type) ?? []);
-  const discordanceWarnings = qualityTypes.has("procedure_content_mismatch") ? [] : clinicalSummary?.warnings.filter((warning) => plainText(warning).includes("discordancia")) ?? [];
-  const sourceWarnings = qualityTypes.has("missing_impression") ? [] : clinicalSummary?.warnings.filter((warning) => plainText(warning).includes("resumen generado desde hallazgos")) ?? [];
-  const bannerWarnings = [...new Set([...qaWarnings, ...discordanceWarnings, ...sourceWarnings])];
-  const otherWarnings = clinicalSummary?.warnings.filter((warning) => !bannerWarnings.includes(warning)) ?? [];
+  const reviewSections = (["synthesis", "coherence", "missing", "actions"] as ClinicalReviewSection[]).map((key) => ({
+    key,
+    items: summaryItems.filter((item) => clinicalReviewSection(item.category) === key),
+    messages: [
+      ...(clinicalSummary?.qualityWarnings.filter((warning) => clinicalQualitySection(warning.type) === key).map((warning) => warning.message) ?? []),
+      ...(clinicalSummary?.warnings.filter((warning) => clinicalWarningSection(warning) === key) ?? []),
+    ].filter((message, index, all) => all.indexOf(message) === index),
+  }));
   const assessment = clinicalSummary?.globalResponse
     ? { status: clinicalSummary.globalResponse.status, text: clinicalSummary.globalResponse.explanation, confidence: clinicalSummary.globalResponse.confidence }
     : clinicalSummary?.globalAssessment;
@@ -243,17 +248,17 @@ export function AiFindingsPanel({ reportId, reportStatus, reportCategory, disabl
     saving: "Guardando borrador antes del análisis…",
     analyzing: "Analizando el informe…",
     refreshing: "Actualizando resultados…",
-    success: "Resumen actualizado.",
+    success: "Revisión actualizada.",
     error: error || "No fue posible completar el análisis.",
   };
 
   return <details className="report-clinical-panel collapsible ai-findings-panel" open>
-    <summary><span className="collapsible-icon">IA</span>Resumen IA<span className="collapsible-count">{summaryItems.length || items.length}</span></summary>
-    <p className="empty-inline">Resumen sugerido automaticamente. Debe ser revisado por el usuario.</p>
+    <summary><span className="collapsible-icon">IA</span>Revisión clínica IA<span className="collapsible-count">{summaryItems.length || items.length}</span></summary>
+    <p className="empty-inline">Revisa síntesis, coherencia, información faltante y acciones. No reemplaza el juicio clínico.</p>
     {!reportId && <p className="notice">Guarda el borrador antes de ejecutar la extraccion con IA.</p>}
     {reportStatus === "final" && <p className="empty-inline">El informe esta firmado: la extraccion queda en solo lectura.</p>}
     <div className="ai-panel-actions">
-      <button className="button secondary" type="button" onClick={extract} disabled={!reportId || locked || !!acting || operationActive}>{clinicalSummary || items.length ? "Recalcular resumen IA" : isRadiology ? "Detectar hallazgos con IA" : "Analizar documento con IA"}</button>
+      <button className="button secondary" type="button" onClick={extract} disabled={!reportId || locked || !!acting || operationActive}>{clinicalSummary || items.length ? "Recalcular revisión IA" : "Revisar documento con IA"}</button>
       <button className="text-button" type="button" onClick={load} disabled={!reportId || loading || operationActive}>Actualizar</button>
     </div>
     {operationState !== "idle" && <div className={`ai-operation-status ${operationState}`} role={operationState === "error" ? "alert" : "status"} aria-live={operationState === "error" ? "assertive" : "polite"} aria-busy={operationActive}>
@@ -267,28 +272,34 @@ export function AiFindingsPanel({ reportId, reportStatus, reportCategory, disabl
     </div>}
     {error && operationState !== "error" && <p className="notice" role="alert">{error}</p>}
     {isRadiology && <div className="ai-view-switch" role="group" aria-label="Vista de extraccion IA">
-      <button type="button" aria-pressed={mode === "summary"} onClick={() => setMode("summary")}>Resumen clinico</button>
+      <button type="button" aria-pressed={mode === "summary"} onClick={() => setMode("summary")}>Revisión clínica</button>
       <button type="button" aria-pressed={mode === "detail"} onClick={() => setMode("detail")}>Detalle tecnico / diccionario</button>
     </div>}
     {loading ? <p className="empty-inline">Cargando extraccion IA...</p> : mode === "summary" || !isRadiology ? <div className="ai-clinical-summary">
       {clinicalSummary ? <>
-        {bannerWarnings.map((warning) => <p className="notice" role="alert" key={warning}>{warning}</p>)}
         <header className="ai-summary-header">
           <div><span>{isRadiology ? "Perfil detectado" : "Tipo de documento"}</span><strong>{isRadiology ? profileLabels[clinicalSummary.reportingProfile] ?? clinicalSummary.reportingProfile : documentLabels[reportCategory]}</strong></div>
           <div><span>Contexto</span><strong>{formatClinicalContext(clinicalSummary.clinicalContext || clinicalSummary.modalityContext)}</strong></div>
-          {assessment && <div className="ai-summary-assessment"><span>{isRadiology ? "Evaluación global" : "Síntesis clínica"}</span><CompactClinicalText text={assessmentText} /><small>{isRadiology ? `${assessmentLabels[assessment.status] ?? assessment.status} - ` : ""}{lowAssessmentConfidence ? "Baja confianza - " : ""}{Math.round(assessment.confidence * 100)}%</small></div>}
           {isRadiology && clinicalSummary.scores.map((score) => <div key={`${score.name}-${score.value}`}><span>Score</span><strong>{score.name} {score.value}</strong></div>)}
           {isRadiology && <div><span>Detalle</span><strong>{items.length} hallazgos</strong><small>{pendingReview} pendientes - {pendingDictionary} en diccionario</small></div>}
           {isRadiology && clinicalSummary.clinicalTags.length > 0 && <div><span>Etiquetas clínicas</span><div className="ai-finding-badges">{clinicalSummary.clinicalTags.map((tag) => <span key={tag}>{tagLabels[tag] ?? tag}</span>)}</div></div>}
         </header>
-        {summaryGroups.map((group) => <section className="ai-summary-group" key={group.key}>
-          <h4>{group.label}</h4>
-          {group.items.map((item, index) => <article key={`${group.key}-${index}`}>
-            <div><strong>{item.title}</strong><span>{item.summary}</span></div>
-            <div className="ai-finding-badges">{isRadiology && <span>{trendLabels[item.trend] ?? item.trend}</span>}<span>{Math.round(item.confidence * 100)}%</span></div>
-            <details className="ai-finding-source"><summary>Ver fuente</summary>{item.sourceSentences.map((source) => <span key={source}>{source}</span>)}</details>
-          </article>)}
-        </section>)}
+        <div className="ai-review-grid">
+          {reviewSections.map((section) => <section className={`ai-summary-group ai-review-section ${section.key}`} key={section.key}>
+            <h4>{reviewSectionLabels[section.key]}</h4>
+            {section.key === "synthesis" && assessment && <article>
+              <div><CompactClinicalText text={assessmentText} />{lowAssessmentConfidence && <span>Confianza limitada: confirma esta síntesis con el documento.</span>}</div>
+              {isRadiology && <div className="ai-finding-badges"><span>{assessmentLabels[assessment.status] ?? assessment.status}</span></div>}
+            </article>}
+            {section.items.map((item, index) => <article key={`${section.key}-${index}`}>
+              <div><strong>{item.title}</strong><span>{item.summary}</span></div>
+              {isRadiology && item.trend !== "not_applicable" && <div className="ai-finding-badges"><span>{trendLabels[item.trend] ?? item.trend}</span></div>}
+              <details className="ai-finding-source"><summary>Ver fuente</summary>{item.sourceSentences.map((source) => <span key={source}>{source}</span>)}</details>
+            </article>)}
+            {section.messages.map((message) => <p className="notice" role="alert" key={message}>{message}</p>)}
+            {!section.items.length && !section.messages.length && !(section.key === "synthesis" && assessment) && <p className="empty-inline">{reviewSectionEmpty[section.key]}</p>}
+          </section>)}
+        </div>
         {isRadiology && trackedLesions.length > 0 && <details className="ai-finding-group">
           <summary>Seguimiento de lesiones ({trackedLesions.length})</summary>
           {trackedLesions.map((lesion) => <article className="ai-finding-row" key={lesion.label}>
@@ -298,7 +309,6 @@ export function AiFindingsPanel({ reportId, reportStatus, reportCategory, disabl
           </article>)}
         </details>}
         {isRadiology && items.length > 10 && <button className="text-button" type="button" onClick={() => setMode("detail")}>{items.length} hallazgos técnicos extraídos. Ver detalle.</button>}
-        {otherWarnings.length > 0 && <details className="ai-summary-warnings"><summary>{otherWarnings.length} alertas de extracción</summary>{otherWarnings.map((warning) => <p key={warning}>{warning}</p>)}</details>}
       </> : <p className="empty-inline">{items.length ? "Este informe tiene detalle tecnico previo. Recalcula para generar el resumen clinico." : "Sin extraccion IA todavia."}</p>}
     </div> : <div className="ai-technical-detail">
       <p className="ai-finding-summary">{items.length} hallazgos tecnicos extraidos. {items.length > 10 && !showAll ? "Se muestran los 10 de mayor prioridad." : ""}</p>

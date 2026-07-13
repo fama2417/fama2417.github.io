@@ -46,7 +46,7 @@ export const AiClinicalSummarySchema = z.object({
   primarySummaryItems: z.array(z.object({
     title: z.string().trim().min(1),
     summary: z.string().trim().min(1),
-    category: z.enum(["active_disease", "progression", "stable_disease", "resolved", "incidental", "negative_relevant", "recommendation", "quality_warning"]),
+    category: z.enum(["active_disease", "progression", "stable_disease", "resolved", "incidental", "negative_relevant", "recommendation", "quality_warning", "clinical_fact", "result", "diagnosis", "limitation", "warning"]),
     sites: z.array(z.string().trim().min(1)),
     trend: z.enum(["new", "progression", "stable", "decreased", "resolved", "unknown", "not_applicable"]),
     sourceSection: z.enum(["clinical_indication", "comparison", "technique", "findings", "impression", "both"]),
@@ -121,6 +121,21 @@ export type AiFindingExtractionResult = z.infer<typeof AiFindingExtractionResult
 export type AiClinicalDocumentSummary = z.infer<typeof AiClinicalDocumentSummarySchema>;
 export type AiClinicalDocumentSummaryResult = z.infer<typeof AiClinicalDocumentSummaryResultSchema>;
 export type ReportingProfile = z.infer<typeof ReportingProfileSchema>;
+
+export type ClinicalReviewSection = "synthesis" | "coherence" | "missing" | "actions";
+
+export const clinicalReviewSection = (category: string): ClinicalReviewSection => {
+  if (category === "recommendation") return "actions";
+  if (category === "limitation") return "missing";
+  if (["warning", "quality_warning"].includes(category)) return "coherence";
+  return "synthesis";
+};
+
+export const clinicalQualitySection = (type: string): ClinicalReviewSection =>
+  type.startsWith("missing_") || type === "insufficient_text" ? "missing" : "coherence";
+
+export const clinicalWarningSection = (message: string): ClinicalReviewSection =>
+  /(falta|faltante|sin impresi[oó]n|no se detect[oó]|insuficiente)/i.test(message) ? "missing" : "coherence";
 
 const NO_IMPRESSION_WARNING = "Resumen generado desde Hallazgos. No se detectó sección Impresión/Conclusión.";
 const INDETERMINATE_WITHOUT_IMPRESSION = "Hallazgos compatibles con enfermedad activa/secundaria, sin poder determinar progresión por falta de impresión o comparación.";

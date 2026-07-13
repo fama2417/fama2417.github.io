@@ -61,19 +61,21 @@ Reglas estrictas:
 6. En patologia no infieras etapa, grado, margenes, biomarcadores ni diagnosticos que no esten escritos.
 7. En procedimientos no declares ausencia de incidentes o complicaciones salvo que este documentada.
 8. En consulta no propongas diagnosticos, tratamientos o conductas nuevas.
-9. assessment.text debe ser una sintesis breve del documento, con confianza calibrada.
+9. assessment.text debe representar el problema clinico, su contexto y la conducta documentada en un maximo de dos frases; no repitas todas las secciones.
 10. Genera como maximo 8 summaryItems y usa sourceSection segun el campo de origen.
 11. Clasifica cada punto solo como clinical_fact, result, diagnosis, recommendation, limitation o warning.
-12. Usa recommendation solo para planes o seguimientos escritos y warning solo para vacios o contradicciones observables; no inventes alertas.
-13. No devuelvas codigos SNOMED, CIE, LOINC o RadLex si no fueron proporcionados.
-14. Devuelve solo datos estructurados segun el JSON Schema.`;
+12. Usa recommendation solo para acciones, planes o seguimientos escritos; nunca propongas una conducta nueva.
+13. Usa warning solo para contradicciones observables entre secciones y limitation solo para informacion clinicamente relevante que el propio documento deja incompleta. No inventes alertas ni datos faltantes esperados por costumbre.
+14. Evita duplicar assessment.text en summaryItems. Cada punto debe aportar evidencia, una inconsistencia, una limitacion o una accion verificable.
+15. No devuelvas codigos SNOMED, CIE, LOINC o RadLex si no fueron proporcionados.
+16. Devuelve solo datos estructurados segun el JSON Schema.`;
 
 type NonRadiologyCategory = Exclude<Appointment["serviceCategory"], "imaging">;
 const clinicalGuidance: Record<NonRadiologyCategory, string> = {
-  consultation: "Prioriza evaluacion, diagnosticos y plan documentados; separa antecedentes de problemas activos.",
+  consultation: "Representa el problema, contexto, evaluacion y plan documentados; marca contradicciones y datos explicitamente incompletos sin sugerir diagnosticos nuevos.",
   laboratory: "Prioriza resultados e interpretacion escritos; conserva valores y unidades sin inferir rangos.",
-  pathology: "Prioriza diagnostico, muestra, microscopia y marcadores, grado o margenes solo cuando esten explicitamente documentados.",
-  procedure: "Prioriza indicacion, tecnica, hallazgos, incidentes o limitaciones y plan posterior documentado.",
+  pathology: "Prioriza diagnostico, muestra, microscopia y marcadores; marca grado, margenes o biomarcadores como limitacion solo si el documento indica que estan pendientes o no evaluables.",
+  procedure: "Prioriza indicacion, tecnica, hallazgos, incidentes o limitaciones y plan posterior documentado; detecta contradicciones entre tecnica y resultado.",
 };
 
 export function buildRadiologyFindingExtractionPrompt(input: SanitizedAiReportInput, reportingProfile: ReportingProfile = "UNKNOWN") {

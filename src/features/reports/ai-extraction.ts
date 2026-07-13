@@ -116,7 +116,7 @@ export async function extractReportWithAi(reportId: string, options: { actorRole
         globalResponse: null,
         globalAssessment: { status: "not_applicable", ...parsed.clinicalSummary.assessment },
         scores: [],
-        primarySummaryItems: parsed.clinicalSummary.summaryItems.map((item) => ({ ...item, category: item.category === "recommendation" ? "recommendation" : item.category === "warning" ? "quality_warning" : "active_disease", sites: [], trend: "not_applicable" })),
+        primarySummaryItems: parsed.clinicalSummary.summaryItems.map((item) => ({ ...item, sites: [], trend: "not_applicable" as const })),
         activeDiseaseSites: [], resolvedSites: [], stableSites: [], incidentalFindings: [], qualityWarnings: [], clinicalTags: [], lesionTracking: [],
         warnings: parsed.clinicalSummary.warnings,
       };

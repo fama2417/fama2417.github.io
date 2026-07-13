@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { parseAiClinicalDocumentResponse, parseAiExtractionResponse, publicAiError } from "./ai-extraction.ts";
-import { AiClinicalDocumentSummaryResultSchema, AiFindingExtractionResultSchema, detectReportingProfile, finalizeClinicalSummary, guardClinicalSummaryWithoutImpression, parseStoredAiClinicalSummary } from "./ai-extraction-schema.ts";
+import { AiClinicalDocumentSummaryResultSchema, AiFindingExtractionResultSchema, clinicalQualitySection, clinicalReviewSection, clinicalWarningSection, detectReportingProfile, finalizeClinicalSummary, guardClinicalSummaryWithoutImpression, parseStoredAiClinicalSummary } from "./ai-extraction-schema.ts";
 import { buildClinicalDocumentSummaryPrompt, SYSTEM_PROMPT_FOR_CLINICAL_DOCUMENT_SUMMARY } from "./ai-prompts.ts";
 
 const valid = {
@@ -102,6 +102,18 @@ test("resume documentos no radiológicos sin crear hallazgos ni códigos", () =>
   assert.match(prompt, /Procesamiento \/ técnicas \[comparison\]: PAS previa/);
   assert.match(SYSTEM_PROMPT_FOR_CLINICAL_DOCUMENT_SUMMARY, /no infieras etapa, grado, margenes/i);
   assert.match(SYSTEM_PROMPT_FOR_CLINICAL_DOCUMENT_SUMMARY, /No devuelvas codigos SNOMED, CIE, LOINC o RadLex/i);
+  assert.match(SYSTEM_PROMPT_FOR_CLINICAL_DOCUMENT_SUMMARY, /limitation solo para informacion clinicamente relevante/i);
+});
+
+test("organiza la revisión clínica sin convertirla en diccionario", () => {
+  assert.equal(clinicalReviewSection("diagnosis"), "synthesis");
+  assert.equal(clinicalReviewSection("warning"), "coherence");
+  assert.equal(clinicalReviewSection("limitation"), "missing");
+  assert.equal(clinicalReviewSection("recommendation"), "actions");
+  assert.equal(clinicalQualitySection("missing_impression"), "missing");
+  assert.equal(clinicalQualitySection("impression_findings_discordance"), "coherence");
+  assert.equal(clinicalWarningSection("No se detectó sección Impresión."), "missing");
+  assert.equal(clinicalWarningSection("Discordancia entre hallazgos e impresión."), "coherence");
 });
 
 test("sin impresion ni comparacion evita declarar progresion", () => {
