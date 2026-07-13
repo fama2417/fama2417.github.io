@@ -4,7 +4,10 @@ import { codeHref, codingError } from "./coding.ts";
 
 test("valida y enlaza códigos clínicos estándar", () => {
   assert.equal(codingError("LOCAL", "", "", "Prestación"), "");
-  assert.match(codingError("LOINC", "", "", "Prestación"), /completa/);
+  assert.equal(codingError("SNOMEDCT", "", "", "Hallazgo"), "");
+  assert.equal(codingError("ICD-10", "", "", "Diagnóstico"), "");
+  assert.match(codingError("LOINC", "", "", "Prestación", true), /completa/);
+  assert.match(codingError("SNOMEDCT", "123456", "", "Hallazgo"), /completa/);
   assert.match(codingError("BAD", "123", "Texto", "Prestación"), /inválido/);
   assert.match(codingError("SNOMEDCT", "123 456", "Texto", "Hallazgo"), /caracteres/);
   assert.equal(codingError("LOINC", "1234-5", "Glucose", "Prestación"), "");

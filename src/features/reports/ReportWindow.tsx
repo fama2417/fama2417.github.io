@@ -113,8 +113,9 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
   }, []);
 
   useEffect(() => {
-    Promise.all([fetchAppointments(), fetchReport(appointmentId), fetchCommunications(appointmentId), fetchAddenda(appointmentId), fetchFollowUps(appointmentId), fetchMyProfile()])
-      .then(([appointments, storedReport, storedCommunications, storedAddenda, storedFollowUps, profile]) => {
+    Promise.all([fetchAppointments(), fetchReport(appointmentId), fetchAddenda(appointmentId), fetchFollowUps(appointmentId), fetchMyProfile()])
+      .then(async ([appointments, storedReport, storedAddenda, storedFollowUps, profile]) => {
+        const storedCommunications = storedReport?.id ? await fetchCommunications(storedReport.id) : [];
         const current = appointments.find((item) => item.id === appointmentId) ?? null;
         setAppointment(current);
         if (current) setPriorReports(appointments
@@ -179,7 +180,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
   }
 
   function finalReportError() {
-    const criticalState = criticalFindingState(report.criticalFinding, communications);
+    const criticalState = criticalFindingState(report.criticalFinding, report.id, communications);
     return validateFinalReport(report, criticalState.status === "confirmed") || [
       codingError(report.reportCodeSystem, report.reportCode, report.reportCodeDisplay, "Reporte/prestación", true),
       codingError(report.findingCodeSystem, report.findingCode, report.findingCodeDisplay, "Hallazgo principal"),
@@ -190,7 +191,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
   async function persist(status: RadiologyReport["status"]) {
     if (status === "final") {
       const validation = finalReportError();
-      if (validation) { setError(validation); return false; }
+      if (validation) { setError(validation); return null; }
     }
     setSaving(true); setError(""); setNotice("");
     try {
@@ -198,10 +199,10 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
       setReport(saved);
       setNotice(status === "final" ? "Reporte firmado y bloqueado como definitivo." : "Borrador guardado.");
       if (status === "final" && appointment?.serviceCategory === "imaging") await archivePdfInPacs();
-      return true;
+      return saved;
     } catch {
       setError(status === "final" ? "No fue posible firmar. Verifica tu perfil de administración/radiología y el registro profesional." : "No fue posible guardar el borrador.");
-      return false;
+      return null;
     } finally { setSaving(false); }
   }
 
@@ -212,7 +213,9 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
   async function recordCommunication(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setSaving(true); setError("");
     try {
-      const created = await addCommunication(appointmentId, { ...communicationDraft, communicatedAt: new Date(communicationDraft.communicatedAt).toISOString() });
+      const communicationReport = report.id ? report : await persist("draft");
+      if (!communicationReport?.id) return;
+      const created = await addCommunication(communicationReport.id, appointmentId, { ...communicationDraft, communicatedAt: new Date(communicationDraft.communicatedAt).toISOString() });
       setCommunications((current) => [...current, created]);
       setCommunicationDraft({ recipient: "", channel: "phone", communicatedAt: localNow(), acknowledged: false, notes: "" });
       setNotice("Intento de comunicación registrado.");
@@ -311,7 +314,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
     setSaving(true); setError("");
     try {
       await deleteReport(appointmentId, reason);
-      setReport(emptyReport(appointmentId, appointment ?? undefined)); setAddenda([]); setKeyImages([]); setReportAction(null);
+      setReport(emptyReport(appointmentId, appointment ?? undefined)); setCommunications([]); setAddenda([]); setKeyImages([]); setReportAction(null);
       try {
         await deletePdfFromPacs();
         setNotice("Informe eliminado (también del PACS). El motivo quedó registrado.");
@@ -349,7 +352,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
     ? `/api/pacs/handoff?next=${encodeURIComponent(`/ohif/viewer?StudyInstanceUIDs=${appointment.studyInstanceUid}`)}` : viewer;
   const detail: [string, string][] = [["Anamnesis", appointment.anamnesis || "—"], ["Hipótesis diagnóstica", appointment.diagnosticHypothesis || "—"], ...appointmentDetail(appointment).filter(([, value]) => value)];
   const institutionLabel = tenant?.name || appointment.branch || appointment.service;
-  const criticalState = criticalFindingState(report.criticalFinding, communications);
+  const criticalState = criticalFindingState(report.criticalFinding, report.id, communications);
   const acknowledgedCommunication = criticalState.communication;
   const signingError = report.status === "draft" ? finalReportError() : "";
 

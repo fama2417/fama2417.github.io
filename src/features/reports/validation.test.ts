@@ -17,11 +17,15 @@ test("valida los requisitos de un informe definitivo", () => {
 });
 
 test("deriva el estado crítico y elige la última comunicación confirmada", () => {
-  const old = { urgency: "critical", acknowledged: true, communicatedAt: "2026-07-10T10:00:00Z", recipient: "Urgencias" };
-  const current = { urgency: "critical", acknowledged: true, communicatedAt: "2026-07-10T11:00:00Z", recipient: "Médico tratante" };
-  assert.equal(criticalFindingState(false, [old]).status, "inactive");
-  assert.equal(criticalFindingState(true, [{ ...old, acknowledged: false }]).status, "pending");
-  assert.deepEqual(criticalFindingState(true, [old, { ...old, urgency: "urgent" }, current]), { status: "confirmed", communication: current });
+  const old = { reportId: "report-a", urgency: "critical", acknowledged: true, communicatedAt: "2026-07-10T10:00:00Z", recipient: "Urgencias" };
+  const current = { reportId: "report-a", urgency: "critical", acknowledged: true, communicatedAt: "2026-07-10T11:00:00Z", recipient: "Médico tratante" };
+  assert.equal(criticalFindingState(false, "report-a", [old]).status, "inactive");
+  assert.equal(criticalFindingState(true, "report-a", [{ ...old, acknowledged: false }]).status, "pending");
+  assert.equal(criticalFindingState(true, "report-a", [{ ...old, urgency: "urgent" }]).status, "pending");
+  assert.equal(criticalFindingState(true, "report-a", [{ ...old, reportId: null }]).status, "pending");
+  assert.equal(criticalFindingState(true, "report-b", [old]).status, "pending");
+  assert.equal(criticalFindingState(true, "report-recreated", [old]).status, "pending");
+  assert.deepEqual(criticalFindingState(true, "report-a", [old, current]), { status: "confirmed", communication: current });
 });
 
 test("asigna workspace y visor por tipo de documento", () => {

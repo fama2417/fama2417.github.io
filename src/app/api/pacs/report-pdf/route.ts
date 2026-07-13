@@ -90,22 +90,25 @@ export async function POST(request: NextRequest) {
   const { appointmentId } = (await request.json().catch(() => ({}))) ?? {};
   if (!appointmentId) return NextResponse.json({ error: "Falta appointmentId." }, { status: 400 });
 
-  const [report, appointment, tenant, keyImagesResult, followUpsResult, communicationsResult] = await Promise.all([
-    db.from("radiology_reports").select("clinical_indication, technique, comparison, findings, impression, status, critical_finding, critical_finding_type, signed_at, signed_by, signer_name, signer_registration").eq("appointment_id", appointmentId).maybeSingle(),
+  const report = await db.from("radiology_reports").select("id, clinical_indication, technique, comparison, findings, impression, status, critical_finding, critical_finding_type, signed_at, signed_by, signer_name, signer_registration").eq("appointment_id", appointmentId).maybeSingle();
+  if (report.error) return NextResponse.json({ error: report.error.message }, { status: 500 });
+  const reportRow = report.data;
+  if (!reportRow || reportRow.status !== "final") return NextResponse.json({ error: "No hay informe definitivo para archivar." }, { status: 409 });
+
+  const [appointment, tenant, keyImagesResult, followUpsResult, communicationsResult] = await Promise.all([
     db.from("appointments").select("appointment_date, modality, reason, treating_physician, requester_name, patient:patients(full_name, identifier), study:imaging_studies(orthanc_study_id, study_instance_uid)").eq("id", appointmentId).maybeSingle(),
     db.from("tenants").select("name, rut, address, phone, report_header, logo_url").eq("id", tenantId).maybeSingle(),
     db.from("report_key_images").select("instance_id, caption").eq("appointment_id", appointmentId).order("created_at"),
     db.from("report_follow_ups").select("recommendation, due_date, status").eq("appointment_id", appointmentId).order("due_date"),
-    db.from("report_communications").select("recipient, channel, communicated_at, acknowledged, urgency").eq("appointment_id", appointmentId).order("communicated_at"),
+    db.from("report_communications").select("recipient, channel, communicated_at, acknowledged, urgency").eq("report_id", reportRow.id).order("communicated_at"),
   ]);
-  const queryError = [report.error, appointment.error, tenant.error, keyImagesResult.error, followUpsResult.error, communicationsResult.error].find(Boolean);
+  const queryError = [appointment.error, tenant.error, keyImagesResult.error, followUpsResult.error, communicationsResult.error].find(Boolean);
   if (queryError) return NextResponse.json({ error: queryError.message }, { status: 500 });
   const keyImages = (keyImagesResult.data ?? []) as { instance_id: string; caption: string }[];
   const followUps = (followUpsResult.data ?? []) as { recommendation: string; due_date: string; status: string }[];
   const acknowledged = ((communicationsResult.data ?? []) as { recipient: string; channel: string; communicated_at: string; acknowledged: boolean; urgency: string }[]).filter((c) => c.urgency === "critical" && c.acknowledged).at(-1);
-  const reportRow = report.data;
   const appointmentRow = appointment.data as unknown as { appointment_date: string; modality: string; reason: string; treating_physician: string; requester_name: string; patient: { full_name: string; identifier: string } | null; study: LinkedStudy | null } | null;
-  if (!reportRow || reportRow.status !== "final" || !appointmentRow) return NextResponse.json({ error: "No hay informe definitivo para archivar." }, { status: 409 });
+  if (!appointmentRow) return NextResponse.json({ error: "No hay informe definitivo para archivar." }, { status: 409 });
   let orthancStudyId = "";
   try { orthancStudyId = await resolveOrthancStudyId(appointmentRow.study); }
   catch (cause) { return NextResponse.json({ error: cause instanceof Error ? cause.message : "PACS no disponible." }, { status: 502 }); }
