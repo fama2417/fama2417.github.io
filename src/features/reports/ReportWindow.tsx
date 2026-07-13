@@ -40,8 +40,6 @@ const emptyReport = (appointmentId: string, appointment?: Appointment): Radiolog
 
 const channelLabels: Record<ReportCommunication["channel"], string> = { phone: "Teléfono", in_person: "Presencial", secure_message: "Mensajería segura", email: "Correo", other: "Otro" };
 const followUpLabels: Record<FollowUpStatus, string> = { pending: "Pendiente", acknowledged: "Recibido", completed: "Realizado" };
-const reportSectionOrder: Record<ReportSection["name"], number> = { impression: 0, findings: 1, clinicalIndication: 2, technique: 3, comparison: 4 };
-
 const appointmentDetail = (appointment: Appointment): [string, string][] => [
   ["Identificador", appointment.patientIdentifier ?? ""], ["Previsión", appointment.patientPrevision ?? ""],
   ["Fecha y hora", `${appointment.date} ${appointment.startTime}–${appointment.endTime}`], ["Estado", appointmentStatusLabels[appointment.status]],
@@ -323,7 +321,6 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
   const baseKeyImages = keyImages.filter((item) => !item.addendumId);
   const profile = clinicalProfileForCategory(appointment.serviceCategory);
   const sections = profile.sections;
-  const orderedSections = [...sections].sort((a, b) => reportSectionOrder[a.name] - reportSectionOrder[b.name]);
   const examLabel = `${appointment.serviceCategory === "imaging" && appointment.modality !== "OT" ? `${appointment.modality} · ` : ""}${appointment.reason}`;
   if (role === "operator" || (role !== "admin" && !canSign)) return <div className="report-workstation read-only-report">
     <header className="report-workstation-header"><div><p className="eyebrow">{profile.title}</p><h2>{appointment.patientName}</h2><p className="report-meta"><span>{appointment.date}</span><span>{examLabel}</span></p></div>{report.status === "final" && <button className="text-button" type="button" onClick={() => window.print()}>Imprimir</button>}</header>
@@ -440,7 +437,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
               {appointment.serviceCategory === "imaging" && templates.filter((template) => template.active && template.category === "imaging" && template.modality !== appointment.modality).map((template) => <option key={template.id} value={template.id}>{template.modality} · {template.name}</option>)}
             </select>}
           </div>
-          {orderedSections.map((section) => <Fragment key={section.name}>
+          {sections.map((section) => <Fragment key={section.name}>
             <label className={`report-section report-section-${section.name}`}>{section.label}<textarea name={section.name} value={report[section.name]} placeholder={section.hint} onChange={(event) => setSection(section.name, event.target.value)} disabled={report.status === "final"} /></label>
             {section.name === "impression" && criticalFindingControl}
           </Fragment>)}
