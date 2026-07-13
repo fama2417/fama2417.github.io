@@ -34,7 +34,9 @@ test("deriva el estado crítico y elige la última comunicación confirmada", ()
 
 test("asigna workspace y visor por tipo de documento", () => {
   assert.deepEqual(Object.keys(clinicalDocumentProfiles).sort(), ["consultation", "imaging", "laboratory", "pathology", "procedure"]);
+  for (const profile of Object.values(clinicalDocumentProfiles)) assert.deepEqual(profile.sections.map((section) => section.name), ["clinicalIndication", "comparison", "technique", "findings", "impression"]);
   assert.equal(clinicalProfileForCategory("imaging").viewerMode, "dicom");
+  assert.equal(clinicalProfileForCategory("imaging").sections.at(-1)?.label, "Impresión diagnóstica");
   assert.equal(clinicalProfileForCategory("consultation").viewerMode, "none");
   assert.equal(clinicalProfileForCategory("pathology").viewerMode, "attachments");
   assert.equal(clinicalProfileForCategory("pathology").aiAnalysisProfile, "none");
