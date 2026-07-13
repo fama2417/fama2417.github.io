@@ -5,6 +5,7 @@ import { TerminologyManager } from "@/features/clinical/TerminologyManager";
 import { TemplatesManager } from "@/features/reports/TemplatesManager";
 import { ScheduleManager } from "@/features/schedule/ScheduleManager";
 import { OfferingManager } from "@/features/scheduling/OfferingManager";
+import { ParametryManager } from "@/features/scheduling/ParametryManager";
 import { InstitutionSettings } from "@/features/tenant/InstitutionSettings";
 import { TenantsManager } from "@/features/tenant/TenantsManager";
 import { UsersManager } from "@/features/users/UsersManager";
@@ -25,6 +26,7 @@ export default function SettingsPage() {
         <summary>Administración e integraciones</summary>
         <div>
           <InstitutionSettings />
+          <ParametryManager tabs={["practitioners", "roles"]} />
           <UsersManager />
           <TerminologyManager />
           <TemplatesManager />

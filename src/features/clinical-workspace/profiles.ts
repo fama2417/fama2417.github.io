@@ -1,57 +1,111 @@
+import type { Appointment } from "../appointments/mock-data.ts";
+
+export type ReportSectionName = "clinicalIndication" | "technique" | "comparison" | "findings" | "impression";
+export type ReportSection = { name: ReportSectionName; label: string; hint: string; required?: boolean };
+
 export type ClinicalDocumentProfile = {
-  id: "radiology" | "consultation" | "pathology" | "endoscopy" | "laboratory" | "procedure";
-  resourceType: "radiology_report" | "medical_consultation" | "pathology_report" | "endoscopy_report" | "laboratory_report" | "procedure_note";
-  label: string;
-  sections: string[];
+  title: string;
+  editor: string;
+  confirmationLabel: string;
+  criticalLabel: string;
+  criticalTypeOptions?: readonly string[];
+  sections: ReportSection[];
   layoutMode: "editor_viewer" | "editor_only" | "editor_attachments";
   viewerMode: "dicom" | "attachments" | "none";
-  aiAnalysisProfile: "radiology" | "consultation" | "pathology" | "endoscopy" | "generic_clinical_note" | "none";
-  availableActions: string[];
+  aiAnalysisProfile: "radiology" | "none";
 };
 
-export const clinicalDocumentProfiles: Record<ClinicalDocumentProfile["id"], ClinicalDocumentProfile> = {
-  radiology: {
-    id: "radiology", resourceType: "radiology_report", label: "Informe radiológico",
-    sections: ["clinicalIndication", "technique", "comparison", "findings", "impression"],
-    layoutMode: "editor_viewer", viewerMode: "dicom", aiAnalysisProfile: "radiology",
-    availableActions: ["save", "sign", "print", "fullscreen"],
+const radiologyCriticalTypes = [
+  "Neumotórax a tensión", "Tromboembolismo pulmonar", "Disección o rotura aórtica", "Hemorragia intracraneal",
+  "ACV isquémico agudo", "Neumoperitoneo / aire libre", "Isquemia mesentérica", "Fractura inestable de columna",
+  "Torsión ovárica o testicular", "Embarazo ectópico", "Otro hallazgo crítico",
+] as const;
+
+export const clinicalDocumentProfiles: Record<Appointment["serviceCategory"], ClinicalDocumentProfile> = {
+  imaging: {
+    title: "Informe imagenológico",
+    editor: "Informe estructurado imagenológico",
+    confirmationLabel: "Confirmo que la impresión responde la pregunta clínica.",
+    criticalLabel: "Hallazgo crítico",
+    criticalTypeOptions: radiologyCriticalTypes,
+    layoutMode: "editor_viewer",
+    viewerMode: "dicom",
+    aiAnalysisProfile: "radiology",
+    sections: [
+      { name: "clinicalIndication", label: "Indicación clínica", hint: "Motivo del examen, antecedentes relevantes." },
+      { name: "technique", label: "Técnica", hint: "Protocolo, contraste, limitaciones." },
+      { name: "comparison", label: "Comparación", hint: "Estudios previos utilizados." },
+      { name: "findings", label: "Hallazgos", hint: "Descripción sistemática por órgano/región.", required: true },
+      { name: "impression", label: "Impresión", hint: "Conclusión numerada y recomendaciones.", required: true },
+    ],
   },
   consultation: {
-    id: "consultation", resourceType: "medical_consultation", label: "Consulta médica",
-    sections: ["reason", "history", "physicalExam", "assessment", "plan"],
-    layoutMode: "editor_only", viewerMode: "none", aiAnalysisProfile: "consultation",
-    availableActions: ["save", "sign", "print"],
-  },
-  pathology: {
-    id: "pathology", resourceType: "pathology_report", label: "Anatomía patológica",
-    sections: ["specimen", "macroscopy", "microscopy", "diagnosis"],
-    layoutMode: "editor_attachments", viewerMode: "attachments", aiAnalysisProfile: "pathology",
-    availableActions: ["save", "sign", "print"],
-  },
-  endoscopy: {
-    id: "endoscopy", resourceType: "endoscopy_report", label: "Endoscopia",
-    sections: ["indication", "preparation", "sedation", "findings", "intervention", "impression", "recommendations"],
-    layoutMode: "editor_attachments", viewerMode: "attachments", aiAnalysisProfile: "endoscopy",
-    availableActions: ["save", "sign", "print"],
+    title: "Nota clínica",
+    editor: "Consulta clínica estructurada",
+    confirmationLabel: "Confirmo que la evaluación y el plan fueron revisados.",
+    criticalLabel: "Situación clínica crítica",
+    layoutMode: "editor_only",
+    viewerMode: "none",
+    aiAnalysisProfile: "none",
+    sections: [
+      { name: "clinicalIndication", label: "Motivo de consulta", hint: "Problema principal declarado por el paciente o derivante." },
+      { name: "technique", label: "Anamnesis", hint: "Historia actual y antecedentes relevantes." },
+      { name: "comparison", label: "Examen físico / controles", hint: "Examen, signos vitales o comparación con evolución previa." },
+      { name: "findings", label: "Evaluación", hint: "Hallazgos clínicos y razonamiento.", required: true },
+      { name: "impression", label: "Diagnóstico y plan", hint: "Diagnósticos, indicaciones, tratamiento y control.", required: true },
+    ],
   },
   laboratory: {
-    id: "laboratory", resourceType: "laboratory_report", label: "Informe de laboratorio",
-    sections: ["request", "sample", "results", "interpretation"],
-    layoutMode: "editor_only", viewerMode: "none", aiAnalysisProfile: "none",
-    availableActions: ["save", "sign", "print"],
+    title: "Informe de laboratorio",
+    editor: "Resultados estructurados de laboratorio",
+    confirmationLabel: "Confirmo que los resultados fueron verificados.",
+    criticalLabel: "Resultado crítico",
+    layoutMode: "editor_only",
+    viewerMode: "none",
+    aiAnalysisProfile: "none",
+    sections: [
+      { name: "clinicalIndication", label: "Solicitud / indicación", hint: "Motivo clínico o panel solicitado." },
+      { name: "technique", label: "Muestra / método", hint: "Tipo de muestra, método, equipo o limitaciones preanalíticas." },
+      { name: "comparison", label: "Valores de referencia", hint: "Rangos relevantes o comparación con controles previos." },
+      { name: "findings", label: "Resultados", hint: "Resultados principales con unidades cuando corresponda.", required: true },
+      { name: "impression", label: "Interpretación", hint: "Conclusión clínica, alertas o recomendación de control." },
+    ],
+  },
+  pathology: {
+    title: "Informe anatomopatológico",
+    editor: "Informe estructurado de anatomía patológica",
+    confirmationLabel: "Confirmo que el diagnóstico fue verificado.",
+    criticalLabel: "Diagnóstico crítico",
+    layoutMode: "editor_attachments",
+    viewerMode: "attachments",
+    aiAnalysisProfile: "none",
+    sections: [
+      { name: "clinicalIndication", label: "Antecedentes clínicos", hint: "Hipótesis, sitio anatómico y contexto." },
+      { name: "technique", label: "Muestra / macroscopía", hint: "Tipo de muestra, cantidad, medidas y descripción macroscópica." },
+      { name: "comparison", label: "Procesamiento / técnicas", hint: "Tinciones, inmunohistoquímica o estudios complementarios." },
+      { name: "findings", label: "Microscopía", hint: "Descripción microscópica estructurada." },
+      { name: "impression", label: "Diagnóstico", hint: "Diagnóstico anatomopatológico, grado, márgenes o recomendaciones.", required: true },
+    ],
   },
   procedure: {
-    id: "procedure", resourceType: "procedure_note", label: "Nota de procedimiento",
-    sections: ["indication", "technique", "incidents", "findings", "plan"],
-    layoutMode: "editor_attachments", viewerMode: "attachments", aiAnalysisProfile: "generic_clinical_note",
-    availableActions: ["save", "sign", "print"],
+    title: "Reporte de procedimiento",
+    editor: "Procedimiento estructurado",
+    confirmationLabel: "Confirmo que la técnica y la conclusión o plan fueron revisados.",
+    criticalLabel: "Evento o hallazgo crítico",
+    layoutMode: "editor_attachments",
+    viewerMode: "attachments",
+    aiAnalysisProfile: "none",
+    sections: [
+      { name: "clinicalIndication", label: "Indicación", hint: "Motivo del procedimiento y antecedentes." },
+      { name: "technique", label: "Técnica / procedimiento", hint: "Descripción del procedimiento, materiales y sedación si aplica.", required: true },
+      { name: "comparison", label: "Incidentes / limitaciones", hint: "Complicaciones, tolerancia o limitaciones." },
+      { name: "findings", label: "Hallazgos", hint: "Hallazgos observados durante el procedimiento." },
+      { name: "impression", label: "Conclusión y plan", hint: "Conclusión, indicaciones post-procedimiento y seguimiento.", required: true },
+    ],
   },
 };
 
-export const clinicalProfileForCategory = (category: "imaging" | "laboratory" | "pathology" | "consultation" | "procedure") => ({
-  imaging: clinicalDocumentProfiles.radiology,
-  laboratory: clinicalDocumentProfiles.laboratory,
-  pathology: clinicalDocumentProfiles.pathology,
-  consultation: clinicalDocumentProfiles.consultation,
-  procedure: clinicalDocumentProfiles.procedure,
-})[category];
+export const clinicalProfileForCategory = (category: Appointment["serviceCategory"] = "procedure") => clinicalDocumentProfiles[category];
+
+export const supportsRadiologyAi = (category: Appointment["serviceCategory"]) =>
+  clinicalProfileForCategory(category).aiAnalysisProfile === "radiology";

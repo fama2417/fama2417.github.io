@@ -5,6 +5,7 @@ import { normalizeCandidateKey, normalizeLocalCodeName } from "./ai-normalizatio
 export type AiReportContext = {
   id: string;
   tenantId: string;
+  reportCategory: "consultation" | "imaging" | "laboratory" | "pathology" | "procedure";
   serviceTypeId: string | null;
   serviceTypeCode: string;
   serviceTypeName: string;
@@ -20,7 +21,7 @@ export type AiReportContext = {
 export async function getReportForAiExtraction(reportId: string, supabase: AiSupabase): Promise<AiReportContext> {
   const report = await supabase
     .from("radiology_reports")
-    .select("id, tenant_id, appointment_id, clinical_indication, technique, findings, impression, appointment:appointments(service_type_id, modality, reason, procedure_code)")
+    .select("id, tenant_id, appointment_id, report_category, clinical_indication, technique, findings, impression, appointment:appointments(service_type_id, modality, reason, procedure_code)")
     .eq("id", reportId)
     .maybeSingle();
   if (report.error) throw report.error;
@@ -42,6 +43,7 @@ export async function getReportForAiExtraction(reportId: string, supabase: AiSup
   return {
     id: row.id,
     tenantId: row.tenant_id,
+    reportCategory: row.report_category ?? "imaging",
     serviceTypeId,
     serviceTypeCode: st.code ?? appointment.procedure_code ?? "",
     serviceTypeName: st.name ?? appointment.reason ?? "",

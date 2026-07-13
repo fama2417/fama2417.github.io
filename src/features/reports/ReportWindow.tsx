@@ -1,17 +1,17 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { Fragment, FormEvent, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { CODE_SYSTEMS, codeHref, codingError } from "@/features/clinical/coding";
 import { CodePicker } from "@/features/clinical/CodePicker";
 import { ClinicalWorkspace } from "@/features/clinical-workspace/ClinicalWorkspace";
-import { clinicalProfileForCategory } from "@/features/clinical-workspace/profiles";
+import { clinicalProfileForCategory, supportsRadiologyAi, type ReportSection } from "@/features/clinical-workspace/profiles";
 import type { Appointment } from "@/features/appointments/mock-data";
 import { fetchAppointments, orderFileUrl } from "@/features/appointments/repository";
 import { appointmentStatusLabels } from "@/features/appointments/status";
 import { fetchMyTenant, renderHeader, type Tenant } from "@/features/tenant/repository";
 import { supabase } from "@/lib/supabase-client";
 import {
-  addAddendum, addCommunication, addFollowUp, addKeyImage, captureUrl, deleteReport, fetchAddenda, fetchCommunications,
+  addAddendum, addCommunication, addFollowUp, addKeyImage, canSignReport, captureUrl, deleteReport, fetchAddenda, fetchCommunications,
   fetchFollowUps, fetchKeyImages, fetchMyProfile, fetchReport, fetchSignatureUrl, isCaptureKeyImage, removeKeyImage,
   reopenReport, saveReport, updateFollowUpStatus, updateKeyImageCaption, uploadKeyImageCapture, type FollowUpStatus,
   type RadiologyReport, type ReportAddendum, type ReportCommunication, type ReportFollowUp, type ReportKeyImage,
@@ -19,8 +19,7 @@ import {
 import { AiFindingsPanel } from "./AiFindingsPanel";
 import { ReportReleasePanel } from "./ReportReleasePanel";
 import { fetchTemplates, type ReportTemplate } from "./templates";
-import { profileFor, type ReportSection } from "./profiles";
-import { validateFinalReport } from "./validation";
+import { criticalFindingState, criticalFindingTypeError, validateFinalReport } from "./validation";
 
 const fallbackOhifUrl = (process.env.NEXT_PUBLIC_OHIF_URL ?? "http://localhost:8042/ohif").replace(/\/$/, "");
 const localNow = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
@@ -35,25 +34,13 @@ const emptyReport = (appointmentId: string, appointment?: Appointment): Radiolog
   diagnosisCodeSystem: "ICD-10",
   diagnosisCode: "",
   diagnosisCodeDisplay: "",
-  appointmentId, clinicalIndication: "", technique: "", comparison: "Sin estudios previos disponibles.", findings: "", impression: "",
+  appointmentId, clinicalIndication: "", technique: "", comparison: appointment?.serviceCategory === "imaging" ? "Sin estudios previos disponibles." : "", findings: "", impression: "",
   status: "draft", criticalFinding: false, criticalFindingType: "", identityConfirmed: false, clinicalQuestionAnswered: false,
 });
 
-const criticalFindingTypes = [
-  "Neumotórax a tensión", "Tromboembolismo pulmonar", "Disección o rotura aórtica", "Hemorragia intracraneal",
-  "ACV isquémico agudo", "Neumoperitoneo / aire libre", "Isquemia mesentérica", "Fractura inestable de columna",
-  "Torsión ovárica o testicular", "Embarazo ectópico", "Otro hallazgo crítico",
-];
 const channelLabels: Record<ReportCommunication["channel"], string> = { phone: "Teléfono", in_person: "Presencial", secure_message: "Mensajería segura", email: "Correo", other: "Otro" };
 const followUpLabels: Record<FollowUpStatus, string> = { pending: "Pendiente", acknowledged: "Recibido", completed: "Realizado" };
 const reportSectionOrder: Record<ReportSection["name"], number> = { impression: 0, findings: 1, clinicalIndication: 2, technique: 3, comparison: 4 };
-const sections = [
-  { name: "clinicalIndication", label: "Indicación clínica", hint: "Motivo del examen, antecedentes relevantes." },
-  { name: "technique", label: "Técnica", hint: "Protocolo, contraste, limitaciones." },
-  { name: "comparison", label: "Comparación", hint: "Estudios previos utilizados." },
-  { name: "findings", label: "Hallazgos", hint: "Descripción sistemática por órgano/región." },
-  { name: "impression", label: "Impresión", hint: "Conclusión numerada y recomendaciones." },
-] as const;
 
 const appointmentDetail = (appointment: Appointment): [string, string][] => [
   ["Identificador", appointment.patientIdentifier ?? ""], ["Previsión", appointment.patientPrevision ?? ""],
@@ -87,12 +74,15 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [aiOperationActive, setAiOperationActive] = useState(false);
   const [signatureImage, setSignatureImage] = useState<string | null>(null);
   const [keyImages, setKeyImages] = useState<ReportKeyImage[]>([]);
   const [captureUrls, setCaptureUrls] = useState<Record<string, string>>({});
   const [role, setRole] = useState<string>("");
+  const [canSign, setCanSign] = useState(false);
   const [reportAction, setReportAction] = useState<{ kind: "reopen" | "delete"; reason: string } | null>(null);
   const viewerRef = useRef<HTMLIFrameElement>(null);
+  const criticalPanelRef = useRef<HTMLDetailsElement>(null);
 
   useEffect(() => {
     keyImages.filter((item) => isCaptureKeyImage(item.instanceId)).forEach((item) => {
@@ -112,8 +102,9 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
   }, []);
 
   useEffect(() => {
-    Promise.all([fetchAppointments(), fetchReport(appointmentId), fetchCommunications(appointmentId), fetchAddenda(appointmentId), fetchFollowUps(appointmentId), fetchMyProfile()])
-      .then(([appointments, storedReport, storedCommunications, storedAddenda, storedFollowUps, profile]) => {
+    Promise.all([fetchAppointments(), fetchReport(appointmentId), fetchAddenda(appointmentId), fetchFollowUps(appointmentId), fetchMyProfile()])
+      .then(async ([appointments, storedReport, storedAddenda, storedFollowUps, profile]) => {
+        const storedCommunications = storedReport?.id ? await fetchCommunications(storedReport.id) : [];
         const current = appointments.find((item) => item.id === appointmentId) ?? null;
         setAppointment(current);
         if (current) setPriorReports(appointments
@@ -123,8 +114,9 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
         else if (current) setReport(emptyReport(appointmentId, current));
         setCommunications(storedCommunications); setAddenda(storedAddenda); setFollowUps(storedFollowUps);
         setRole(profile.role);
+        setCanSign(current ? await canSignReport(current.id) : false);
       })
-      .catch(() => setError("No fue posible cargar el estudio. Verifica que la migración clínica esté aplicada."))
+      .catch(() => setError("No fue posible cargar la atención. Verifica que la migración clínica esté aplicada."))
       .finally(() => setLoading(false));
     fetchTemplates().then(setTemplates).catch(() => undefined);
     fetchMyTenant().then(setTenant).catch(() => undefined);
@@ -177,32 +169,43 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
     setNotice(`Plantilla "${template.name}" aplicada.`);
   }
 
+  function finalReportError() {
+    const criticalState = criticalFindingState(report.criticalFinding, report.id, communications);
+    return validateFinalReport(report, criticalState.status === "confirmed", appointment?.serviceCategory ?? report.reportCategory) || [
+      codingError(report.reportCodeSystem, report.reportCode, report.reportCodeDisplay, "Reporte/prestación", true),
+      codingError(report.findingCodeSystem, report.findingCode, report.findingCodeDisplay, "Hallazgo principal"),
+      codingError(report.diagnosisCodeSystem, report.diagnosisCode, report.diagnosisCodeDisplay, "Diagnóstico"),
+    ].find(Boolean) || "";
+  }
+
   async function persist(status: RadiologyReport["status"]) {
     if (status === "final") {
-      const validation = validateFinalReport(report, communications.some((item) => item.urgency === "critical" && item.acknowledged));
-      if (validation) return setError(validation);
-      const codingValidation = [
-        codingError(report.reportCodeSystem, report.reportCode, report.reportCodeDisplay, "Reporte/prestación", true),
-        codingError(report.findingCodeSystem, report.findingCode, report.findingCodeDisplay, "Hallazgo principal"),
-        codingError(report.diagnosisCodeSystem, report.diagnosisCode, report.diagnosisCodeDisplay, "Diagnóstico"),
-      ].find(Boolean);
-      if (codingValidation) return setError(codingValidation);
+      const validation = finalReportError();
+      if (validation) { setError(validation); return null; }
     }
     setSaving(true); setError(""); setNotice("");
     try {
       const saved = await saveReport({ ...report, status, reportCategory: appointment?.serviceCategory ?? report.reportCategory });
       setReport(saved);
-      setNotice(status === "final" ? "Reporte firmado y bloqueado como definitivo." : "Borrador guardado.");
+      setNotice(status === "final" ? "Documento firmado y bloqueado como definitivo." : "Borrador guardado.");
       if (status === "final" && appointment?.serviceCategory === "imaging") await archivePdfInPacs();
+      return saved;
     } catch {
-      setError(status === "final" ? "No fue posible firmar. Verifica tu perfil de administración/radiología y el registro profesional." : "No fue posible guardar el borrador.");
+      setError(status === "final" ? "No fue posible firmar. Verifica tu ámbito y registro profesional." : "No fue posible guardar el borrador.");
+      return null;
     } finally { setSaving(false); }
+  }
+
+  async function ensureDraftSavedForAi() {
+    if (saving || !await persist("draft")) throw new Error("Draft save failed");
   }
 
   async function recordCommunication(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setSaving(true); setError("");
     try {
-      const created = await addCommunication(appointmentId, { ...communicationDraft, communicatedAt: new Date(communicationDraft.communicatedAt).toISOString() });
+      const communicationReport = report.id ? report : await persist("draft");
+      if (!communicationReport?.id) return;
+      const created = await addCommunication(communicationReport.id, appointmentId, { ...communicationDraft, communicatedAt: new Date(communicationDraft.communicatedAt).toISOString() });
       setCommunications((current) => [...current, created]);
       setCommunicationDraft({ recipient: "", channel: "phone", communicatedAt: localNow(), acknowledged: false, notes: "" });
       setNotice("Intento de comunicación registrado.");
@@ -263,6 +266,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
 
   /** Pegar (Ctrl+V) una captura del visor en cualquier parte del editor la agrega como imagen clave. */
   function handlePaste(event: React.ClipboardEvent) {
+    if (appointment?.serviceCategory !== "imaging") return;
     const file = Array.from(event.clipboardData.files).find((entry) => entry.type.startsWith("image/"));
     if (file && report.status !== "final") { event.preventDefault(); uploadCapture(file); }
   }
@@ -283,7 +287,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
       setAddenda((current) => [...current, created]);
       if (images.length) setKeyImages((current) => [...current, ...images]);
       setAddendumText(""); setAddendumFiles([]); setNotice("Adenda firmada.");
-    } catch { setError("No fue posible firmar la adenda. Requiere perfil de administración/radiología y un informe definitivo."); }
+    } catch { setError("No fue posible firmar la adenda. Requiere un ámbito profesional autorizado y un documento definitivo."); }
     finally { setSaving(false); }
   }
 
@@ -301,7 +305,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
     setSaving(true); setError("");
     try {
       await deleteReport(appointmentId, reason);
-      setReport(emptyReport(appointmentId, appointment ?? undefined)); setAddenda([]); setKeyImages([]); setReportAction(null);
+      setReport(emptyReport(appointmentId, appointment ?? undefined)); setCommunications([]); setAddenda([]); setKeyImages([]); setReportAction(null);
       try {
         await deletePdfFromPacs();
         setNotice("Informe eliminado (también del PACS). El motivo quedó registrado.");
@@ -312,39 +316,102 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
     finally { setSaving(false); }
   }
 
-  if (loading) return <p className="empty-state">Cargando estudio…</p>;
+  if (loading) return <p className="empty-state">Cargando atención…</p>;
   if (!role) return <p className="notice" role="alert">{error || "No fue posible verificar tu perfil."}</p>;
-  if (!appointment) return <p className="notice" role="alert">{error || "Estudio no encontrado."}</p>;
+  if (!appointment) return <p className="notice" role="alert">{error || "Atención no encontrada."}</p>;
 
   const baseKeyImages = keyImages.filter((item) => !item.addendumId);
-  const profile = profileFor(appointment.serviceCategory);
-  const workspaceProfile = clinicalProfileForCategory(appointment.serviceCategory);
+  const profile = clinicalProfileForCategory(appointment.serviceCategory);
   const sections = profile.sections;
   const orderedSections = [...sections].sort((a, b) => reportSectionOrder[a.name] - reportSectionOrder[b.name]);
   const examLabel = `${appointment.serviceCategory === "imaging" && appointment.modality !== "OT" ? `${appointment.modality} · ` : ""}${appointment.reason}`;
-  if (role === "operator") return <div className="report-workstation read-only-report">
+  if (role === "operator" || (role !== "admin" && !canSign)) return <div className="report-workstation read-only-report">
     <header className="report-workstation-header"><div><p className="eyebrow">{profile.title}</p><h2>{appointment.patientName}</h2><p className="report-meta"><span>{appointment.date}</span><span>{examLabel}</span></p></div>{report.status === "final" && <button className="text-button" type="button" onClick={() => window.print()}>Imprimir</button>}</header>
     {report.status !== "final" ? <p className="notice">El informe definitivo aún no está disponible.</p> : <article className="card legal-content">
       {tenant?.reportHeader && <p>{renderHeader(tenant.reportHeader, { paciente: appointment.patientName, id: appointment.patientIdentifier || "—", medico: appointment.treatingPhysician || appointment.requesterName || "—", examen: examLabel, fecha: appointment.date, institucion: tenant.name })}</p>}
       {sections.map((section) => report[section.name] && <section key={section.name}><h3>{section.label}</h3><p>{report[section.name]}</p></section>)}
-      {baseKeyImages.length > 0 && <section><h3>Imágenes clave</h3><div className="key-images-grid">{baseKeyImages.map((item) => <figure key={item.id}>{keyImageSrc(item) && <img src={keyImageSrc(item)} alt="Imagen clave" />}{item.caption && <figcaption>{item.caption}</figcaption>}</figure>)}</div></section>}
+      {appointment.serviceCategory === "imaging" && baseKeyImages.length > 0 && <section><h3>Imágenes clave</h3><div className="key-images-grid">{baseKeyImages.map((item) => <figure key={item.id}>{keyImageSrc(item) && <img src={keyImageSrc(item)} alt="Imagen clave" />}{item.caption && <figcaption>{item.caption}</figcaption>}</figure>)}</div></section>}
       {addenda.map((item, index) => <section key={item.id}><h3>Adenda {index + 1}</h3><p>{item.text}</p></section>)}
       <footer><strong>{report.signer ? signerLabel(report.signer.name, report.signer.registration) : ""}</strong>{report.signedAt && <p>Firmado el {new Date(report.signedAt).toLocaleString("es-CL")}</p>}</footer>
     </article>}
   </div>;
 
-  const setSection = (name: string, value: string) => setReport((current) => ({ ...current, [name]: value }));
-  const viewer = appointment.studyInstanceUid && viewerBase ? `${viewerBase}/viewer?StudyInstanceUIDs=${encodeURIComponent(appointment.studyInstanceUid)}` : null;
+  const setSection = (name: ReportSection["name"], value: string) => setReport((current) => ({ ...current, [name]: value }));
+  const openOrderDocument = () => orderFileUrl(appointment.orderFile)
+    .then((url) => window.open(url, "_blank", "noopener,noreferrer"))
+    .catch(() => setError("No fue posible abrir el documento adjunto."));
+  const viewer = profile.viewerMode === "dicom" && appointment.studyInstanceUid && viewerBase ? `${viewerBase}/viewer?StudyInstanceUIDs=${encodeURIComponent(appointment.studyInstanceUid)}` : null;
   const fullScreen = appointment.studyInstanceUid && viewerBase === "/ohif"
     ? `/api/pacs/handoff?next=${encodeURIComponent(`/ohif/viewer?StudyInstanceUIDs=${appointment.studyInstanceUid}`)}` : viewer;
   const detail: [string, string][] = [["Anamnesis", appointment.anamnesis || "—"], ["Hipótesis diagnóstica", appointment.diagnosticHypothesis || "—"], ...appointmentDetail(appointment).filter(([, value]) => value)];
-  const acknowledgedCommunication = communications.findLast((item) => item.urgency === "critical" && item.acknowledged);
+  const institutionLabel = tenant?.name || appointment.branch || appointment.service;
+  const criticalState = criticalFindingState(report.criticalFinding, report.id, communications);
+  const acknowledgedCommunication = criticalState.communication;
+  const signingError = report.status === "draft" ? finalReportError() : "";
+  const criticalTypeError = criticalFindingTypeError(appointment.serviceCategory);
+  const attachmentPane = profile.viewerMode === "attachments" && appointment.orderFile ? <section className="clinical-attachments-pane" aria-label="Adjuntos clínicos">
+    <div className="card-heading"><div><p className="eyebrow">Documentos asociados</p><h3>Adjuntos de la atención</h3></div></div>
+    <button className="button secondary" type="button" onClick={openOrderDocument}>Abrir documento adjunto 📎</button>
+    <p className="empty-inline">Los documentos asociados se cargan desde la cita y permanecen vinculados a la misma atención.</p>
+  </section> : undefined;
+
+  function showCriticalCommunication() {
+    setEditorTab("report");
+    requestAnimationFrame(() => {
+      const panel = criticalPanelRef.current;
+      if (!panel) return;
+      panel.open = true;
+      panel.scrollIntoView({ behavior: "smooth", block: "start" });
+      const target = criticalState.status === "confirmed"
+        ? panel.querySelector<HTMLElement>("summary")
+        : report.criticalFindingType
+          ? panel.querySelector<HTMLElement>("input[required]")
+          : panel.querySelector<HTMLElement>("[data-critical-type]");
+      target?.focus();
+    });
+  }
+
+  function handleEditorTabKey(event: KeyboardEvent<HTMLElement>) {
+    if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+    event.preventDefault();
+    const nextTab = editorTab === "report" ? "coding" : "report";
+    setEditorTab(nextTab);
+    requestAnimationFrame(() => document.getElementById(`${nextTab}-tab`)?.focus());
+  }
+
+  const criticalFindingControl = <Fragment>
+    <label className="consent-field critical-field"><input type="checkbox" checked={report.criticalFinding} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, criticalFinding: event.target.checked, criticalFindingType: event.target.checked ? current.criticalFindingType : "" }))} />{profile.criticalLabel}: requiere comunicación inmediata y confirmada.</label>
+    {report.criticalFinding && <details ref={criticalPanelRef} className="report-clinical-panel collapsible critical-panel" open>
+      <summary><span className="collapsible-icon">❤️‍🔥</span>{profile.criticalLabel}{report.criticalFindingType && <span className="collapsible-hint">{report.criticalFindingType}</span>}{communications.length > 0 && <span className="collapsible-count">{communications.length}</span>}</summary>
+      <label>Tipo de {profile.criticalLabel.toLocaleLowerCase("es-CL")}{profile.criticalTypeOptions
+        ? <select data-critical-type value={report.criticalFindingType} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, criticalFindingType: event.target.value }))}><option value="">Seleccionar…</option>{profile.criticalTypeOptions.map((type) => <option key={type} value={type}>{type}</option>)}</select>
+        : <input data-critical-type value={report.criticalFindingType} disabled={report.status === "final"} placeholder="Describir…" onChange={(event) => setReport((current) => ({ ...current, criticalFindingType: event.target.value }))} />}</label>
+      <h4>Registro de comunicación</h4>
+      {communications.map((item) => <div className="workflow-entry" key={item.id}><strong>{item.acknowledged ? "Confirmada" : "Sin confirmación"}</strong><span>{new Date(item.communicatedAt).toLocaleString("es-CL")} · {item.recipient} · {channelLabels[item.channel]}</span>{item.notes && <span>{item.notes}</span>}</div>)}
+      <form className="report-inline-form" onSubmit={recordCommunication}>
+        <label>Destinatario<input required value={communicationDraft.recipient} onChange={(event) => setCommunicationDraft({ ...communicationDraft, recipient: event.target.value })} /></label>
+        <label>Vía<select value={communicationDraft.channel} onChange={(event) => setCommunicationDraft({ ...communicationDraft, channel: event.target.value as ReportCommunication["channel"] })}>{Object.entries(channelLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+        <label>Fecha y hora<input required type="datetime-local" value={communicationDraft.communicatedAt} onChange={(event) => setCommunicationDraft({ ...communicationDraft, communicatedAt: event.target.value })} /></label>
+        <label className="consent-field"><input type="checkbox" checked={communicationDraft.acknowledged} onChange={(event) => setCommunicationDraft({ ...communicationDraft, acknowledged: event.target.checked })} />Recepción confirmada</label>
+        <label className="span-2">Notas / intento fallido<textarea value={communicationDraft.notes} onChange={(event) => setCommunicationDraft({ ...communicationDraft, notes: event.target.value })} /></label>
+        <button className="button secondary" disabled={saving} type="submit">Registrar intento</button>
+      </form>
+    </details>}
+  </Fragment>;
 
   return <div className="report-workstation">
     <header className="report-workstation-header">
-      <div><p className="eyebrow">{profile.title}</p><h2>{appointment.patientName}</h2><p className="report-meta">
-        <span>{appointment.date} {appointment.startTime}</span><span>{examLabel}</span><span>{appointment.locationName}</span><span>{appointmentStatusLabels[appointment.status]}</span>
-      </p></div>
+      <div className="report-header-context">
+        <div className="report-patient-line"><div><p className="eyebrow">{profile.title}</p><h2>{appointment.patientName}</h2></div>{appointment.patientIdentifier && <span className="report-patient-id">{appointment.patientIdentifier}</span>}</div>
+        <strong className="report-study-name">{appointment.reason}</strong>
+        <dl className="report-meta">
+          <div><dt>Fecha</dt><dd>{appointment.date} · {appointment.startTime}</dd></div>
+          {appointment.serviceCategory === "imaging" && <div><dt>Modalidad</dt><dd>{appointment.modality}</dd></div>}
+          {institutionLabel && <div><dt>Institución</dt><dd>{institutionLabel}</dd></div>}
+          {appointment.locationName && <div><dt>Ubicación</dt><dd>{appointment.locationName}</dd></div>}
+          <div><dt>Estado cita</dt><dd>{appointmentStatusLabels[appointment.status]}</dd></div>
+        </dl>
+      </div>
       <div className="report-header-actions">
         <button className="text-button" type="button" onClick={() => setShowDetail(true)}>Datos de la cita</button>
         <span className={`report-status ${report.status}`}>{report.status === "final" ? "Definitivo" : "Borrador"}</span>
@@ -356,16 +423,16 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
     {showDetail && <div className="appointment-info-backdrop" role="dialog" aria-modal="true" aria-label="Datos del agendamiento" onClick={(event) => { if (event.target === event.currentTarget) setShowDetail(false); }}>
       <div className="appointment-info"><div className="card-heading"><h3>Datos del agendamiento</h3><button className="text-button" type="button" onClick={() => setShowDetail(false)}>Cerrar ✕</button></div>
         <dl>{detail.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
-        {appointment.orderFile ? <button className="button secondary" type="button" onClick={() => orderFileUrl(appointment.orderFile).then((url) => window.open(url, "_blank")).catch(() => setError("No fue posible abrir el documento escaneado."))}>Ver documento escaneado 📎</button> : <p className="empty-inline">Sin documento escaneado adjunto.</p>}
+        {appointment.orderFile ? <button className="button secondary" type="button" onClick={openOrderDocument}>Ver documento adjunto 📎</button> : <p className="empty-inline">Sin documento adjunto.</p>}
       </div>
     </div>}
 
-    <ClinicalWorkspace profile={workspaceProfile} editor={<section className="report-editor" aria-label="Editor de informe" onPaste={handlePaste}>
-        <nav className="ai-view-switch report-editor-tabs" aria-label="Secciones del informe">
-          <button id="report-tab" type="button" aria-controls="report-panel" aria-pressed={editorTab === "report"} onClick={() => setEditorTab("report")}>Informe</button>
-          <button id="coding-tab" type="button" aria-controls="coding-panel" aria-pressed={editorTab === "coding"} onClick={() => setEditorTab("coding")}>Codificación</button>
+    <ClinicalWorkspace profile={profile} editor={<section className="report-editor" aria-label="Editor del documento clínico" onPaste={handlePaste}>
+        <nav className="ai-view-switch report-editor-tabs" role="tablist" aria-label="Secciones del informe" onKeyDown={handleEditorTabKey}>
+          <button id="report-tab" type="button" role="tab" aria-controls="report-panel" aria-selected={editorTab === "report"} tabIndex={editorTab === "report" ? 0 : -1} onClick={() => setEditorTab("report")}>Informe</button>
+          <button id="coding-tab" type="button" role="tab" aria-controls="coding-panel" aria-selected={editorTab === "coding"} tabIndex={editorTab === "coding" ? 0 : -1} onClick={() => setEditorTab("coding")}>Codificación</button>
         </nav>
-        <div id="report-panel" className="report-fields report-tab-panel" role="region" aria-labelledby="report-tab" hidden={editorTab !== "report"}>
+        <div id="report-panel" className="report-fields report-tab-panel" role="tabpanel" aria-labelledby="report-tab" hidden={editorTab !== "report"}>
           <div className="card-heading"><h3>{profile.editor}</h3>{report.status !== "final" && templates.some((template) => template.active && template.category === appointment.serviceCategory) &&
             <select defaultValue="" onChange={(event) => { applyTemplate(event.target.value); event.target.value = ""; }} aria-label="Aplicar plantilla">
               <option value="" disabled>Aplicar plantilla…</option>
@@ -373,30 +440,17 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
               {appointment.serviceCategory === "imaging" && templates.filter((template) => template.active && template.category === "imaging" && template.modality !== appointment.modality).map((template) => <option key={template.id} value={template.id}>{template.modality} · {template.name}</option>)}
             </select>}
           </div>
-          {orderedSections.map((section) => <label key={section.name}>{section.label}<textarea name={section.name} value={report[section.name]} placeholder={section.hint} onChange={(event) => setSection(section.name, event.target.value)} disabled={report.status === "final"} /></label>)}
+          {orderedSections.map((section) => <Fragment key={section.name}>
+            <label className={`report-section report-section-${section.name}`}>{section.label}<textarea name={section.name} value={report[section.name]} placeholder={section.hint} onChange={(event) => setSection(section.name, event.target.value)} disabled={report.status === "final"} /></label>
+            {section.name === "impression" && criticalFindingControl}
+          </Fragment>)}
           <div className="report-confirmations">
-            <label className="consent-field"><input type="checkbox" checked={report.identityConfirmed} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, identityConfirmed: event.target.checked }))} />Confirmo la identidad del paciente y el estudio.</label>
-            <label className="consent-field"><input type="checkbox" checked={report.clinicalQuestionAnswered} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, clinicalQuestionAnswered: event.target.checked }))} />Confirmo que la impresión responde la pregunta clínica.</label>
+            <label className="consent-field"><input type="checkbox" checked={report.identityConfirmed} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, identityConfirmed: event.target.checked }))} />Confirmo la identidad del paciente.</label>
+            <label className="consent-field"><input type="checkbox" checked={report.clinicalQuestionAnswered} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, clinicalQuestionAnswered: event.target.checked }))} />{profile.confirmationLabel}</label>
           </div>
 
-          <label className="consent-field critical-field"><input type="checkbox" checked={report.criticalFinding} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, criticalFinding: event.target.checked, criticalFindingType: event.target.checked ? current.criticalFindingType : "" }))} />Hallazgo crítico: requiere comunicación inmediata y confirmada.</label>
-          {report.criticalFinding && <details className="report-clinical-panel collapsible critical-panel" open>
-            <summary><span className="collapsible-icon">❤️‍🔥</span>Hallazgo crítico{report.criticalFindingType && <span className="collapsible-hint">{report.criticalFindingType}</span>}{communications.length > 0 && <span className="collapsible-count">{communications.length}</span>}</summary>
-            <label>Tipo de hallazgo crítico<select value={report.criticalFindingType} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, criticalFindingType: event.target.value }))}><option value="">Seleccionar…</option>{criticalFindingTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
-            <h4>Registro de comunicación</h4>
-            {communications.map((item) => <div className="workflow-entry" key={item.id}><strong>{item.acknowledged ? "Confirmada" : "Sin confirmación"}</strong><span>{new Date(item.communicatedAt).toLocaleString("es-CL")} · {item.recipient} · {channelLabels[item.channel]}</span>{item.notes && <span>{item.notes}</span>}</div>)}
-            <form className="report-inline-form" onSubmit={recordCommunication}>
-              <label>Destinatario<input required value={communicationDraft.recipient} onChange={(event) => setCommunicationDraft({ ...communicationDraft, recipient: event.target.value })} /></label>
-              <label>Vía<select value={communicationDraft.channel} onChange={(event) => setCommunicationDraft({ ...communicationDraft, channel: event.target.value as ReportCommunication["channel"] })}>{Object.entries(channelLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-              <label>Fecha y hora<input required type="datetime-local" value={communicationDraft.communicatedAt} onChange={(event) => setCommunicationDraft({ ...communicationDraft, communicatedAt: event.target.value })} /></label>
-              <label className="consent-field"><input type="checkbox" checked={communicationDraft.acknowledged} onChange={(event) => setCommunicationDraft({ ...communicationDraft, acknowledged: event.target.checked })} />Recepción confirmada</label>
-              <label className="span-2">Notas / intento fallido<textarea value={communicationDraft.notes} onChange={(event) => setCommunicationDraft({ ...communicationDraft, notes: event.target.value })} /></label>
-              <button className="button secondary" disabled={saving} type="submit">Registrar intento</button>
-            </form>
-          </details>}
-
-          <details className="report-clinical-panel collapsible" open>
-            <summary><span className="collapsible-icon">🩻</span>Imágenes clave (KIN){baseKeyImages.length > 0 && <span className="collapsible-count">{baseKeyImages.length}</span>}</summary>
+          {appointment.serviceCategory === "imaging" && <details className="report-clinical-panel collapsible kin-panel" open>
+            <summary><span className="collapsible-icon">🩻</span>Imágenes clave (KIN){fullScreen && <span className="kin-sync-status"><span aria-hidden="true">●</span>Sincronizado con OHIF</span>}{baseKeyImages.length > 0 && <span className="collapsible-count">{baseKeyImages.length}</span>}</summary>
             {baseKeyImages.length > 0 && <div className="key-images-grid">
               {baseKeyImages.map((item) => <figure key={item.id} className="key-image">
                 {keyImageSrc(item) && <img src={keyImageSrc(item)} alt="Imagen clave" loading="lazy" />}
@@ -412,11 +466,11 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
               <strong>Pega (Ctrl+V), arrastra o haz clic para agregar una imagen clave</strong>
               <span className="empty-inline">CT/MR/PET-CT: captura el corte con la cámara 📷 de OHIF (conserva las anotaciones) y suéltalo aquí — sin pasar por el escritorio si copias al portapapeles.</span>
             </label>}
-          </details>
+          </details>}
 
-          <AiFindingsPanel reportId={report.id} reportStatus={report.status} disabled={!["admin", "radiologist"].includes(role)} />
+          {supportsRadiologyAi(appointment.serviceCategory) && <AiFindingsPanel reportId={report.id} reportStatus={report.status} disabled={!["admin", "radiologist"].includes(role) || saving} ensureDraftSaved={ensureDraftSavedForAi} onOperationActiveChange={setAiOperationActive} />}
 
-          <details className="report-clinical-panel collapsible">
+          <details className="report-clinical-panel collapsible report-secondary-panel">
             <summary><span className="collapsible-icon">📌</span>Seguimientos accionables{followUps.length > 0 && <span className="collapsible-count">{followUps.length}</span>}</summary>
             {followUps.map((item) => <div className="workflow-entry" key={item.id}><strong>{item.recommendation}</strong><span>Plazo: {new Date(`${item.dueDate}T00:00:00`).toLocaleDateString("es-CL")} · Responsable: {item.responsible}</span><label>Estado<select value={item.status} onChange={(event) => changeFollowUpStatus(item.id, event.target.value as FollowUpStatus)}>{Object.entries(followUpLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div>)}
             <form className="report-inline-form" onSubmit={createFollowUp}>
@@ -427,7 +481,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
             </form>
           </details>
 
-          {priorReports.length > 0 && <details className="report-clinical-panel collapsible">
+          {priorReports.length > 0 && <details className="report-clinical-panel collapsible report-secondary-panel">
             <summary><span className="collapsible-icon">🗂️</span>Informes anteriores del paciente<span className="collapsible-count">{priorReports.length}</span></summary>
             <div className="prior-reports">{priorReports.map((prior) => <a key={prior.id} href={`/informe/${prior.id}`} target="_blank" rel="noreferrer"><span>{prior.date}</span><span className="prior-reason">{prior.modality} · {prior.reason}</span><span className={`report-status ${prior.reportStatus}`}>{prior.reportStatus === "final" ? "Definitivo" : "Borrador"}</span></a>)}</div>
           </details>}
@@ -444,15 +498,15 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
             </div>)}
             <form className="report-inline-form" onSubmit={signAddendum}>
               <label className="span-2">Nueva adenda<textarea required value={addendumText} onChange={(event) => setAddendumText(event.target.value)} placeholder="Corrección o información adicional; no reemplaza el informe original." /></label>
-              <label className="span-2">Imágenes de la adenda (opcional)<input type="file" accept="image/png,image/jpeg" multiple onChange={(event) => setAddendumFiles(Array.from(event.target.files ?? []))} /><span className="empty-inline">{addendumFiles.length ? `${addendumFiles.length} imagen(es) adjunta(s).` : "Captura desde OHIF y adjunta el corte con la anotación."}</span></label>
-              <button className="button secondary" disabled={saving} type="submit">Firmar adenda</button>
+              {appointment.serviceCategory === "imaging" && <label className="span-2">Imágenes de la adenda (opcional)<input type="file" accept="image/png,image/jpeg" multiple onChange={(event) => setAddendumFiles(Array.from(event.target.files ?? []))} /><span className="empty-inline">{addendumFiles.length ? `${addendumFiles.length} imagen(es) adjunta(s).` : "Captura desde OHIF y adjunta el corte con la anotación."}</span></label>}
+              <button className="button secondary" disabled={saving || !canSign} type="submit">Firmar adenda</button>
             </form>
           </details>}
         </div>
 
-        <div id="coding-panel" className="report-fields report-tab-panel" role="region" aria-labelledby="coding-tab" hidden={editorTab !== "coding"}>
+        <div id="coding-panel" className="report-fields report-tab-panel report-coding-panel" role="tabpanel" aria-labelledby="coding-tab" hidden={editorTab !== "coding"}>
           <div className="card-heading"><h3>Codificación estándar</h3></div>
-          <section className="report-clinical-panel">
+          <section className="report-clinical-panel coding-section">
             <div className="clinical-form">
               <label>Sistema reporte/prestación<select value={report.reportCodeSystem || "LOCAL"} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, reportCodeSystem: event.target.value }))}>{CODE_SYSTEMS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
               <CodePicker system={report.reportCodeSystem || "LOCAL"} code={report.reportCode} display={report.reportCodeDisplay} disabled={report.status === "final"}
@@ -467,15 +521,33 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
           </section>
         </div>
 
-        <footer className="report-actions">
-          {report.status === "draft" && <><button className="button secondary" type="button" disabled={saving} onClick={() => persist("draft")}>Guardar borrador</button><button className="button primary" type="button" disabled={saving} onClick={() => persist("final")}>Firmar definitivo</button></>}
-          {report.status === "final" && <span>Definitivo · las correcciones se agregan como adenda.</span>}
-          {report.status === "final" && role === "admin" && <><button className="button secondary" type="button" disabled={saving} onClick={() => setReportAction({ kind: "reopen", reason: "" })}>Reabrir informe</button><button className="text-button danger" type="button" disabled={saving} onClick={() => setReportAction({ kind: "delete", reason: "" })}>Eliminar informe</button></>}
-          <ReportReleasePanel appointmentId={appointmentId} reportStatus={report.status} role={role} />
-          {notice && <span className="form-notice" role="status">{notice}</span>}
-          {report.updatedAt && <span className="report-updated">Última modificación: {new Date(report.updatedAt).toLocaleString("es-CL")}</span>}
-        </footer>
-      </section>} viewer={appointment.serviceCategory === "imaging" ? <section className="viewer-pane" aria-label="Visor de imágenes">{fullScreen ? <iframe ref={viewerRef} src={fullScreen} title="Visor OHIF" allow="fullscreen" /> : <p className="empty-state">Este estudio aún no tiene imágenes vinculadas en el PACS.</p>}</section> : undefined} />
+        <div className="report-editor-footer">
+          {report.criticalFinding && <div className={`critical-status ${criticalState.status}`} role={criticalState.status === "pending" ? "alert" : "status"} aria-live={criticalState.status === "pending" ? "assertive" : "polite"} aria-atomic="true">
+            <span className="critical-status-icon" aria-hidden="true">{criticalState.status === "pending" ? "⚠" : "✓"}</span>
+            <div className="critical-status-copy">
+              <strong>{profile.criticalLabel}: {criticalState.status === "pending" ? "comunicación pendiente" : "comunicación confirmada"}</strong>
+              {criticalState.status === "pending"
+                ? <span>Requiere comunicación inmediata y confirmada.</span>
+                : <span>{acknowledgedCommunication?.communicatedAt && `Fecha y hora: ${new Date(acknowledgedCommunication.communicatedAt).toLocaleString("es-CL")}`}{acknowledgedCommunication?.recipient && ` · Destinatario: ${acknowledgedCommunication.recipient}`}</span>}
+              {!report.criticalFindingType && <span className="critical-status-warning">{criticalTypeError}</span>}
+            </div>
+            <button className="button secondary critical-status-action" type="button" onClick={showCriticalCommunication}>{criticalState.status === "pending" ? "Registrar comunicación" : "Ver registro"}</button>
+          </div>}
+          <footer className="report-actions">
+            <div className="report-save-state">
+              {report.status === "final" && <strong>Definitivo · las correcciones se agregan como adenda.</strong>}
+              <span className="report-updated">{saving ? "Guardando cambios…" : report.updatedAt ? `Última modificación: ${new Date(report.updatedAt).toLocaleString("es-CL")}` : "Borrador aún no guardado"}</span>
+              {notice && <span className="form-notice" role="status">{notice}</span>}
+              {report.status === "draft" && (aiOperationActive || signingError) && <span className="report-signing-error" role="status">{aiOperationActive ? "Espera a que finalice el análisis antes de firmar." : signingError}</span>}
+            </div>
+            <div className="report-action-buttons">
+              {report.status === "draft" && <><button className="button secondary" type="button" disabled={saving} onClick={() => persist("draft")}>Guardar borrador</button><button className="button primary" type="button" disabled={saving || aiOperationActive || !canSign} title={!canSign ? "Tu ámbito profesional no permite firmar esta prestación." : aiOperationActive ? "Espera a que finalice el análisis antes de firmar." : undefined} onClick={() => persist("final")}>Firmar definitivo</button></>}
+              {report.status === "final" && role === "admin" && <><button className="button secondary" type="button" disabled={saving} onClick={() => setReportAction({ kind: "reopen", reason: "" })}>Reabrir informe</button><button className="text-button danger" type="button" disabled={saving} onClick={() => setReportAction({ kind: "delete", reason: "" })}>Eliminar informe</button></>}
+              <ReportReleasePanel appointmentId={appointmentId} reportStatus={report.status} role={role} />
+            </div>
+          </footer>
+        </div>
+      </section>} viewer={appointment.serviceCategory === "imaging" ? <section className="viewer-pane" aria-label="Visor de imágenes">{fullScreen ? <iframe ref={viewerRef} src={fullScreen} title="Visor OHIF" allow="fullscreen" /> : <p className="empty-state">Este estudio aún no tiene imágenes vinculadas en el PACS.</p>}</section> : attachmentPane} />
 
     {reportAction && <div className="appointment-info-backdrop" role="dialog" aria-modal="true" aria-label={reportAction.kind === "reopen" ? "Reabrir reporte" : "Eliminar reporte"} onClick={(event) => { if (event.target === event.currentTarget) setReportAction(null); }}>
       <form className="appointment-info status-change-dialog" onSubmit={(event) => { event.preventDefault(); const reason = reportAction.reason.trim(); if (!reason) return; reportAction.kind === "reopen" ? reopen(reason) : removeReport(reason); }}>
@@ -492,16 +564,16 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
       {tenant?.reportHeader
         ? renderHeader(tenant.reportHeader, { paciente: appointment.patientName, id: appointment.patientIdentifier || "—", medico: appointment.treatingPhysician || appointment.requesterName || "—", examen: examLabel, fecha: appointment.date, institucion: tenant.name }).split("\n").map((line, index) => <p key={index}>{line}</p>)
         : <><p><strong>Paciente:</strong> {appointment.patientName} · <strong>ID:</strong> {appointment.patientIdentifier || "—"}</p><p><strong>Prestación:</strong> {examLabel} · <strong>Fecha:</strong> {appointment.date}</p></>}
-      {report.criticalFinding && <p><strong>⚠ HALLAZGO CRÍTICO{report.criticalFindingType && `: ${report.criticalFindingType}`}</strong>{acknowledgedCommunication && <> · Comunicado a {acknowledgedCommunication.recipient} por {channelLabels[acknowledgedCommunication.channel]}, {new Date(acknowledgedCommunication.communicatedAt).toLocaleString("es-CL")}.</>}</p>}
+      {report.criticalFinding && <p><strong>⚠ {profile.criticalLabel.toLocaleUpperCase("es-CL")}{report.criticalFindingType && `: ${report.criticalFindingType}`}</strong>{acknowledgedCommunication && <> · Comunicado a {acknowledgedCommunication.recipient} por {channelLabels[acknowledgedCommunication.channel]}, {new Date(acknowledgedCommunication.communicatedAt).toLocaleString("es-CL")}.</>}</p>}
       {sections.map((section) => report[section.name] && <section key={section.name}><h3>{section.label}</h3><p>{report[section.name]}</p></section>)}
-      {baseKeyImages.length > 0 && <section className="key-images-print"><h3>Imágenes clave</h3><div>
+      {appointment.serviceCategory === "imaging" && baseKeyImages.length > 0 && <section className="key-images-print"><h3>Imágenes clave</h3><div>
         {baseKeyImages.map((item) => <figure key={item.id}>{keyImageSrc(item) && <img src={keyImageSrc(item)} alt="Imagen clave" />}{item.caption && <figcaption>{item.caption}</figcaption>}</figure>)}
       </div></section>}
       {followUps.length > 0 && <section><h3>Recomendaciones y seguimiento</h3>{followUps.map((item) => <p key={item.id}>{item.recommendation} · Plazo {new Date(`${item.dueDate}T00:00:00`).toLocaleDateString("es-CL")} · {followUpLabels[item.status]}</p>)}</section>}
       {addenda.map((item, index) => <section key={item.id}><h3>Adenda {index + 1}</h3><p>{item.text}</p><p>{signerLabel(item.signer.name, item.signer.registration)} · {new Date(item.signedAt).toLocaleString("es-CL")}</p>
-        {keyImages.some((img) => img.addendumId === item.id) && <div className="key-images-print"><div>{keyImages.filter((img) => img.addendumId === item.id).map((img) => <figure key={img.id}>{keyImageSrc(img) && <img src={keyImageSrc(img)} alt="Imagen de adenda" />}{img.caption && <figcaption>{img.caption}</figcaption>}</figure>)}</div></div>}
+        {appointment.serviceCategory === "imaging" && keyImages.some((img) => img.addendumId === item.id) && <div className="key-images-print"><div>{keyImages.filter((img) => img.addendumId === item.id).map((img) => <figure key={img.id}>{keyImageSrc(img) && <img src={keyImageSrc(img)} alt="Imagen de adenda" />}{img.caption && <figcaption>{img.caption}</figcaption>}</figure>)}</div></div>}
       </section>)}
-      <footer>{signatureImage && <img className="signature-image" src={signatureImage} alt="Firma" />}<p>{report.signer ? signerLabel(report.signer.name, report.signer.registration) : "Informe sin firma"}</p><p>Firmado electrónicamente · {report.signedAt ? new Date(report.signedAt).toLocaleString("es-CL") : ""}</p></footer>
+      <footer>{signatureImage && <img className="signature-image" src={signatureImage} alt="Firma" />}<p>{report.signer ? signerLabel(report.signer.name, report.signer.registration) : "Documento sin firma"}</p><p>Firmado electrónicamente · {report.signedAt ? new Date(report.signedAt).toLocaleString("es-CL") : ""}</p></footer>
     </div>
   </div>;
 }

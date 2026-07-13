@@ -6,15 +6,15 @@ import { fetchAppointments } from "@/features/appointments/repository";
 import type { Appointment } from "@/features/appointments/mock-data";
 import { supabase } from "@/lib/supabase-client";
 
-type Role = "admin" | "operator" | "radiologist";
+type Role = "admin" | "operator" | "radiologist" | "clinician";
 
-const roleLabels: Record<Role, string> = { admin: "Administrador", operator: "Operador / admisión", radiologist: "Radiólogo" };
+const roleLabels: Record<Role, string> = { admin: "Administrador", operator: "Operador / admisión", radiologist: "Radiólogo", clinician: "Profesional clínico" };
 const today = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Santiago" });
 
 const modules: { href: string; icon: string; title: string; description: string; roles: Role[] }[] = [
   { href: "/agenda", icon: "📅", title: "Agenda", description: "Programar, editar y confirmar atenciones.", roles: ["admin", "operator"] },
-  { href: "/worklist", icon: "🩺", title: "Lista de trabajo", description: "Filtrar atenciones, reportar y asignar casos.", roles: ["admin", "operator", "radiologist"] },
-  { href: "/pacientes", icon: "👤", title: "Pacientes", description: "Registro clínico y trazabilidad de datos personales.", roles: ["admin"] },
+  { href: "/worklist", icon: "🩺", title: "Lista de trabajo", description: "Filtrar atenciones y completar documentos clínicos.", roles: ["admin", "operator", "radiologist", "clinician"] },
+  { href: "/pacientes", icon: "👤", title: "Pacientes", description: "Registro clínico y trazabilidad de datos personales.", roles: ["admin", "clinician"] },
   { href: "/configuracion", icon: "⚙️", title: "Configuración", description: "Institución, usuarios, plantillas y parámetros de la agenda.", roles: ["admin"] },
   { href: "/privacidad", icon: "🔒", title: "Privacidad", description: "Política de tratamiento de datos personales (Ley 19.628).", roles: ["admin", "radiologist"] },
 ];
