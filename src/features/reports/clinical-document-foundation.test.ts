@@ -5,6 +5,7 @@ import test from "node:test";
 const roleMigration = new URL("../../../supabase/migrations/202607120002_add_clinician_role.sql", import.meta.url);
 const foundationMigration = new URL("../../../supabase/migrations/202607120003_clinical_document_foundation.sql", import.meta.url);
 const clinicalAiMigration = new URL("../../../supabase/migrations/202607130001_clinical_ai_profiles.sql", import.meta.url);
+const triggerPermissionMigration = new URL("../../../supabase/migrations/202607130002_fix_report_content_trigger_permissions.sql", import.meta.url);
 const schedulingMigration = new URL("../../../supabase/migrations/202607070005_fhir_scheduling.sql", import.meta.url);
 
 test("reutiliza Practitioner y PractitionerRole sin crear otra tabla de permisos", async () => {
@@ -62,4 +63,10 @@ test("la IA clínica reutiliza documentos, permisos de firma y métricas agregad
   assert.match(sql, /report_ai_summaries[\s\S]*?public\.can_sign_report\(rr\.appointment_id\)/);
   assert.match(sql, /ai_usage_log[\s\S]*?public\.can_sign_report\(rr\.appointment_id\)/);
   assert.match(sql, /revoke all on function public\.ai_usage_totals\(\) from public, anon/);
+});
+
+test("el trigger deriva content sin conceder acceso a sus funciones internas", async () => {
+  const sql = await readFile(triggerPermissionMigration, "utf8");
+  assert.match(sql, /alter function private\.sync_report_content\(\) security definer/);
+  assert.doesNotMatch(sql, /grant|policy|radiology_reports/i);
 });
