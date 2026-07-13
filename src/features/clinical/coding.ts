@@ -18,7 +18,7 @@ export function codingError(system: string, code: string, display: string, label
   if (!isCodeSystem(sys)) return `${label}: sistema de código inválido.`;
   const hasCode = !!code.trim();
   const hasDisplay = !!display.trim();
-  if (required || sys !== "LOCAL" || hasCode || hasDisplay) {
+  if (required || hasCode || hasDisplay) {
     if (!hasCode || !hasDisplay) return `${label}: completa código y nombre estándar.`;
     if (!codePattern.test(code.trim())) return `${label}: el código tiene caracteres inválidos.`;
   }

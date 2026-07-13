@@ -7,7 +7,7 @@ import { isSupabaseConfigured, supabase } from "@/lib/supabase-client";
 import { effectiveTenantId } from "@/lib/tenant";
 import { resolveSessionKind, type SessionKind } from "@/features/patient-portal/session";
 
-const roleLabels: Record<string, string> = { admin: "Administrador", operator: "Operador", radiologist: "Radiólogo" };
+const roleLabels: Record<string, string> = { admin: "Administrador", operator: "Operador", radiologist: "Radiólogo", clinician: "Profesional clínico" };
 
 type Tenant = { id: string; name: string; active: boolean };
 

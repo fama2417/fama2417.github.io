@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { supportsRadiologyAi } from "../clinical-workspace/profiles.ts";
 import { aiConfig, canRunAiExtraction, estimateAiCost, type AiSupabase } from "./ai-budget.ts";
 import { AiFindingExtractionResultSchema, detectReportingProfile, finalizeClinicalSummary } from "./ai-extraction-schema.ts";
 import { buildRadiologyFindingExtractionPrompt, SYSTEM_PROMPT_FOR_RADIOLOGY_FINDING_EXTRACTION } from "./ai-prompts.ts";
@@ -45,6 +46,9 @@ export async function extractRadiologyFindingsWithAi(reportId: string, options: 
   let context;
   try {
     context = await getReportForAiExtraction(reportId, supabase);
+    if (!supportsRadiologyAi(context.reportCategory)) {
+      return { ok: false as const, error: "La extracción radiológica con IA solo está disponible para informes de imagenología." };
+    }
     const [existingSummary, existingFindings] = await Promise.all([getReportAiSummary(supabase, reportId), listExtractedFindings(supabase, reportId)]);
     if (!options.force && (existingSummary || existingFindings.length)) {
       return { ok: true as const, findings: existingFindings, clinicalSummary: existingSummary, usage: null, warnings: [], reused: true };

@@ -13,14 +13,15 @@ const TABS = {
   locations: { label: "Sedes", help: "Location (FHIR): lugar físico donde se atiende. Una institución puede tener varias sedes." },
   services: { label: "Servicios", help: "HealthcareService: unidad clínica que presta atención (Cardiología, Imagenología…). Su capacidad = atenciones simultáneas." },
   practitioners: { label: "Profesionales", help: "Practitioner: la persona. Puede o no tener usuario del sistema." },
-  roles: { label: "Roles", help: "PractitionerRole: el profesional ejerciendo en una sede y servicio concretos. Es lo que se agenda como recurso «profesional»." },
+  roles: { label: "Ámbitos clínicos", help: "PractitionerRole: el profesional ejerciendo en una sede y servicio concretos. Ese servicio determina qué categoría documental puede firmar." },
   devices: { label: "Equipos", help: "Device: equipo agendable (resonador, scanner, torre endoscópica). Modalidad DICOM si aplica." },
   serviceTypes: { label: "Tipos de atención", help: "Prestación: qué se hace en la cita, con su duración, capacidad y reglas (contraste/anestesia)." },
 } as const;
 type Tab = keyof typeof TABS;
 
-export function ParametryManager() {
-  const [tab, setTab] = useState<Tab>("locations");
+export function ParametryManager({ tabs }: { tabs?: readonly Tab[] } = {}) {
+  const visibleTabs = tabs?.length ? tabs : Object.keys(TABS) as Tab[];
+  const [tab, setTab] = useState<Tab>(visibleTabs[0]);
   const [orgs, setOrgs] = useState<Organization[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
   const [services, setServices] = useState<HealthcareService[]>([]);
@@ -68,14 +69,14 @@ export function ParametryManager() {
   if (!allowed) return null;
 
   return (
-    <section className="card" aria-label="Parametría de agenda">
-      <div className="card-heading"><h3>Parametría de agenda</h3><span className="phase-state">FHIR</span></div>
-      <p>Bloques con los que se arman los recursos agendables. La institución la define el superadministrador.</p>
+    <section className="card" aria-label={tabs ? "Profesionales y ámbitos clínicos" : "Parametría de agenda"}>
+      <div className="card-heading"><h3>{tabs ? "Profesionales y ámbitos clínicos" : "Parametría de agenda"}</h3><span className="phase-state">FHIR</span></div>
+      <p>{tabs ? "Crea profesionales y asígnalos a los servicios en los que pueden documentar y firmar." : "Bloques con los que se arman los recursos agendables. La institución la define el superadministrador."}</p>
       {error && <p className="form-error" role="alert">{error}</p>}
 
       <div className="catalog-layout">
         <nav className="catalog-tabs" aria-label="Componentes de la agenda">
-          {(Object.keys(TABS) as Tab[]).map((key) => (
+          {visibleTabs.map((key) => (
             <button key={key} type="button" className={key === tab ? "active" : ""} onClick={() => { setTab(key); setEditing(null); setError(""); }}>{TABS[key].label}</button>
           ))}
         </nav>
@@ -140,19 +141,19 @@ export function ParametryManager() {
             <form className="catalog-form" onSubmit={(e) => { const f = new FormData(e.currentTarget); run(() => createPractitionerRole({ practitionerId: String(f.get("pract")), organizationId: orgId, locationId: String(f.get("loc")) || null, healthcareServiceId: String(f.get("svc")) || null, specialty: String(f.get("spec")).trim() }), e.currentTarget)(e); }}>
               <label>Profesional<select name="pract" required><option value="">…</option>{practitioners.filter((p) => p.active).map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}</select></label>
               <label>Sede<select name="loc"><option value="">(Cualquiera)</option>{locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select></label>
-              <label>Servicio<select name="svc"><option value="">(Ninguno)</option>{services.map((sv) => <option key={sv.id} value={sv.id}>{sv.name}</option>)}</select></label>
+              <label>Servicio<select name="svc"><option value="">Sin servicio (no autoriza firma)</option>{services.map((sv) => <option key={sv.id} value={sv.id}>{sv.name}</option>)}</select></label>
               <label>Especialidad<input name="spec" placeholder="Ej: Cardiología" /></label>
               <button className="button primary" type="submit">Agregar</button>
             </form>
             <ul className="catalog-list">{roles.map((r) => <li key={r.id} className={r.active ? "" : "inactive"}>{editing?.id === r.id
               ? <form className="catalog-form" onSubmit={run(() => updateRole(r.id, { specialty: s("specialty"), locationId: s("locationId") || null, healthcareServiceId: s("healthcareServiceId") || null, active: Boolean(E.active) }))}>
                   <label>Sede<select value={s("locationId")} onChange={(e) => set("locationId", e.target.value)}><option value="">(Cualquiera)</option>{locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select></label>
-                  <label>Servicio<select value={s("healthcareServiceId")} onChange={(e) => set("healthcareServiceId", e.target.value)}><option value="">(Ninguno)</option>{services.map((sv) => <option key={sv.id} value={sv.id}>{sv.name}</option>)}</select></label>
+                  <label>Servicio<select value={s("healthcareServiceId")} onChange={(e) => set("healthcareServiceId", e.target.value)}><option value="">Sin servicio (no autoriza firma)</option>{services.map((sv) => <option key={sv.id} value={sv.id}>{sv.name}</option>)}</select></label>
                   <label>Especialidad<input value={s("specialty")} onChange={(e) => set("specialty", e.target.value)} /></label>
                   <label className="checkbox"><input type="checkbox" checked={Boolean(E.active)} onChange={(e) => set("active", e.target.checked)} /> Activo</label>
                   <button className="button primary" type="submit">Guardar</button><button className="text-button" type="button" onClick={() => setEditing(null)}>Cancelar</button>
                 </form>
-              : <><span><strong>{practName(r.practitionerId)}</strong>{r.specialty && ` · ${r.specialty}`}{r.locationId ? ` · ${locations.find((l) => l.id === r.locationId)?.name ?? ""}` : ""}</span><span><button className="text-button" type="button" onClick={() => setEditing({ ...r })}>Editar</button><button className="text-button" type="button" onClick={del("practitioner_roles", r.id)}>Eliminar</button></span></>}
+              : <><span><strong>{practName(r.practitionerId)}</strong>{r.specialty && ` · ${r.specialty}`}{r.healthcareServiceId ? ` · ${services.find((service) => service.id === r.healthcareServiceId)?.name ?? ""}` : " · sin autorización de firma"}{r.locationId ? ` · ${locations.find((l) => l.id === r.locationId)?.name ?? ""}` : ""}</span><span><button className="text-button" type="button" onClick={() => setEditing({ ...r })}>Editar</button><button className="text-button" type="button" onClick={del("practitioner_roles", r.id)}>Eliminar</button></span></>}
             </li>)}</ul>
           </>}
 

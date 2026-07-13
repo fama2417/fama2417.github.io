@@ -5,15 +5,15 @@ import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { supabase } from "@/lib/supabase-client";
 
-type Role = "admin" | "operator" | "radiologist";
+type Role = "admin" | "operator" | "radiologist" | "clinician";
 
-const roleLabels: Record<Role, string> = { admin: "Administrador", operator: "Operador", radiologist: "Radiólogo" };
+const roleLabels: Record<Role, string> = { admin: "Administrador", operator: "Operador", radiologist: "Radiólogo", clinician: "Profesional clínico" };
 
 const navigation: { href: string; label: string; roles: Role[] }[] = [
-  { href: "/", label: "Inicio", roles: ["admin", "operator", "radiologist"] },
+  { href: "/", label: "Inicio", roles: ["admin", "operator", "radiologist", "clinician"] },
   { href: "/agenda", label: "Agenda", roles: ["admin", "operator"] },
-  { href: "/pacientes", label: "Pacientes", roles: ["admin", "operator", "radiologist"] },
-  { href: "/worklist", label: "Lista de trabajo", roles: ["admin", "operator", "radiologist"] },
+  { href: "/pacientes", label: "Pacientes", roles: ["admin", "operator", "radiologist", "clinician"] },
+  { href: "/worklist", label: "Lista de trabajo", roles: ["admin", "operator", "radiologist", "clinician"] },
   { href: "/privacidad", label: "Privacidad", roles: ["admin", "radiologist"] },
   { href: "/configuracion", label: "Configuración", roles: ["admin"] },
 ];
