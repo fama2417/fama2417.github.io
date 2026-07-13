@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase-client";
+import type { Appointment } from "@/features/appointments/mock-data";
 import { isAiOperationActive, runAiExtractionWorkflow, type AiOperationState } from "./ai-extraction-workflow";
 
 type Item = {
@@ -41,6 +42,7 @@ const profileLabels: Record<string, string> = { PET_CT_ONCOLOGY: "PET-CT oncoló
 const tagLabels: Record<string, string> = { oncology: "Oncología", progression: "Progresión", stable: "Estable", resolved_lesions: "Lesiones resueltas", deauville_5: "Deauville 5", incidental_findings: "Hallazgos incidentales", follow_up_relevant: "Seguimiento relevante", report_quality_warning: "Alerta de calidad", procedure_content_mismatch: "Discordancia prestación/contenido", missing_impression: "Sin impresión" };
 const lesionTrendLabels: Record<string, string> = { increased: "Aumentó", decreased: "Disminuyó", stable: "Estable", unknown: "No determinado" };
 const groupLabels = { principal: "Hallazgos principales", secondary: "Hallazgos secundarios", incidental: "Hallazgos incidentales", negative: "Hallazgos negativos", reviewed: "Rechazados o corregidos" } as const;
+const documentLabels: Record<Appointment["serviceCategory"], string> = { consultation: "Consulta clínica", imaging: "Imagenología", laboratory: "Laboratorio", pathology: "Anatomía patológica", procedure: "Procedimiento" };
 type GroupKey = keyof typeof groupLabels;
 
 async function authHeaders() {
@@ -73,9 +75,10 @@ function CompactClinicalText({ text }: { text: string }) {
   return <><strong>{text.slice(0, 217)}...</strong><details className="ai-finding-source"><summary>Ver explicación completa</summary><span>{text}</span></details></>;
 }
 
-export function AiFindingsPanel({ reportId, reportStatus, disabled, ensureDraftSaved, onOperationActiveChange }: {
+export function AiFindingsPanel({ reportId, reportStatus, reportCategory, disabled, ensureDraftSaved, onOperationActiveChange }: {
   reportId?: string;
   reportStatus?: string;
+  reportCategory: Appointment["serviceCategory"];
   disabled?: boolean;
   ensureDraftSaved: () => Promise<void>;
   onOperationActiveChange?: (active: boolean) => void;
@@ -94,6 +97,7 @@ export function AiFindingsPanel({ reportId, reportStatus, disabled, ensureDraftS
   const runIdRef = useRef(0);
   const locked = disabled || reportStatus === "final";
   const operationActive = isAiOperationActive(operationState);
+  const isRadiology = reportCategory === "imaging";
 
   useEffect(() => {
     mountedRef.current = true;
@@ -137,14 +141,15 @@ export function AiFindingsPanel({ reportId, reportStatus, disabled, ensureDraftS
   useEffect(() => {
     runIdRef.current += 1;
     runningRef.current = false;
+    setMode("summary");
     setOperationState("idle");
     load();
-  }, [reportId]);
+  }, [reportId, reportCategory]);
 
   async function extract() {
     if (!reportId || locked || runningRef.current) return;
     const force = items.length > 0 || clinicalSummary !== null;
-    if (force && !window.confirm("Ya existen hallazgos IA para este informe. Deseas recalcularlos?")) return;
+    if (force && !window.confirm(isRadiology ? "Ya existen hallazgos IA para este informe. ¿Deseas recalcularlos?" : "Ya existe un resumen IA para este documento. ¿Deseas recalcularlo?")) return;
     runningRef.current = true;
     const runId = ++runIdRef.current;
     const isCurrent = () => mountedRef.current && runIdRef.current === runId;
@@ -216,7 +221,9 @@ export function AiFindingsPanel({ reportId, reportStatus, disabled, ensureDraftS
   const extractedSummaryItems = clinicalSummary?.primarySummaryItems ?? [];
   const isMainSummaryItem = (item: SummaryItem) => ["active_disease", "progression", "stable_disease"].includes(item.category);
   const summaryItems = [...extractedSummaryItems.filter(isMainSummaryItem).slice(0, 3), ...extractedSummaryItems.filter((item) => !isMainSummaryItem(item))].slice(0, 8);
-  const summaryGroups = Object.entries(categoryLabels).map(([key, label]) => ({ key, label, items: summaryItems.filter((item) => item.category === key) })).filter((group) => group.items.length);
+  const summaryGroups = isRadiology
+    ? Object.entries(categoryLabels).map(([key, label]) => ({ key, label, items: summaryItems.filter((item) => item.category === key) })).filter((group) => group.items.length)
+    : summaryItems.length ? [{ key: "clinical_summary", label: "Puntos clínicos clave", items: summaryItems }] : [];
   const visibleItems = showAll ? items : items.slice(0, 10);
   const technicalGroups = (Object.keys(groupLabels) as GroupKey[]).map((key) => ({ key, items: visibleItems.filter((item) => groupOf(item) === key) })).filter((group) => group.items.length);
   const qaWarnings = clinicalSummary?.qualityWarnings.map((warning) => warning.message) ?? [];
@@ -246,7 +253,7 @@ export function AiFindingsPanel({ reportId, reportStatus, disabled, ensureDraftS
     {!reportId && <p className="notice">Guarda el borrador antes de ejecutar la extraccion con IA.</p>}
     {reportStatus === "final" && <p className="empty-inline">El informe esta firmado: la extraccion queda en solo lectura.</p>}
     <div className="ai-panel-actions">
-      <button className="button secondary" type="button" onClick={extract} disabled={!reportId || locked || !!acting || operationActive}>{clinicalSummary || items.length ? "Recalcular resumen IA" : "Detectar hallazgos con IA"}</button>
+      <button className="button secondary" type="button" onClick={extract} disabled={!reportId || locked || !!acting || operationActive}>{clinicalSummary || items.length ? "Recalcular resumen IA" : isRadiology ? "Detectar hallazgos con IA" : "Analizar documento con IA"}</button>
       <button className="text-button" type="button" onClick={load} disabled={!reportId || loading || operationActive}>Actualizar</button>
     </div>
     {operationState !== "idle" && <div className={`ai-operation-status ${operationState}`} role={operationState === "error" ? "alert" : "status"} aria-live={operationState === "error" ? "assertive" : "polite"} aria-busy={operationActive}>
@@ -254,35 +261,35 @@ export function AiFindingsPanel({ reportId, reportStatus, disabled, ensureDraftS
       {operationState === "analyzing" && <>
         <div className="ai-operation-progress" role="progressbar" aria-label="Análisis IA en curso"><span /></div>
         <span>{elapsedSeconds} s transcurridos</span>
-        {elapsedSeconds >= 15 && <span>El análisis está tomando más de lo habitual. Puedes continuar revisando las imágenes.</span>}
+        {elapsedSeconds >= 15 && <span>El análisis está tomando más de lo habitual. Puedes continuar revisando el documento.</span>}
       </>}
       {operationState === "error" && <button className="text-button" type="button" disabled={locked || !!acting} onClick={extract}>Reintentar</button>}
     </div>}
     {error && operationState !== "error" && <p className="notice" role="alert">{error}</p>}
-    <div className="ai-view-switch" role="group" aria-label="Vista de extraccion IA">
+    {isRadiology && <div className="ai-view-switch" role="group" aria-label="Vista de extraccion IA">
       <button type="button" aria-pressed={mode === "summary"} onClick={() => setMode("summary")}>Resumen clinico</button>
       <button type="button" aria-pressed={mode === "detail"} onClick={() => setMode("detail")}>Detalle tecnico / diccionario</button>
-    </div>
-    {loading ? <p className="empty-inline">Cargando extraccion IA...</p> : mode === "summary" ? <div className="ai-clinical-summary">
+    </div>}
+    {loading ? <p className="empty-inline">Cargando extraccion IA...</p> : mode === "summary" || !isRadiology ? <div className="ai-clinical-summary">
       {clinicalSummary ? <>
         {bannerWarnings.map((warning) => <p className="notice" role="alert" key={warning}>{warning}</p>)}
         <header className="ai-summary-header">
-          <div><span>Perfil detectado</span><strong>{profileLabels[clinicalSummary.reportingProfile] ?? clinicalSummary.reportingProfile}</strong></div>
+          <div><span>{isRadiology ? "Perfil detectado" : "Tipo de documento"}</span><strong>{isRadiology ? profileLabels[clinicalSummary.reportingProfile] ?? clinicalSummary.reportingProfile : documentLabels[reportCategory]}</strong></div>
           <div><span>Contexto</span><strong>{formatClinicalContext(clinicalSummary.clinicalContext || clinicalSummary.modalityContext)}</strong></div>
-          {assessment && <div className="ai-summary-assessment"><span>Evaluación global</span><CompactClinicalText text={assessmentText} /><small>{assessmentLabels[assessment.status] ?? assessment.status} - {lowAssessmentConfidence ? "Baja confianza - " : ""}{Math.round(assessment.confidence * 100)}%</small></div>}
-          {clinicalSummary.scores.map((score) => <div key={`${score.name}-${score.value}`}><span>Score</span><strong>{score.name} {score.value}</strong></div>)}
-          <div><span>Detalle</span><strong>{items.length} hallazgos</strong><small>{pendingReview} pendientes - {pendingDictionary} en diccionario</small></div>
-          {clinicalSummary.clinicalTags.length > 0 && <div><span>Etiquetas clínicas</span><div className="ai-finding-badges">{clinicalSummary.clinicalTags.map((tag) => <span key={tag}>{tagLabels[tag] ?? tag}</span>)}</div></div>}
+          {assessment && <div className="ai-summary-assessment"><span>{isRadiology ? "Evaluación global" : "Síntesis clínica"}</span><CompactClinicalText text={assessmentText} /><small>{isRadiology ? `${assessmentLabels[assessment.status] ?? assessment.status} - ` : ""}{lowAssessmentConfidence ? "Baja confianza - " : ""}{Math.round(assessment.confidence * 100)}%</small></div>}
+          {isRadiology && clinicalSummary.scores.map((score) => <div key={`${score.name}-${score.value}`}><span>Score</span><strong>{score.name} {score.value}</strong></div>)}
+          {isRadiology && <div><span>Detalle</span><strong>{items.length} hallazgos</strong><small>{pendingReview} pendientes - {pendingDictionary} en diccionario</small></div>}
+          {isRadiology && clinicalSummary.clinicalTags.length > 0 && <div><span>Etiquetas clínicas</span><div className="ai-finding-badges">{clinicalSummary.clinicalTags.map((tag) => <span key={tag}>{tagLabels[tag] ?? tag}</span>)}</div></div>}
         </header>
         {summaryGroups.map((group) => <section className="ai-summary-group" key={group.key}>
           <h4>{group.label}</h4>
           {group.items.map((item, index) => <article key={`${group.key}-${index}`}>
             <div><strong>{item.title}</strong><span>{item.summary}</span></div>
-            <div className="ai-finding-badges"><span>{trendLabels[item.trend] ?? item.trend}</span><span>{Math.round(item.confidence * 100)}%</span></div>
+            <div className="ai-finding-badges">{isRadiology && <span>{trendLabels[item.trend] ?? item.trend}</span>}<span>{Math.round(item.confidence * 100)}%</span></div>
             <details className="ai-finding-source"><summary>Ver fuente</summary>{item.sourceSentences.map((source) => <span key={source}>{source}</span>)}</details>
           </article>)}
         </section>)}
-        {trackedLesions.length > 0 && <details className="ai-finding-group">
+        {isRadiology && trackedLesions.length > 0 && <details className="ai-finding-group">
           <summary>Seguimiento de lesiones ({trackedLesions.length})</summary>
           {trackedLesions.map((lesion) => <article className="ai-finding-row" key={lesion.label}>
             <div><strong>{lesion.label} - {lesion.site}</strong><span>Tamaño: {lesion.currentSize || "No determinado"} (previo: {lesion.priorSize || "No determinado"})</span><span>SUV: {lesion.currentSuv || "No determinado"} (previo: {lesion.priorSuv || "No determinado"})</span></div>
@@ -290,7 +297,7 @@ export function AiFindingsPanel({ reportId, reportStatus, disabled, ensureDraftS
             <details className="ai-finding-source"><summary>Ver fuente</summary><span>{lesion.sourceSentence}</span></details>
           </article>)}
         </details>}
-        {items.length > 10 && <button className="text-button" type="button" onClick={() => setMode("detail")}>{items.length} hallazgos técnicos extraídos. Ver detalle.</button>}
+        {isRadiology && items.length > 10 && <button className="text-button" type="button" onClick={() => setMode("detail")}>{items.length} hallazgos técnicos extraídos. Ver detalle.</button>}
         {otherWarnings.length > 0 && <details className="ai-summary-warnings"><summary>{otherWarnings.length} alertas de extracción</summary>{otherWarnings.map((warning) => <p key={warning}>{warning}</p>)}</details>}
       </> : <p className="empty-inline">{items.length ? "Este informe tiene detalle tecnico previo. Recalcula para generar el resumen clinico." : "Sin extraccion IA todavia."}</p>}
     </div> : <div className="ai-technical-detail">

@@ -10,6 +10,7 @@ test("remueve PHI comun antes de enviar a IA", () => {
 });
 
 test("remueve nombre estructurado del paciente", () => {
-  const input = sanitizeReportForAi({ findings: "Juan Perez con neumonia.", impression: "" }, { patientName: "Juan Perez" });
+  const input = sanitizeReportForAi({ comparison: "Control de Juan Perez.", findings: "Juan Perez con neumonia.", impression: "" }, { patientName: "Juan Perez" });
   assert.match(input.findings ?? "", /\[PATIENT\]/);
+  assert.match(input.comparison ?? "", /\[PATIENT\]/);
 });

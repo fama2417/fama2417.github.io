@@ -4,6 +4,7 @@ export type SanitizedAiReportInput = {
   modality?: string;
   reportingGroupCode?: string | null;
   clinicalIndication?: string;
+  comparison?: string;
   technique?: string;
   findings?: string;
   impression?: string;
@@ -12,6 +13,7 @@ export type SanitizedAiReportInput = {
 
 type ReportLike = {
   clinicalIndication?: string | null;
+  comparison?: string | null;
   technique?: string | null;
   findings?: string | null;
   impression?: string | null;
@@ -43,7 +45,7 @@ const removeName = (text: string, name?: string | null) => name?.trim()
   : text;
 
 function fit(input: SanitizedAiReportInput, maxChars: number) {
-  const fields: ("impression" | "findings" | "technique" | "clinicalIndication")[] = ["impression", "findings", "technique", "clinicalIndication"];
+  const fields: ("impression" | "findings" | "comparison" | "technique" | "clinicalIndication")[] = ["impression", "findings", "comparison", "technique", "clinicalIndication"];
   let remaining = maxChars;
   for (const key of fields) {
     const value = String(input[key] ?? "");
@@ -64,6 +66,7 @@ export function sanitizeReportForAi(report: ReportLike, relatedData: RelatedLike
     modality: clean(relatedData.modality),
     reportingGroupCode: clean(relatedData.reportingGroupCode),
     clinicalIndication: clean(report.clinicalIndication),
+    comparison: clean(report.comparison),
     technique: clean(report.technique),
     findings: clean(report.findings),
     impression: clean(report.impression),

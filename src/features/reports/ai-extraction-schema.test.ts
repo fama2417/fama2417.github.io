@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseAiExtractionResponse, publicAiError } from "./ai-extraction.ts";
-import { AiFindingExtractionResultSchema, detectReportingProfile, finalizeClinicalSummary, guardClinicalSummaryWithoutImpression, parseStoredAiClinicalSummary } from "./ai-extraction-schema.ts";
+import { parseAiClinicalDocumentResponse, parseAiExtractionResponse, publicAiError } from "./ai-extraction.ts";
+import { AiClinicalDocumentSummaryResultSchema, AiFindingExtractionResultSchema, detectReportingProfile, finalizeClinicalSummary, guardClinicalSummaryWithoutImpression, parseStoredAiClinicalSummary } from "./ai-extraction-schema.ts";
+import { buildClinicalDocumentSummaryPrompt, SYSTEM_PROMPT_FOR_CLINICAL_DOCUMENT_SUMMARY } from "./ai-prompts.ts";
 
 const valid = {
   reportLanguage: "es",
@@ -79,6 +80,28 @@ test("deriva QA y tags clinicas sin romper resumen antiguo", () => {
 test("parsea respuesta IA desde output_text y oculta errores crudos", () => {
   assert.deepEqual(parseAiExtractionResponse({ output_parsed: null, output_text: JSON.stringify(valid) }), valid);
   assert.equal(publicAiError(new Error('[{"code":"invalid_type"}]')), "No fue posible interpretar la respuesta estructurada de IA.");
+});
+
+test("resume documentos no radiológicos sin crear hallazgos ni códigos", () => {
+  const clinicalDocument = {
+    reportLanguage: "es",
+    clinicalSummary: {
+      documentContext: "Biopsia gástrica.",
+      assessment: { text: "Biopsia compatible con adenoma.", confidence: 0.88 },
+      summaryItems: [{ title: "Diagnóstico", summary: "Biopsia compatible con adenoma.", category: "diagnosis", sourceSection: "impression", sourceSentences: ["Biopsia compatible con adenoma."], confidence: 0.88 }],
+      warnings: [],
+    },
+    overallConfidence: 0.88,
+    warnings: [],
+  };
+  assert.equal(AiClinicalDocumentSummaryResultSchema.safeParse(clinicalDocument).success, true);
+  assert.deepEqual(parseAiClinicalDocumentResponse({ output_text: JSON.stringify(clinicalDocument) }), clinicalDocument);
+
+  const prompt = buildClinicalDocumentSummaryPrompt({ clinicalIndication: "Biopsia gástrica.", comparison: "PAS previa.", technique: "HE.", findings: "Glándulas conservadas.", impression: "Adenoma.", warnings: [] }, "pathology");
+  assert.match(prompt, /Antecedentes clínicos \[clinicalIndication\]: Biopsia gástrica/);
+  assert.match(prompt, /Procesamiento \/ técnicas \[comparison\]: PAS previa/);
+  assert.match(SYSTEM_PROMPT_FOR_CLINICAL_DOCUMENT_SUMMARY, /no infieras etapa, grado, margenes/i);
+  assert.match(SYSTEM_PROMPT_FOR_CLINICAL_DOCUMENT_SUMMARY, /No devuelvas codigos SNOMED, CIE, LOINC o RadLex/i);
 });
 
 test("sin impresion ni comparacion evita declarar progresion", () => {

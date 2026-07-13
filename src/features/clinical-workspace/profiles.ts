@@ -2,6 +2,7 @@ import type { Appointment } from "../appointments/mock-data.ts";
 
 export type ReportSectionName = "clinicalIndication" | "technique" | "comparison" | "findings" | "impression";
 export type ReportSection = { name: ReportSectionName; label: string; hint: string; required?: boolean };
+export type ClinicalAiAnalysisProfile = "radiology" | Exclude<Appointment["serviceCategory"], "imaging"> | "none";
 
 export type ClinicalDocumentProfile = {
   title: string;
@@ -12,7 +13,7 @@ export type ClinicalDocumentProfile = {
   sections: ReportSection[];
   layoutMode: "editor_viewer" | "editor_only" | "editor_attachments";
   viewerMode: "dicom" | "attachments" | "none";
-  aiAnalysisProfile: "radiology" | "none";
+  aiAnalysisProfile: ClinicalAiAnalysisProfile;
 };
 
 const radiologyCriticalTypes = [
@@ -46,7 +47,7 @@ export const clinicalDocumentProfiles: Record<Appointment["serviceCategory"], Cl
     criticalLabel: "Situación clínica crítica",
     layoutMode: "editor_only",
     viewerMode: "none",
-    aiAnalysisProfile: "none",
+    aiAnalysisProfile: "consultation",
     sections: [
       { name: "clinicalIndication", label: "Motivo de consulta", hint: "Problema principal declarado por el paciente o derivante." },
       { name: "comparison", label: "Examen físico / controles", hint: "Examen, signos vitales o comparación con evolución previa." },
@@ -62,7 +63,7 @@ export const clinicalDocumentProfiles: Record<Appointment["serviceCategory"], Cl
     criticalLabel: "Resultado crítico",
     layoutMode: "editor_only",
     viewerMode: "none",
-    aiAnalysisProfile: "none",
+    aiAnalysisProfile: "laboratory",
     sections: [
       { name: "clinicalIndication", label: "Solicitud / indicación", hint: "Motivo clínico o panel solicitado." },
       { name: "comparison", label: "Valores de referencia", hint: "Rangos relevantes o comparación con controles previos." },
@@ -78,7 +79,7 @@ export const clinicalDocumentProfiles: Record<Appointment["serviceCategory"], Cl
     criticalLabel: "Diagnóstico crítico",
     layoutMode: "editor_attachments",
     viewerMode: "attachments",
-    aiAnalysisProfile: "none",
+    aiAnalysisProfile: "pathology",
     sections: [
       { name: "clinicalIndication", label: "Antecedentes clínicos", hint: "Hipótesis, sitio anatómico y contexto." },
       { name: "comparison", label: "Procesamiento / técnicas", hint: "Tinciones, inmunohistoquímica o estudios complementarios." },
@@ -94,7 +95,7 @@ export const clinicalDocumentProfiles: Record<Appointment["serviceCategory"], Cl
     criticalLabel: "Evento o hallazgo crítico",
     layoutMode: "editor_attachments",
     viewerMode: "attachments",
-    aiAnalysisProfile: "none",
+    aiAnalysisProfile: "procedure",
     sections: [
       { name: "clinicalIndication", label: "Indicación", hint: "Motivo del procedimiento y antecedentes." },
       { name: "comparison", label: "Incidentes / limitaciones", hint: "Complicaciones, tolerancia o limitaciones." },
@@ -109,3 +110,6 @@ export const clinicalProfileForCategory = (category: Appointment["serviceCategor
 
 export const supportsRadiologyAi = (category: Appointment["serviceCategory"]) =>
   clinicalProfileForCategory(category).aiAnalysisProfile === "radiology";
+
+export const supportsClinicalAi = (category: Appointment["serviceCategory"]) =>
+  clinicalProfileForCategory(category).aiAnalysisProfile !== "none";

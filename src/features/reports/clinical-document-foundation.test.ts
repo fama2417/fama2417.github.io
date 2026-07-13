@@ -4,6 +4,7 @@ import test from "node:test";
 
 const roleMigration = new URL("../../../supabase/migrations/202607120002_add_clinician_role.sql", import.meta.url);
 const foundationMigration = new URL("../../../supabase/migrations/202607120003_clinical_document_foundation.sql", import.meta.url);
+const clinicalAiMigration = new URL("../../../supabase/migrations/202607130001_clinical_ai_profiles.sql", import.meta.url);
 const schedulingMigration = new URL("../../../supabase/migrations/202607070005_fhir_scheduling.sql", import.meta.url);
 
 test("reutiliza Practitioner y PractitionerRole sin crear otra tabla de permisos", async () => {
@@ -51,4 +52,14 @@ test("la configuración enlaza usuarios con profesionales y sus ámbitos existen
   assert.match(route, /from\("practitioner_roles"\)/);
   assert.match(settings, /ParametryManager tabs=\{\["practitioners", "roles"\]\}/);
   assert.match(parametry, /Sin servicio \(no autoriza firma\)/);
+});
+
+test("la IA clínica reutiliza documentos, permisos de firma y métricas agregadas", async () => {
+  const sql = await readFile(clinicalAiMigration, "utf8");
+  assert.doesNotMatch(sql, /create table/i);
+  assert.match(sql, /function public\.ai_usage_totals\(\)/);
+  assert.match(sql, /private\.current_role\(\) in \('admin', 'radiologist', 'clinician'\)/);
+  assert.match(sql, /report_ai_summaries[\s\S]*?public\.can_sign_report\(rr\.appointment_id\)/);
+  assert.match(sql, /ai_usage_log[\s\S]*?public\.can_sign_report\(rr\.appointment_id\)/);
+  assert.match(sql, /revoke all on function public\.ai_usage_totals\(\) from public, anon/);
 });

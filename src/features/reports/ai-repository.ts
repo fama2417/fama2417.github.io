@@ -1,9 +1,10 @@
 import { aiConfig, type AiSupabase } from "./ai-budget.ts";
-import { finalizeClinicalSummary, parseStoredAiClinicalSummary, type AiFinding, type AiFindingExtractionResult } from "./ai-extraction-schema.ts";
+import { finalizeClinicalSummary, parseStoredAiClinicalSummary, type AiClinicalSummary, type AiFinding, type AiFindingExtractionResult } from "./ai-extraction-schema.ts";
 import { normalizeCandidateKey, normalizeLocalCodeName } from "./ai-normalization.ts";
 
 export type AiReportContext = {
   id: string;
+  appointmentId: string;
   tenantId: string;
   reportCategory: "consultation" | "imaging" | "laboratory" | "pathology" | "procedure";
   serviceTypeId: string | null;
@@ -13,6 +14,7 @@ export type AiReportContext = {
   reportingGroupId: string | null;
   reportingGroupCode: string | null;
   clinicalIndication: string;
+  comparison: string;
   technique: string;
   findings: string;
   impression: string;
@@ -21,7 +23,7 @@ export type AiReportContext = {
 export async function getReportForAiExtraction(reportId: string, supabase: AiSupabase): Promise<AiReportContext> {
   const report = await supabase
     .from("radiology_reports")
-    .select("id, tenant_id, appointment_id, report_category, clinical_indication, technique, findings, impression, appointment:appointments(service_type_id, modality, reason, procedure_code)")
+    .select("id, tenant_id, appointment_id, report_category, clinical_indication, comparison, technique, findings, impression, appointment:appointments(service_type_id, modality, reason, procedure_code)")
     .eq("id", reportId)
     .maybeSingle();
   if (report.error) throw report.error;
@@ -42,6 +44,7 @@ export async function getReportForAiExtraction(reportId: string, supabase: AiSup
 
   return {
     id: row.id,
+    appointmentId: row.appointment_id,
     tenantId: row.tenant_id,
     reportCategory: row.report_category ?? "imaging",
     serviceTypeId,
@@ -51,6 +54,7 @@ export async function getReportForAiExtraction(reportId: string, supabase: AiSup
     reportingGroupId: groupRow?.reporting_group_id ?? null,
     reportingGroupCode: groupRow?.reporting_group?.code ?? null,
     clinicalIndication: row.clinical_indication ?? "",
+    comparison: row.comparison ?? "",
     technique: row.technique ?? "",
     findings: row.findings ?? "",
     impression: row.impression ?? "",
@@ -128,16 +132,20 @@ export async function getReportAiSummary(supabase: AiSupabase, reportId: string)
   if (error) throw error;
   if (report.error) throw report.error;
   if (!data) return null;
-  const stored = parseStoredAiClinicalSummary((data as any).summary_json);
-  const summary = finalizeClinicalSummary(stored, { hasImpression: !!(report.data as any)?.impression?.trim(), profile: stored.reportingProfile });
-  return { ...summary, model: (data as any).model, updatedAt: (data as any).updated_at };
+  const raw = (data as any).summary_json as Record<string, unknown>;
+  const analysisProfile = typeof raw?.analysisProfile === "string" ? raw.analysisProfile : "radiology";
+  const stored = parseStoredAiClinicalSummary(raw);
+  const summary = analysisProfile === "radiology"
+    ? finalizeClinicalSummary(stored, { hasImpression: !!(report.data as any)?.impression?.trim(), profile: stored.reportingProfile })
+    : stored;
+  return { ...summary, analysisProfile, model: (data as any).model, updatedAt: (data as any).updated_at };
 }
 
-export async function saveReportAiSummary(supabase: AiSupabase, reportId: string, context: AiReportContext, extractionResult: AiFindingExtractionResult) {
+export async function saveReportAiSummary(supabase: AiSupabase, reportId: string, context: AiReportContext, summary: AiClinicalSummary, analysisProfile = "radiology") {
   const { error } = await supabase.from("report_ai_summaries").upsert({
     tenant_id: context.tenantId,
     report_id: reportId,
-    summary_json: extractionResult.clinicalSummary,
+    summary_json: { ...summary, analysisProfile },
     model: aiConfig().model,
     provider: "openai",
   }, { onConflict: "tenant_id,report_id" });
@@ -199,7 +207,7 @@ export async function persistAiExtractionResult(supabase: AiSupabase, reportId: 
     });
     inserted.push({ id: insertedFinding.id, findingCandidateId: insertedFinding.finding_candidate_id });
   }
-  await saveReportAiSummary(supabase, reportId, context, extractionResult);
+  await saveReportAiSummary(supabase, reportId, context, extractionResult.clinicalSummary);
   return inserted;
 }
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { clinicalDocumentProfiles, clinicalProfileForCategory, supportsRadiologyAi } from "../clinical-workspace/profiles.ts";
+import { clinicalDocumentProfiles, clinicalProfileForCategory, supportsClinicalAi, supportsRadiologyAi } from "../clinical-workspace/profiles.ts";
 import { criticalFindingState, criticalFindingTypeError, validateFinalReport } from "./validation.ts";
 
 const valid = {
@@ -39,7 +39,7 @@ test("asigna workspace y visor por tipo de documento", () => {
   assert.equal(clinicalProfileForCategory("imaging").sections.at(-1)?.label, "Impresión diagnóstica");
   assert.equal(clinicalProfileForCategory("consultation").viewerMode, "none");
   assert.equal(clinicalProfileForCategory("pathology").viewerMode, "attachments");
-  assert.equal(clinicalProfileForCategory("pathology").aiAnalysisProfile, "none");
+  assert.equal(clinicalProfileForCategory("pathology").aiAnalysisProfile, "pathology");
   assert.equal(clinicalProfileForCategory("pathology").sections.find((section) => section.name === "impression")?.label, "Diagnóstico");
   assert.equal(clinicalProfileForCategory("procedure").sections.find((section) => section.name === "comparison")?.label, "Incidentes / limitaciones");
   assert.match(criticalFindingTypeError("laboratory"), /resultado crítico/);
@@ -48,4 +48,5 @@ test("asigna workspace y visor por tipo de documento", () => {
   assert.equal(supportsRadiologyAi("laboratory"), false);
   assert.equal(supportsRadiologyAi("pathology"), false);
   assert.equal(supportsRadiologyAi("procedure"), false);
+  for (const category of Object.keys(clinicalDocumentProfiles) as (keyof typeof clinicalDocumentProfiles)[]) assert.equal(supportsClinicalAi(category), true);
 });

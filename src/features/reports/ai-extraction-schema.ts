@@ -49,7 +49,7 @@ export const AiClinicalSummarySchema = z.object({
     category: z.enum(["active_disease", "progression", "stable_disease", "resolved", "incidental", "negative_relevant", "recommendation", "quality_warning"]),
     sites: z.array(z.string().trim().min(1)),
     trend: z.enum(["new", "progression", "stable", "decreased", "resolved", "unknown", "not_applicable"]),
-    sourceSection: z.enum(["impression", "findings", "both"]),
+    sourceSection: z.enum(["clinical_indication", "comparison", "technique", "findings", "impression", "both"]),
     sourceSentences: z.array(z.string().trim().min(1)).min(1),
     confidence,
   }).strict()).max(8),
@@ -94,9 +94,32 @@ export const AiFindingExtractionResultSchema = z.object({
   warnings: z.array(z.string()),
 }).strict();
 
+export const AiClinicalDocumentSummarySchema = z.object({
+  documentContext: z.string().trim().nullable(),
+  assessment: z.object({ text: z.string().trim().min(1), confidence }).strict(),
+  summaryItems: z.array(z.object({
+    title: z.string().trim().min(1),
+    summary: z.string().trim().min(1),
+    category: z.enum(["clinical_fact", "result", "diagnosis", "recommendation", "limitation", "warning"]),
+    sourceSection: z.enum(["clinical_indication", "comparison", "technique", "findings", "impression", "both"]),
+    sourceSentences: z.array(z.string().trim().min(1)).min(1),
+    confidence,
+  }).strict()).max(8),
+  warnings: z.array(z.string()),
+}).strict();
+
+export const AiClinicalDocumentSummaryResultSchema = z.object({
+  reportLanguage: z.enum(["es", "en", "mixed", "unknown"]),
+  clinicalSummary: AiClinicalDocumentSummarySchema,
+  overallConfidence: confidence,
+  warnings: z.array(z.string()),
+}).strict();
+
 export type AiFinding = z.infer<typeof AiFindingSchema>;
 export type AiClinicalSummary = z.infer<typeof AiClinicalSummarySchema>;
 export type AiFindingExtractionResult = z.infer<typeof AiFindingExtractionResultSchema>;
+export type AiClinicalDocumentSummary = z.infer<typeof AiClinicalDocumentSummarySchema>;
+export type AiClinicalDocumentSummaryResult = z.infer<typeof AiClinicalDocumentSummaryResultSchema>;
 export type ReportingProfile = z.infer<typeof ReportingProfileSchema>;
 
 const NO_IMPRESSION_WARNING = "Resumen generado desde Hallazgos. No se detectó sección Impresión/Conclusión.";
@@ -158,7 +181,10 @@ const storedSummaryDefaults = {
   lesionTracking: [],
 };
 
-export const parseStoredAiClinicalSummary = (value: unknown) => AiClinicalSummarySchema.parse({ ...storedSummaryDefaults, ...(value as Record<string, unknown>) });
+export const parseStoredAiClinicalSummary = (value: unknown) => {
+  const { analysisProfile: _analysisProfile, ...summary } = (value ?? {}) as Record<string, unknown>;
+  return AiClinicalSummarySchema.parse({ ...storedSummaryDefaults, ...summary });
+};
 
 export function finalizeClinicalSummary(summary: AiClinicalSummary, options: { hasImpression: boolean; profile: ReportingProfile; mismatch?: { type: "procedure_content_mismatch"; message: string } | null }) {
   const guarded = guardClinicalSummaryWithoutImpression(summary, options.hasImpression);
