@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { clinicalProfileForCategory } from "../clinical-workspace/profiles.ts";
+import { clinicalProfileForCategory, supportsRadiologyAi } from "../clinical-workspace/profiles.ts";
 import { criticalFindingState, validateFinalReport } from "./validation.ts";
 
 const valid = {
@@ -33,4 +33,9 @@ test("asigna workspace y visor por tipo de documento", () => {
   assert.equal(clinicalProfileForCategory("consultation").viewerMode, "none");
   assert.equal(clinicalProfileForCategory("pathology").aiAnalysisProfile, "pathology");
   assert.notEqual(clinicalProfileForCategory("procedure").aiAnalysisProfile, "radiology");
+  assert.equal(supportsRadiologyAi("imaging"), true);
+  assert.equal(supportsRadiologyAi("consultation"), false);
+  assert.equal(supportsRadiologyAi("laboratory"), false);
+  assert.equal(supportsRadiologyAi("pathology"), false);
+  assert.equal(supportsRadiologyAi("procedure"), false);
 });

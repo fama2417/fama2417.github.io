@@ -4,7 +4,7 @@ import { Fragment, FormEvent, useEffect, useRef, useState, type KeyboardEvent } 
 import { CODE_SYSTEMS, codeHref, codingError } from "@/features/clinical/coding";
 import { CodePicker } from "@/features/clinical/CodePicker";
 import { ClinicalWorkspace } from "@/features/clinical-workspace/ClinicalWorkspace";
-import { clinicalProfileForCategory } from "@/features/clinical-workspace/profiles";
+import { clinicalProfileForCategory, supportsRadiologyAi } from "@/features/clinical-workspace/profiles";
 import type { Appointment } from "@/features/appointments/mock-data";
 import { fetchAppointments, orderFileUrl } from "@/features/appointments/repository";
 import { appointmentStatusLabels } from "@/features/appointments/status";
@@ -276,6 +276,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
 
   /** Pegar (Ctrl+V) una captura del visor en cualquier parte del editor la agrega como imagen clave. */
   function handlePaste(event: React.ClipboardEvent) {
+    if (appointment?.serviceCategory !== "imaging") return;
     const file = Array.from(event.clipboardData.files).find((entry) => entry.type.startsWith("image/"));
     if (file && report.status !== "final") { event.preventDefault(); uploadCapture(file); }
   }
@@ -340,7 +341,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
     {report.status !== "final" ? <p className="notice">El informe definitivo aún no está disponible.</p> : <article className="card legal-content">
       {tenant?.reportHeader && <p>{renderHeader(tenant.reportHeader, { paciente: appointment.patientName, id: appointment.patientIdentifier || "—", medico: appointment.treatingPhysician || appointment.requesterName || "—", examen: examLabel, fecha: appointment.date, institucion: tenant.name })}</p>}
       {sections.map((section) => report[section.name] && <section key={section.name}><h3>{section.label}</h3><p>{report[section.name]}</p></section>)}
-      {baseKeyImages.length > 0 && <section><h3>Imágenes clave</h3><div className="key-images-grid">{baseKeyImages.map((item) => <figure key={item.id}>{keyImageSrc(item) && <img src={keyImageSrc(item)} alt="Imagen clave" />}{item.caption && <figcaption>{item.caption}</figcaption>}</figure>)}</div></section>}
+      {appointment.serviceCategory === "imaging" && baseKeyImages.length > 0 && <section><h3>Imágenes clave</h3><div className="key-images-grid">{baseKeyImages.map((item) => <figure key={item.id}>{keyImageSrc(item) && <img src={keyImageSrc(item)} alt="Imagen clave" />}{item.caption && <figcaption>{item.caption}</figcaption>}</figure>)}</div></section>}
       {addenda.map((item, index) => <section key={item.id}><h3>Adenda {index + 1}</h3><p>{item.text}</p></section>)}
       <footer><strong>{report.signer ? signerLabel(report.signer.name, report.signer.registration) : ""}</strong>{report.signedAt && <p>Firmado el {new Date(report.signedAt).toLocaleString("es-CL")}</p>}</footer>
     </article>}
@@ -448,7 +449,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
             <label className="consent-field"><input type="checkbox" checked={report.clinicalQuestionAnswered} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, clinicalQuestionAnswered: event.target.checked }))} />Confirmo que la impresión responde la pregunta clínica.</label>
           </div>
 
-          <details className="report-clinical-panel collapsible kin-panel" open>
+          {appointment.serviceCategory === "imaging" && <details className="report-clinical-panel collapsible kin-panel" open>
             <summary><span className="collapsible-icon">🩻</span>Imágenes clave (KIN){fullScreen && <span className="kin-sync-status"><span aria-hidden="true">●</span>Sincronizado con OHIF</span>}{baseKeyImages.length > 0 && <span className="collapsible-count">{baseKeyImages.length}</span>}</summary>
             {baseKeyImages.length > 0 && <div className="key-images-grid">
               {baseKeyImages.map((item) => <figure key={item.id} className="key-image">
@@ -465,9 +466,9 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
               <strong>Pega (Ctrl+V), arrastra o haz clic para agregar una imagen clave</strong>
               <span className="empty-inline">CT/MR/PET-CT: captura el corte con la cámara 📷 de OHIF (conserva las anotaciones) y suéltalo aquí — sin pasar por el escritorio si copias al portapapeles.</span>
             </label>}
-          </details>
+          </details>}
 
-          <AiFindingsPanel reportId={report.id} reportStatus={report.status} disabled={!["admin", "radiologist"].includes(role) || saving} ensureDraftSaved={ensureDraftSavedForAi} onOperationActiveChange={setAiOperationActive} />
+          {supportsRadiologyAi(appointment.serviceCategory) && <AiFindingsPanel reportId={report.id} reportStatus={report.status} disabled={!["admin", "radiologist"].includes(role) || saving} ensureDraftSaved={ensureDraftSavedForAi} onOperationActiveChange={setAiOperationActive} />}
 
           <details className="report-clinical-panel collapsible report-secondary-panel">
             <summary><span className="collapsible-icon">📌</span>Seguimientos accionables{followUps.length > 0 && <span className="collapsible-count">{followUps.length}</span>}</summary>

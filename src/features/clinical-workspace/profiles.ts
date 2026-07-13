@@ -55,3 +55,6 @@ export const clinicalProfileForCategory = (category: "imaging" | "laboratory" | 
   consultation: clinicalDocumentProfiles.consultation,
   procedure: clinicalDocumentProfiles.procedure,
 })[category];
+
+export const supportsRadiologyAi = (category: "imaging" | "laboratory" | "pathology" | "consultation" | "procedure") =>
+  clinicalProfileForCategory(category).aiAnalysisProfile === "radiology";
