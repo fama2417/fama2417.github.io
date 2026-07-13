@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { Fragment, FormEvent, useEffect, useRef, useState } from "react";
 import { CODE_SYSTEMS, codeHref, codingError } from "@/features/clinical/coding";
 import { CodePicker } from "@/features/clinical/CodePicker";
 import { ClinicalWorkspace } from "@/features/clinical-workspace/ClinicalWorkspace";
@@ -19,7 +19,7 @@ import {
 import { AiFindingsPanel } from "./AiFindingsPanel";
 import { fetchTemplates, type ReportTemplate } from "./templates";
 import { profileFor, type ReportSection } from "./profiles";
-import { validateFinalReport } from "./validation";
+import { criticalFindingState, criticalFindingTypeError, validateFinalReport } from "./validation";
 
 const fallbackOhifUrl = (process.env.NEXT_PUBLIC_OHIF_URL ?? "http://localhost:8042/ohif").replace(/\/$/, "");
 const localNow = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
@@ -92,6 +92,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
   const [role, setRole] = useState<string>("");
   const [reportAction, setReportAction] = useState<{ kind: "reopen" | "delete"; reason: string } | null>(null);
   const viewerRef = useRef<HTMLIFrameElement>(null);
+  const criticalPanelRef = useRef<HTMLDetailsElement>(null);
 
   useEffect(() => {
     keyImages.filter((item) => isCaptureKeyImage(item.instanceId)).forEach((item) => {
@@ -176,16 +177,19 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
     setNotice(`Plantilla "${template.name}" aplicada.`);
   }
 
+  function finalReportError() {
+    const criticalState = criticalFindingState(report.criticalFinding, communications);
+    return validateFinalReport(report, criticalState.status === "confirmed") || [
+      codingError(report.reportCodeSystem, report.reportCode, report.reportCodeDisplay, "Reporte/prestación", true),
+      codingError(report.findingCodeSystem, report.findingCode, report.findingCodeDisplay, "Hallazgo principal"),
+      codingError(report.diagnosisCodeSystem, report.diagnosisCode, report.diagnosisCodeDisplay, "Diagnóstico"),
+    ].find(Boolean) || "";
+  }
+
   async function persist(status: RadiologyReport["status"]) {
     if (status === "final") {
-      const validation = validateFinalReport(report, communications.some((item) => item.urgency === "critical" && item.acknowledged));
+      const validation = finalReportError();
       if (validation) return setError(validation);
-      const codingValidation = [
-        codingError(report.reportCodeSystem, report.reportCode, report.reportCodeDisplay, "Reporte/prestación", true),
-        codingError(report.findingCodeSystem, report.findingCode, report.findingCodeDisplay, "Hallazgo principal"),
-        codingError(report.diagnosisCodeSystem, report.diagnosisCode, report.diagnosisCodeDisplay, "Diagnóstico"),
-      ].find(Boolean);
-      if (codingValidation) return setError(codingValidation);
     }
     setSaving(true); setError(""); setNotice("");
     try {
@@ -337,7 +341,43 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
   const fullScreen = appointment.studyInstanceUid && viewerBase === "/ohif"
     ? `/api/pacs/handoff?next=${encodeURIComponent(`/ohif/viewer?StudyInstanceUIDs=${appointment.studyInstanceUid}`)}` : viewer;
   const detail: [string, string][] = [["Anamnesis", appointment.anamnesis || "—"], ["Hipótesis diagnóstica", appointment.diagnosticHypothesis || "—"], ...appointmentDetail(appointment).filter(([, value]) => value)];
-  const acknowledgedCommunication = communications.findLast((item) => item.urgency === "critical" && item.acknowledged);
+  const criticalState = criticalFindingState(report.criticalFinding, communications);
+  const acknowledgedCommunication = criticalState.communication;
+  const signingError = report.status === "draft" ? finalReportError() : "";
+
+  function showCriticalCommunication() {
+    setEditorTab("report");
+    requestAnimationFrame(() => {
+      const panel = criticalPanelRef.current;
+      if (!panel) return;
+      panel.open = true;
+      panel.scrollIntoView({ behavior: "smooth", block: "start" });
+      const target = criticalState.status === "confirmed"
+        ? panel.querySelector<HTMLElement>("summary")
+        : report.criticalFindingType
+          ? panel.querySelector<HTMLElement>("input[required]")
+          : panel.querySelector<HTMLElement>("select");
+      target?.focus();
+    });
+  }
+
+  const criticalFindingControl = <Fragment>
+    <label className="consent-field critical-field"><input type="checkbox" checked={report.criticalFinding} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, criticalFinding: event.target.checked, criticalFindingType: event.target.checked ? current.criticalFindingType : "" }))} />Hallazgo crítico: requiere comunicación inmediata y confirmada.</label>
+    {report.criticalFinding && <details ref={criticalPanelRef} className="report-clinical-panel collapsible critical-panel" open>
+      <summary><span className="collapsible-icon">❤️‍🔥</span>Hallazgo crítico{report.criticalFindingType && <span className="collapsible-hint">{report.criticalFindingType}</span>}{communications.length > 0 && <span className="collapsible-count">{communications.length}</span>}</summary>
+      <label>Tipo de hallazgo crítico<select value={report.criticalFindingType} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, criticalFindingType: event.target.value }))}><option value="">Seleccionar…</option>{criticalFindingTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
+      <h4>Registro de comunicación</h4>
+      {communications.map((item) => <div className="workflow-entry" key={item.id}><strong>{item.acknowledged ? "Confirmada" : "Sin confirmación"}</strong><span>{new Date(item.communicatedAt).toLocaleString("es-CL")} · {item.recipient} · {channelLabels[item.channel]}</span>{item.notes && <span>{item.notes}</span>}</div>)}
+      <form className="report-inline-form" onSubmit={recordCommunication}>
+        <label>Destinatario<input required value={communicationDraft.recipient} onChange={(event) => setCommunicationDraft({ ...communicationDraft, recipient: event.target.value })} /></label>
+        <label>Vía<select value={communicationDraft.channel} onChange={(event) => setCommunicationDraft({ ...communicationDraft, channel: event.target.value as ReportCommunication["channel"] })}>{Object.entries(channelLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+        <label>Fecha y hora<input required type="datetime-local" value={communicationDraft.communicatedAt} onChange={(event) => setCommunicationDraft({ ...communicationDraft, communicatedAt: event.target.value })} /></label>
+        <label className="consent-field"><input type="checkbox" checked={communicationDraft.acknowledged} onChange={(event) => setCommunicationDraft({ ...communicationDraft, acknowledged: event.target.checked })} />Recepción confirmada</label>
+        <label className="span-2">Notas / intento fallido<textarea value={communicationDraft.notes} onChange={(event) => setCommunicationDraft({ ...communicationDraft, notes: event.target.value })} /></label>
+        <button className="button secondary" disabled={saving} type="submit">Registrar intento</button>
+      </form>
+    </details>}
+  </Fragment>;
 
   return <div className="report-workstation">
     <header className="report-workstation-header">
@@ -372,27 +412,14 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
               {appointment.serviceCategory === "imaging" && templates.filter((template) => template.active && template.category === "imaging" && template.modality !== appointment.modality).map((template) => <option key={template.id} value={template.id}>{template.modality} · {template.name}</option>)}
             </select>}
           </div>
-          {orderedSections.map((section) => <label key={section.name}>{section.label}<textarea name={section.name} value={report[section.name]} placeholder={section.hint} onChange={(event) => setSection(section.name, event.target.value)} disabled={report.status === "final"} /></label>)}
+          {orderedSections.map((section) => <Fragment key={section.name}>
+            <label>{section.label}<textarea name={section.name} value={report[section.name]} placeholder={section.hint} onChange={(event) => setSection(section.name, event.target.value)} disabled={report.status === "final"} /></label>
+            {section.name === "impression" && criticalFindingControl}
+          </Fragment>)}
           <div className="report-confirmations">
             <label className="consent-field"><input type="checkbox" checked={report.identityConfirmed} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, identityConfirmed: event.target.checked }))} />Confirmo la identidad del paciente y el estudio.</label>
             <label className="consent-field"><input type="checkbox" checked={report.clinicalQuestionAnswered} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, clinicalQuestionAnswered: event.target.checked }))} />Confirmo que la impresión responde la pregunta clínica.</label>
           </div>
-
-          <label className="consent-field critical-field"><input type="checkbox" checked={report.criticalFinding} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, criticalFinding: event.target.checked, criticalFindingType: event.target.checked ? current.criticalFindingType : "" }))} />Hallazgo crítico: requiere comunicación inmediata y confirmada.</label>
-          {report.criticalFinding && <details className="report-clinical-panel collapsible critical-panel" open>
-            <summary><span className="collapsible-icon">❤️‍🔥</span>Hallazgo crítico{report.criticalFindingType && <span className="collapsible-hint">{report.criticalFindingType}</span>}{communications.length > 0 && <span className="collapsible-count">{communications.length}</span>}</summary>
-            <label>Tipo de hallazgo crítico<select value={report.criticalFindingType} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, criticalFindingType: event.target.value }))}><option value="">Seleccionar…</option>{criticalFindingTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
-            <h4>Registro de comunicación</h4>
-            {communications.map((item) => <div className="workflow-entry" key={item.id}><strong>{item.acknowledged ? "Confirmada" : "Sin confirmación"}</strong><span>{new Date(item.communicatedAt).toLocaleString("es-CL")} · {item.recipient} · {channelLabels[item.channel]}</span>{item.notes && <span>{item.notes}</span>}</div>)}
-            <form className="report-inline-form" onSubmit={recordCommunication}>
-              <label>Destinatario<input required value={communicationDraft.recipient} onChange={(event) => setCommunicationDraft({ ...communicationDraft, recipient: event.target.value })} /></label>
-              <label>Vía<select value={communicationDraft.channel} onChange={(event) => setCommunicationDraft({ ...communicationDraft, channel: event.target.value as ReportCommunication["channel"] })}>{Object.entries(channelLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-              <label>Fecha y hora<input required type="datetime-local" value={communicationDraft.communicatedAt} onChange={(event) => setCommunicationDraft({ ...communicationDraft, communicatedAt: event.target.value })} /></label>
-              <label className="consent-field"><input type="checkbox" checked={communicationDraft.acknowledged} onChange={(event) => setCommunicationDraft({ ...communicationDraft, acknowledged: event.target.checked })} />Recepción confirmada</label>
-              <label className="span-2">Notas / intento fallido<textarea value={communicationDraft.notes} onChange={(event) => setCommunicationDraft({ ...communicationDraft, notes: event.target.value })} /></label>
-              <button className="button secondary" disabled={saving} type="submit">Registrar intento</button>
-            </form>
-          </details>}
 
           <details className="report-clinical-panel collapsible" open>
             <summary><span className="collapsible-icon">🩻</span>Imágenes clave (KIN){baseKeyImages.length > 0 && <span className="collapsible-count">{baseKeyImages.length}</span>}</summary>
@@ -466,13 +493,27 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
           </section>
         </div>
 
-        <footer className="report-actions">
-          {report.status === "draft" && <><button className="button secondary" type="button" disabled={saving} onClick={() => persist("draft")}>Guardar borrador</button><button className="button primary" type="button" disabled={saving} onClick={() => persist("final")}>Firmar definitivo</button></>}
-          {report.status === "final" && <span>Definitivo · las correcciones se agregan como adenda.</span>}
-          {report.status === "final" && role === "admin" && <><button className="button secondary" type="button" disabled={saving} onClick={() => setReportAction({ kind: "reopen", reason: "" })}>Reabrir informe</button><button className="text-button danger" type="button" disabled={saving} onClick={() => setReportAction({ kind: "delete", reason: "" })}>Eliminar informe</button></>}
-          {notice && <span className="form-notice" role="status">{notice}</span>}
-          {report.updatedAt && <span className="report-updated">Última modificación: {new Date(report.updatedAt).toLocaleString("es-CL")}</span>}
-        </footer>
+        <div className="report-editor-footer">
+          {report.criticalFinding && <div className={`critical-status ${criticalState.status}`} role={criticalState.status === "pending" ? "alert" : "status"} aria-live={criticalState.status === "pending" ? "assertive" : "polite"} aria-atomic="true">
+            <span className="critical-status-icon" aria-hidden="true">{criticalState.status === "pending" ? "⚠" : "✓"}</span>
+            <div className="critical-status-copy">
+              <strong>{criticalState.status === "pending" ? "Hallazgo crítico pendiente de comunicación" : "Hallazgo crítico comunicado"}</strong>
+              {criticalState.status === "pending"
+                ? <span>Requiere comunicación inmediata y confirmada.</span>
+                : <span>{acknowledgedCommunication?.communicatedAt && `Fecha y hora: ${new Date(acknowledgedCommunication.communicatedAt).toLocaleString("es-CL")}`}{acknowledgedCommunication?.recipient && ` · Destinatario: ${acknowledgedCommunication.recipient}`}</span>}
+              {!report.criticalFindingType && <span className="critical-status-warning">{criticalFindingTypeError}</span>}
+            </div>
+            <button className="button secondary critical-status-action" type="button" onClick={showCriticalCommunication}>{criticalState.status === "pending" ? "Registrar comunicación" : "Ver registro"}</button>
+          </div>}
+          <footer className="report-actions">
+            {report.status === "draft" && signingError && <span className="report-signing-error" role="status">{signingError}</span>}
+            {report.status === "draft" && <><button className="button secondary" type="button" disabled={saving} onClick={() => persist("draft")}>Guardar borrador</button><button className="button primary" type="button" disabled={saving} onClick={() => persist("final")}>Firmar definitivo</button></>}
+            {report.status === "final" && <span>Definitivo · las correcciones se agregan como adenda.</span>}
+            {report.status === "final" && role === "admin" && <><button className="button secondary" type="button" disabled={saving} onClick={() => setReportAction({ kind: "reopen", reason: "" })}>Reabrir informe</button><button className="text-button danger" type="button" disabled={saving} onClick={() => setReportAction({ kind: "delete", reason: "" })}>Eliminar informe</button></>}
+            {notice && <span className="form-notice" role="status">{notice}</span>}
+            {report.updatedAt && <span className="report-updated">Última modificación: {new Date(report.updatedAt).toLocaleString("es-CL")}</span>}
+          </footer>
+        </div>
       </section>} viewer={appointment.serviceCategory === "imaging" ? <section className="viewer-pane" aria-label="Visor de imágenes">{fullScreen ? <iframe ref={viewerRef} src={fullScreen} title="Visor OHIF" allow="fullscreen" /> : <p className="empty-state">Este estudio aún no tiene imágenes vinculadas en el PACS.</p>}</section> : undefined} />
 
     {reportAction && <div className="appointment-info-backdrop" role="dialog" aria-modal="true" aria-label={reportAction.kind === "reopen" ? "Reabrir reporte" : "Eliminar reporte"} onClick={(event) => { if (event.target === event.currentTarget) setReportAction(null); }}>
