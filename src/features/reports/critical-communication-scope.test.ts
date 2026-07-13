@@ -19,7 +19,9 @@ test("la base exige informe y cita compatibles y firma por el informe exacto", a
   const signatureSql = sql.slice(sql.indexOf("create or replace function private.validate_critical_report_communication"));
   assert.match(sql, /if new\.report_id is null[\s\S]*?tg_op = 'INSERT'[\s\S]*?raise exception/);
   assert.match(sql, /r\.id = new\.report_id[\s\S]*?r\.appointment_id = new\.appointment_id[\s\S]*?r\.tenant_id = new\.tenant_id/);
-  assert.match(signatureSql, /c\.report_id = new\.id[\s\S]*?c\.urgency = 'critical'\s+and c\.acknowledged/);
+  assert.match(signatureSql, /r\.appointment_id = new\.appointment_id[\s\S]*?r\.tenant_id = new\.tenant_id/);
+  assert.match(signatureSql, /v_report_id := coalesce\(v_report_id, new\.id\)/);
+  assert.match(signatureSql, /c\.report_id = v_report_id[\s\S]*?c\.urgency = 'critical'\s+and c\.acknowledged/);
   assert.doesNotMatch(signatureSql, /c\.report_id is null/);
   assert.doesNotMatch(sql, /create or replace function private\.protect_final_report/);
 });

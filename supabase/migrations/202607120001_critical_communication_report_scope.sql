@@ -83,10 +83,20 @@ with check (
 create or replace function private.validate_critical_report_communication() returns trigger
 language plpgsql security definer set search_path = ''
 as $$
+declare
+  v_report_id uuid;
 begin
+  -- En un UPSERT, el BEFORE INSERT recibe un UUID nuevo antes de resolver el
+  -- conflicto por appointment_id. Usa el informe existente cuando corresponda.
+  select r.id into v_report_id
+  from public.radiology_reports r
+  where r.appointment_id = new.appointment_id
+    and r.tenant_id = new.tenant_id;
+  v_report_id := coalesce(v_report_id, new.id);
+
   if new.status = 'final' and new.critical_finding and not exists (
     select 1 from public.report_communications c
-    where c.report_id = new.id
+    where c.report_id = v_report_id
       and c.appointment_id = new.appointment_id
       and c.tenant_id = new.tenant_id
       and c.urgency = 'critical'
