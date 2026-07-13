@@ -1,5 +1,7 @@
 import type { SanitizedAiReportInput } from "./ai-sanitizer.ts";
 import type { ReportingProfile } from "./ai-extraction-schema.ts";
+import { clinicalProfileForCategory } from "../clinical-workspace/profiles.ts";
+import type { Appointment } from "../appointments/mock-data.ts";
 
 export const SYSTEM_PROMPT_FOR_RADIOLOGY_FINDING_EXTRACTION = `Eres un extractor de hallazgos radiologicos en espanol para un sistema RIS/PACS.
 
@@ -48,6 +50,32 @@ Reglas estrictas:
 
 const line = (label: string, value?: string | null) => value?.trim() ? `${label}: ${value.trim()}` : "";
 
+export const SYSTEM_PROMPT_FOR_CLINICAL_DOCUMENT_SUMMARY = `Eres un asistente de revision documental clinica en espanol.
+
+Reglas estrictas:
+1. El resultado es una sugerencia para revision profesional; no inventes informacion ni completes datos ausentes.
+2. No reescribas ni modifiques el documento original.
+3. Resume solo afirmaciones presentes en las secciones recibidas y cita cada punto con sourceSentences textuales.
+4. Conserva cifras, unidades, lateralidad, negaciones e incertidumbre exactamente como fueron documentadas.
+5. En laboratorio no calcules, no cambies unidades y no declares normalidad o anormalidad salvo que el texto lo indique.
+6. En patologia no infieras etapa, grado, margenes, biomarcadores ni diagnosticos que no esten escritos.
+7. En procedimientos no declares ausencia de incidentes o complicaciones salvo que este documentada.
+8. En consulta no propongas diagnosticos, tratamientos o conductas nuevas.
+9. assessment.text debe ser una sintesis breve del documento, con confianza calibrada.
+10. Genera como maximo 8 summaryItems y usa sourceSection segun el campo de origen.
+11. Clasifica cada punto solo como clinical_fact, result, diagnosis, recommendation, limitation o warning.
+12. Usa recommendation solo para planes o seguimientos escritos y warning solo para vacios o contradicciones observables; no inventes alertas.
+13. No devuelvas codigos SNOMED, CIE, LOINC o RadLex si no fueron proporcionados.
+14. Devuelve solo datos estructurados segun el JSON Schema.`;
+
+type NonRadiologyCategory = Exclude<Appointment["serviceCategory"], "imaging">;
+const clinicalGuidance: Record<NonRadiologyCategory, string> = {
+  consultation: "Prioriza evaluacion, diagnosticos y plan documentados; separa antecedentes de problemas activos.",
+  laboratory: "Prioriza resultados e interpretacion escritos; conserva valores y unidades sin inferir rangos.",
+  pathology: "Prioriza diagnostico, muestra, microscopia y marcadores, grado o margenes solo cuando esten explicitamente documentados.",
+  procedure: "Prioriza indicacion, tecnica, hallazgos, incidentes o limitaciones y plan posterior documentado.",
+};
+
 export function buildRadiologyFindingExtractionPrompt(input: SanitizedAiReportInput, reportingProfile: ReportingProfile = "UNKNOWN") {
   return [
     line("Codigo local de prestacion", input.procedureCode),
@@ -56,8 +84,21 @@ export function buildRadiologyFindingExtractionPrompt(input: SanitizedAiReportIn
     line("Reporting group", input.reportingGroupCode),
     line("Reporting profile asignado", reportingProfile),
     line("Indicacion clinica (solo contexto)", input.clinicalIndication),
+    line("Comparacion", input.comparison),
     line("Tecnica", input.technique),
     line("Hallazgos", input.findings),
     line("Impresion", input.impression),
+  ].filter(Boolean).join("\n\n");
+}
+
+export function buildClinicalDocumentSummaryPrompt(input: SanitizedAiReportInput, category: NonRadiologyCategory) {
+  const profile = clinicalProfileForCategory(category);
+  const values = { clinicalIndication: input.clinicalIndication, comparison: input.comparison, technique: input.technique, findings: input.findings, impression: input.impression };
+  return [
+    line("Perfil documental", category),
+    line("Prestacion registrada", input.procedureName),
+    line("Codigo local de prestacion", input.procedureCode),
+    line("Instruccion especifica", clinicalGuidance[category]),
+    ...profile.sections.map((section) => line(`${section.label} [${section.name}]`, values[section.name])),
   ].filter(Boolean).join("\n\n");
 }

@@ -37,15 +37,11 @@ export async function canRunAiExtraction({ tenantId, supabase }: { tenantId: str
   if (!config.enabled) return { allowed: false, reason: "AI extraction disabled" };
   if (!process.env.OPENAI_API_KEY) return { allowed: false, reason: "Missing OPENAI_API_KEY" };
 
-  const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0);
-  const daily = await supabase.from("ai_usage_log").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId).eq("success", true).gte("created_at", dayStart.toISOString());
-  if (daily.error) return { allowed: false, reason: daily.error.message };
-  if ((daily.count ?? 0) >= config.maxReportsPerDay) return { allowed: false, reason: "Daily AI extraction limit reached" };
-
-  const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
-  const usage = await supabase.from("ai_usage_log").select("estimated_cost_usd").eq("tenant_id", tenantId).eq("success", true).gte("created_at", monthStart.toISOString());
-  if (usage.error) return { allowed: false, reason: usage.error.message };
-  const spent = (usage.data ?? []).reduce((sum, row) => sum + Number(row.estimated_cost_usd ?? 0), 0);
+  const totals = await supabase.rpc("ai_usage_totals");
+  if (totals.error) return { allowed: false, reason: totals.error.message };
+  const usage = Array.isArray(totals.data) ? totals.data[0] : totals.data;
+  if (Number(usage?.daily_count ?? 0) >= config.maxReportsPerDay) return { allowed: false, reason: "Daily AI extraction limit reached" };
+  const spent = Number(usage?.monthly_cost_usd ?? 0);
   if (spent >= config.monthlyBudgetUsd) return { allowed: false, reason: "Monthly AI budget reached" };
 
   const pricing = await supabase.from("ai_model_pricing").select("input_usd_per_1m, output_usd_per_1m").eq("provider", "openai").eq("model", config.model).eq("active", true).maybeSingle();

@@ -4,7 +4,7 @@ import { Fragment, FormEvent, useEffect, useRef, useState, type KeyboardEvent } 
 import { CODE_SYSTEMS, codeHref, codingError } from "@/features/clinical/coding";
 import { CodePicker } from "@/features/clinical/CodePicker";
 import { ClinicalWorkspace } from "@/features/clinical-workspace/ClinicalWorkspace";
-import { clinicalProfileForCategory, supportsRadiologyAi, type ReportSection } from "@/features/clinical-workspace/profiles";
+import { clinicalProfileForCategory, supportsClinicalAi, type ReportSection } from "@/features/clinical-workspace/profiles";
 import type { Appointment } from "@/features/appointments/mock-data";
 import { fetchAppointments, orderFileUrl } from "@/features/appointments/repository";
 import { appointmentStatusLabels } from "@/features/appointments/status";
@@ -465,7 +465,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
             </label>}
           </details>}
 
-          {supportsRadiologyAi(appointment.serviceCategory) && <AiFindingsPanel reportId={report.id} reportStatus={report.status} disabled={!["admin", "radiologist"].includes(role) || saving} ensureDraftSaved={ensureDraftSavedForAi} onOperationActiveChange={setAiOperationActive} />}
+          {supportsClinicalAi(appointment.serviceCategory) && <AiFindingsPanel reportId={report.id} reportStatus={report.status} reportCategory={appointment.serviceCategory} disabled={!["admin", "radiologist", "clinician"].includes(role) || (role === "clinician" && !canSign) || saving} ensureDraftSaved={ensureDraftSavedForAi} onOperationActiveChange={setAiOperationActive} />}
 
           <details className="report-clinical-panel collapsible report-secondary-panel">
             <summary><span className="collapsible-icon">📌</span>Seguimientos accionables{followUps.length > 0 && <span className="collapsible-count">{followUps.length}</span>}</summary>
