@@ -5,7 +5,7 @@ import { requireAiRouteUser } from "@/features/reports/ai-route-auth.ts";
 
 const errorStatus = (message: string) => {
   if (/limit|budget/i.test(message)) return 429;
-  if (/sin hallazgos|sin impresion/i.test(message)) return 400;
+  if (/sin hallazgos|sin impresion|solo está disponible para informes de imagenología/i.test(message)) return 400;
   if (/inexistente/i.test(message)) return 404;
   return 502;
 };

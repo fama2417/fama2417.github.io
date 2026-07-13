@@ -6,11 +6,12 @@ const boolEnv = (name: string, fallback: boolean) => process.env[name] == null ?
 const numberEnv = (name: string, fallback: number) => Number(process.env[name] ?? fallback);
 
 export function aiConfig() {
+  const explicitlyConfigured = process.env.AI_EXTRACTION_ENABLED != null;
   const enabledByEnv = boolEnv("AI_EXTRACTION_ENABLED", false);
   return {
     model: process.env.OPENAI_MODEL || "gpt-5.4-nano",
     fallbackModel: process.env.OPENAI_FALLBACK_MODEL || "gpt-5.4-mini",
-    enabled: enabledByEnv || (process.env.RENDER === "true" && !!process.env.OPENAI_API_KEY),
+    enabled: explicitlyConfigured ? enabledByEnv : process.env.RENDER === "true" && !!process.env.OPENAI_API_KEY,
     maxOutputTokens: Math.max(numberEnv("AI_MAX_OUTPUT_TOKENS", 4000), 4000),
     timeoutMs: Math.max(numberEnv("AI_TIMEOUT_MS", 45000), 45000),
     maxReportsPerDay: numberEnv("AI_MAX_REPORTS_PER_DAY", 100),
