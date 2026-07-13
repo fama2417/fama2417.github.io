@@ -24,6 +24,21 @@ export async function GET(request: NextRequest) {
   const context = await requireAdmin(request);
   if ("error" in context) return context.error;
   const { admin, tenantId } = context;
+
+  // Resolución de cuenta por email para vincular pacientes al portal (solo lectura; el
+  // update de patients.user_id lo hace el admin desde el cliente, protegido por trigger + RLS).
+  const email = request.nextUrl.searchParams.get("email")?.trim().toLowerCase();
+  if (email) {
+    const { data: authUsers, error: listError } = await admin.auth.admin.listUsers({ perPage: 1000 });
+    if (listError) return NextResponse.json({ error: listError.message }, { status: 500 });
+    const account = authUsers.users.find((user) => user.email?.toLowerCase() === email);
+    if (!account) return NextResponse.json({ error: "No existe una cuenta con ese correo." }, { status: 404 });
+    const [staff, linked] = await Promise.all([
+      admin.from("profiles").select("id").eq("id", account.id).maybeSingle(),
+      admin.from("patients").select("id, full_name").eq("user_id", account.id).maybeSingle(),
+    ]);
+    return NextResponse.json({ userId: account.id, isStaff: !!staff.data, linkedPatientId: linked.data?.id ?? null, linkedPatientName: linked.data?.full_name ?? null });
+  }
   const { data: profiles, error } = await admin.from("profiles").select("id, full_name, role, platform, tenant_id, professional_registration, signature_url").eq("tenant_id", tenantId);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   const { data: authUsers } = await admin.auth.admin.listUsers({ perPage: 1000 });

@@ -97,8 +97,38 @@ revoke execute on function public.revoke_report_release(uuid) from authenticated
 Las columnas `user_id` y `released_to_patient_*` pueden quedarse (inertes sin políticas).
 `protect_final_report` puede restaurarse a la versión de `202607060005` si fuese necesario.
 
-## Deuda para Fase 3B
+## Fase 3B — Portal MVP (implementada)
 
-- UI de vinculación/liberación, invitaciones y `/portal`.
-- Acceso del paciente a nombre de institución (tenants) y a previews de imágenes (storage).
-- PDF del informe para paciente.
+- **Vincular cuenta**: `/pacientes/[id]` → sección "Cuenta de paciente" (solo admin). La cuenta
+  se resuelve por email vía `GET /api/admin/users?email=` (admin + service role, solo lectura);
+  el update de `patients.user_id` lo hace el cliente admin (trigger + RLS como autoridad final).
+- **Liberar/revocar**: `/informe/[id]` → panel junto a las acciones de admin (solo informes final).
+- **Portal**: `/portal`, layout propio sin AppShell; sesión sin profile + vinculada → redirige al
+  portal; staff en `/portal` → vuelve a `/`; sin vínculo → "Cuenta no habilitada" con logout.
+
+### Prueba manual del flujo real
+
+1. **Crear cuenta paciente temporal**: Supabase Dashboard → Authentication → Users → *Add user*
+   (email + contraseña, marcar *Auto Confirm*). No crear perfil en `profiles`.
+   Si se crea por SQL: los campos `confirmation_token`, `recovery_token`, `email_change*`,
+   `phone_change*` y `reauthentication_token` deben ir con `''`, nunca NULL (GoTrue devuelve
+   500 en el login si hay NULL).
+2. **Vincular**: como admin, abrir la ficha del paciente de prueba → "Cuenta de paciente" →
+   ingresar el email → Vincular. Verificar el rechazo si se intenta con un email de staff.
+3. **Liberar**: abrir `/informe/[id]` de un examen con informe **definitivo** → "Liberar al
+   paciente" → confirmar. El panel muestra fecha de liberación y "Revocar acceso".
+4. **Verificar portal**: en una ventana privada, iniciar sesión con la cuenta paciente → debe
+   caer en `/portal`; revisar Inicio, Mis citas, Mis exámenes (con "Ver informe" solo en el
+   examen liberado), Mis informes (secciones + addenda) y Mi información; probar que
+   `/worklist` o `/pacientes` redirigen a `/portal`; cerrar sesión.
+5. **Limpiar**: revocar la liberación desde `/informe/[id]`; desvincular desde la ficha;
+   eliminar la cuenta temporal en Authentication → Users. Todo queda auditado
+   (updates de `released_to_patient_*` y `user_id` en `audit_log`).
+
+### Deuda pendiente
+
+- Creación de cuentas e invitaciones por email desde la UI.
+- Nombre de la institución en el portal (RLS de `tenants` no lo permite para pacientes).
+- Imágenes clave en el portal (requiere políticas de storage/PACS propias).
+- PDF del informe para el paciente.
+- E2E automatizado del flujo paciente.

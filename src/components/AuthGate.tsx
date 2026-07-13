@@ -1,9 +1,11 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import type { AuthError, Session } from "@supabase/supabase-js";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase-client";
 import { effectiveTenantId } from "@/lib/tenant";
+import { resolveSessionKind, type SessionKind } from "@/features/patient-portal/session";
 
 const roleLabels: Record<string, string> = { admin: "Administrador", operator: "Operador", radiologist: "Radiólogo" };
 
@@ -25,11 +27,20 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const [submitting, setSubmitting] = useState(false);
   const [profile, setProfile] = useState<{ name: string; role: string; tenant: string; platform: boolean; tenantId: string } | null>(null);
   const [tenants, setTenants] = useState<Tenant[]>([]);
+  const [kind, setKind] = useState<SessionKind | "loading">("loading");
+  const pathname = usePathname();
+  const router = useRouter();
 
   useEffect(() => {
-    if (!session?.user.id) return setProfile(null);
-    supabase.from("profiles").select("full_name, role, platform, tenant_id, active_tenant_id, tenant:tenants!profiles_tenant_id_fkey(name), activeTenant:tenants!profiles_active_tenant_id_fkey(name)").eq("id", session.user.id).single().then(({ data }) => {
-      if (!data) return;
+    if (!session?.user.id) { setProfile(null); setKind("loading"); return; }
+    supabase.from("profiles").select("full_name, role, platform, tenant_id, active_tenant_id, tenant:tenants!profiles_tenant_id_fkey(name), activeTenant:tenants!profiles_active_tenant_id_fkey(name)").eq("id", session.user.id).maybeSingle().then(async ({ data }) => {
+      if (!data) {
+        // Sin perfil staff: ¿cuenta vinculada como paciente? (RLS solo devuelve la fila propia).
+        const patient = await supabase.from("patients").select("id").limit(1).maybeSingle();
+        setKind(resolveSessionKind({ hasProfile: false, hasPatient: !!patient.data }));
+        return;
+      }
+      setKind("staff");
       const baseTenant = data.tenant as unknown as { name: string } | null;
       const activeTenant = data.activeTenant as unknown as { name: string } | null;
       setProfile({
@@ -46,6 +57,12 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
         .catch(() => undefined);
     });
   }, [session?.user.id, session?.access_token]);
+
+  // El paciente solo navega el portal; cualquier otra ruta lo devuelve a /portal.
+  useEffect(() => {
+    if (kind === "patient" && pathname !== "/portal") router.replace("/portal");
+    if (kind === "staff" && pathname === "/portal") router.replace("/");
+  }, [kind, pathname, router]);
 
   async function switchTenant(tenantId: string) {
     setError("");
@@ -121,6 +138,19 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
         {notice && <p className="form-notice" role="status">{notice}</p>}
       </form>
     </main>
+  );
+
+  if (kind === "loading") return <main className="login-page"><p>Cargando sesión…</p></main>;
+  if (kind === "patient") {
+    if (pathname !== "/portal") return <main className="login-page"><p>Redirigiendo a tu portal…</p></main>;
+    return <>{children}</>;
+  }
+  if (kind === "unknown") return (
+    <main className="login-page"><section className="login-card">
+      <p className="eyebrow">Acceso restringido</p><h1>Cuenta no habilitada</h1>
+      <p>Tu cuenta no tiene un perfil autorizado en esta institución. Si eres paciente, solicita la vinculación de tu cuenta; si eres parte del equipo, contacta al administrador.</p>
+      <button className="button secondary" type="button" onClick={() => supabase.auth.signOut()}>Cerrar sesión</button>
+    </section></main>
   );
 
   return <><div className="session-bar">

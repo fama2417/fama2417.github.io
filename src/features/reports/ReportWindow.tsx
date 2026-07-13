@@ -17,6 +17,7 @@ import {
   type RadiologyReport, type ReportAddendum, type ReportCommunication, type ReportFollowUp, type ReportKeyImage,
 } from "./repository";
 import { AiFindingsPanel } from "./AiFindingsPanel";
+import { ReportReleasePanel } from "./ReportReleasePanel";
 import { fetchTemplates, type ReportTemplate } from "./templates";
 import { profileFor } from "./profiles";
 import { validateFinalReport } from "./validation";
@@ -461,6 +462,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
           {report.status === "draft" && <><button className="button secondary" type="button" disabled={saving} onClick={() => persist("draft")}>Guardar borrador</button><button className="button primary" type="button" disabled={saving} onClick={() => persist("final")}>Firmar definitivo</button></>}
           {report.status === "final" && <span>Definitivo · las correcciones se agregan como adenda.</span>}
           {report.status === "final" && role === "admin" && <><button className="button secondary" type="button" disabled={saving} onClick={() => setReportAction({ kind: "reopen", reason: "" })}>Reabrir informe</button><button className="text-button danger" type="button" disabled={saving} onClick={() => setReportAction({ kind: "delete", reason: "" })}>Eliminar informe</button></>}
+          <ReportReleasePanel appointmentId={appointmentId} reportStatus={report.status} role={role} />
           {notice && <span className="form-notice" role="status">{notice}</span>}
           {report.updatedAt && <span className="report-updated">Última modificación: {new Date(report.updatedAt).toLocaleString("es-CL")}</span>}
         </footer>

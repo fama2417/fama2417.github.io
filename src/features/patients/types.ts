@@ -13,6 +13,8 @@ export type Patient = {
   allergies: string;
   morbidHistory: string;
   prevision: string;
+  /** Cuenta auth vinculada para el portal de paciente (solo admin la gestiona). */
+  userId?: string | null;
 };
 
 export const identifierTypeLabels: Record<Patient["identifierType"], string> = { run: "RUN", passport: "Pasaporte", other: "Otro" };

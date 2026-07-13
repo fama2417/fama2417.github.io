@@ -3,11 +3,12 @@ import type { Patient } from "./types";
 import type { PatientEditPatch } from "./patient-edit";
 import { patientSearchFilter } from "./search";
 
-const columns = "id, identifier, identifier_type, full_name, birth_date, sex, phone, privacy_consent_at, address, comuna, email, allergies, morbid_history, prevision";
+const columns = "id, identifier, identifier_type, full_name, birth_date, sex, phone, privacy_consent_at, address, comuna, email, allergies, morbid_history, prevision, user_id";
 
 type PatientRow = {
   id: string; identifier: string; identifier_type: Patient["identifierType"]; full_name: string; birth_date: string; sex: Patient["sex"]; phone: string;
   privacy_consent_at: string | null; address: string; comuna: string; email: string; allergies: string; morbid_history: string; prevision: string;
+  user_id: string | null;
 };
 
 function mapPatient(row: PatientRow): Patient {
@@ -15,7 +16,7 @@ function mapPatient(row: PatientRow): Patient {
     id: row.id, identifier: row.identifier, identifierType: row.identifier_type ?? "run", name: row.full_name, birthDate: row.birth_date, sex: row.sex, phone: row.phone,
     consentAt: row.privacy_consent_at ?? undefined,
     address: row.address ?? "", comuna: row.comuna ?? "", email: row.email ?? "", allergies: row.allergies ?? "", morbidHistory: row.morbid_history ?? "",
-    prevision: row.prevision ?? "",
+    prevision: row.prevision ?? "", userId: row.user_id ?? null,
   };
 }
 
