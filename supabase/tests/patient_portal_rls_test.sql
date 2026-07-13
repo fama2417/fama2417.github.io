@@ -25,11 +25,11 @@ insert into public.patients (id, identifier, full_name, birth_date, sex, tenant_
   ('b0000000-0000-0000-0000-00000000000b', '22.222.222-2', 'Paciente B', '1991-02-02', 'female', 'f0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-00000000000a', 'a0000000-0000-0000-0000-0000000000bb');
 
 -- Citas: A1 (informe final liberado), A2 (borrador), A3 (final sin liberar), B1 (final liberado de B).
-insert into public.appointments (id, patient_id, appointment_date, start_time, end_time, practitioner_name, location_name, modality, reason, status, tenant_id, created_by) values
-  ('c0000000-0000-0000-0000-0000000000a1', 'b0000000-0000-0000-0000-00000000000a', '2026-07-01', '08:00', '08:30', 'Dr. X', 'Sala 1', 'CT', 'Examen A1', 'completed', 'f0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-00000000000a'),
-  ('c0000000-0000-0000-0000-0000000000a2', 'b0000000-0000-0000-0000-00000000000a', '2026-07-02', '08:00', '08:30', 'Dr. X', 'Sala 2', 'US', 'Examen A2', 'completed', 'f0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-00000000000a'),
-  ('c0000000-0000-0000-0000-0000000000a3', 'b0000000-0000-0000-0000-00000000000a', '2026-07-03', '08:00', '08:30', 'Dr. X', 'Sala 3', 'MR', 'Examen A3', 'completed', 'f0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-00000000000a'),
-  ('c0000000-0000-0000-0000-0000000000b1', 'b0000000-0000-0000-0000-00000000000b', '2026-07-04', '08:00', '08:30', 'Dr. X', 'Sala 4', 'CT', 'Examen B1', 'completed', 'f0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-00000000000a');
+insert into public.appointments (id, patient_id, appointment_date, start_time, end_time, practitioner_name, location_name, modality, reason, status, service_category, tenant_id, created_by) values
+  ('c0000000-0000-0000-0000-0000000000a1', 'b0000000-0000-0000-0000-00000000000a', '2026-07-01', '08:00', '08:30', 'Dr. X', 'Sala 1', 'CT', 'Examen A1', 'completed', 'imaging', 'f0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-00000000000a'),
+  ('c0000000-0000-0000-0000-0000000000a2', 'b0000000-0000-0000-0000-00000000000a', '2026-07-02', '08:00', '08:30', 'Dr. X', 'Sala 2', 'US', 'Examen A2', 'completed', 'imaging', 'f0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-00000000000a'),
+  ('c0000000-0000-0000-0000-0000000000a3', 'b0000000-0000-0000-0000-00000000000a', '2026-07-03', '08:00', '08:30', 'Dr. X', 'Sala 3', 'MR', 'Examen A3', 'completed', 'imaging', 'f0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-00000000000a'),
+  ('c0000000-0000-0000-0000-0000000000b1', 'b0000000-0000-0000-0000-00000000000b', '2026-07-04', '08:00', '08:30', 'Dr. X', 'Sala 4', 'CT', 'Examen B1', 'completed', 'imaging', 'f0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-00000000000a');
 
 insert into public.imaging_studies (id, appointment_id, tenant_id, orthanc_study_id, study_instance_uid) values
   ('d0000000-0000-0000-0000-0000000000a1', 'c0000000-0000-0000-0000-0000000000a1', 'f0000000-0000-0000-0000-000000000001', 'orthanc-a1', '1.2.3.a1'),
@@ -53,9 +53,9 @@ insert into public.report_key_images (appointment_id, tenant_id, instance_id, ad
 select a.appointment_id, a.tenant_id, 'instance-' || a.appointment_id, a.id, 'a0000000-0000-0000-0000-00000000000b'
 from public.report_addenda a;
 
--- Comunicación crítica sobre A1 (el paciente no debe verla).
-insert into public.report_communications (appointment_id, tenant_id, urgency, recipient, channel, communicated_at, created_by)
-values ('c0000000-0000-0000-0000-0000000000a1', 'f0000000-0000-0000-0000-000000000001', 'critical', 'Dr. Tratante', 'phone', now(), 'a0000000-0000-0000-0000-00000000000b');
+-- Comunicación crítica sobre el informe de A1 (el paciente no debe verla).
+insert into public.report_communications (appointment_id, report_id, tenant_id, urgency, recipient, channel, communicated_at, created_by)
+values ('c0000000-0000-0000-0000-0000000000a1', 'e0000000-0000-0000-0000-0000000000a1', 'f0000000-0000-0000-0000-000000000001', 'critical', 'Dr. Tratante', 'phone', now(), 'a0000000-0000-0000-0000-00000000000b');
 
 -- Liberaciones: A1 y B1 con claims de admin, vía RPC.
 select set_config('request.jwt.claims', '{"sub":"a0000000-0000-0000-0000-00000000000a","role":"authenticated"}', true);

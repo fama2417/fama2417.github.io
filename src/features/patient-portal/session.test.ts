@@ -23,7 +23,7 @@ test("el repository del portal no acepta patientId ni filtros del cliente", () =
     .replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
   assert.ok(!source.includes("patientId"), "el repository no debe usar patientId");
   const exported = [...source.matchAll(/export async function (\w+)\(([^)]*)\)/g)];
-  assert.equal(exported.length, 4, "se esperan 4 funciones exportadas");
+  assert.ok(exported.length >= 4, "se esperan al menos 4 funciones exportadas");
   for (const [, name, params] of exported) assert.equal(params.trim(), "", `${name} no debe recibir argumentos`);
 });
 

@@ -75,6 +75,8 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   }
 
   useEffect(() => {
+    // Los enlaces de invitación (pacientes del portal) llegan con type=invite: pedir contraseña al aceptar.
+    if (/type=invite/.test(window.location.hash)) setRecovering(true);
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
     const { data } = supabase.auth.onAuthStateChange((event, nextSession) => {
       setSession(nextSession);

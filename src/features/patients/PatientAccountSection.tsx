@@ -10,6 +10,7 @@ export function PatientAccountSection({ patient, onChanged }: { patient: Patient
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [confirmUnlink, setConfirmUnlink] = useState(false);
+  const [inviteOffer, setInviteOffer] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -21,6 +22,10 @@ export function PatientAccountSection({ patient, onChanged }: { patient: Patient
       const token = (await supabase.auth.getSession()).data.session?.access_token ?? "";
       const response = await fetch(`/api/admin/users?email=${encodeURIComponent(email.trim())}`, { headers: { Authorization: `Bearer ${token}` } });
       const payload = await response.json().catch(() => ({}));
+      if (response.status === 404) {
+        setInviteOffer(email.trim());
+        return;
+      }
       if (!response.ok) throw new Error(payload.error ?? "No fue posible buscar la cuenta.");
       if (payload.isStaff) throw new Error("Esa cuenta pertenece al equipo clínico y no puede vincularse como paciente.");
       if (payload.linkedPatientId && payload.linkedPatientId !== patient.id) throw new Error(`Esa cuenta ya está vinculada a otro paciente (${payload.linkedPatientName ?? "sin nombre"}).`);
@@ -30,6 +35,25 @@ export function PatientAccountSection({ patient, onChanged }: { patient: Patient
       setEmail("");
     } catch (cause) {
       setError(cause instanceof Error && cause.message ? cause.message : "No fue posible vincular la cuenta.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function inviteAndLink() {
+    if (busy) return;
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const token = (await supabase.auth.getSession()).data.session?.access_token ?? "";
+      const response = await fetch("/api/admin/users", { method: "PUT", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ email: inviteOffer }) });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error ?? "No fue posible enviar la invitación.");
+      await linkPatientAccount(patient.id, payload.userId);
+      onChanged(payload.userId);
+      setNotice(`Invitación enviada a ${inviteOffer}: el paciente definirá su contraseña desde el correo y entrará directo al portal.`);
+      setInviteOffer(""); setEmail("");
+    } catch (cause) {
+      setError(cause instanceof Error && cause.message ? cause.message : "No fue posible invitar la cuenta.");
     } finally {
       setBusy(false);
     }
@@ -68,9 +92,13 @@ export function PatientAccountSection({ patient, onChanged }: { patient: Patient
         </>
       ) : (
         <form className="patient-account-form" onSubmit={link}>
-          <label>Correo de la cuenta existente<input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="paciente@correo.cl" /></label>
-          <button className="button primary" type="submit" disabled={busy || !email.trim()}>{busy ? "Vinculando…" : "Vincular cuenta"}</button>
-          <p className="empty-inline">La cuenta debe existir previamente (esta fase no crea usuarios ni envía invitaciones).</p>
+          <label>Correo del paciente<input type="email" required value={email} onChange={(event) => { setEmail(event.target.value); setInviteOffer(""); }} placeholder="paciente@correo.cl" /></label>
+          <button className="button primary" type="submit" disabled={busy || !email.trim()}>{busy ? "Procesando…" : "Vincular cuenta"}</button>
+          {inviteOffer && <div className="form-actions">
+            <span className="empty-inline">No existe una cuenta con ese correo.</span>
+            <button className="button secondary" type="button" disabled={busy} onClick={inviteAndLink}>{busy ? "Enviando…" : `Invitar a ${inviteOffer} y vincular`}</button>
+          </div>}
+          <p className="empty-inline">Si la cuenta existe se vincula directo; si no, puedes enviarle una invitación por correo.</p>
         </form>
       )}
       {error && <p className="form-error" role="alert">{error}</p>}

@@ -867,4 +867,18 @@ body:has(.report-workstation) .app-shell-main { min-height: 0; overflow: hidden;
 .portal-info { display: grid; gap: 12px 20px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin: 0; }
 .portal-info dt { color: var(--muted); font-size: 0.74rem; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; }
 .portal-info dd { font-size: 0.92rem; margin: 4px 0 0; }
+.portal-image-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+.portal-image-grid figure { margin: 0; }
+.portal-image-grid img { background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border); border-radius: 6px; max-width: 100%; width: 100%; }
+.portal-image-grid figcaption { color: var(--muted); font-size: 0.8rem; margin-top: 4px; }
+.portal-report-body footer { align-items: center; display: flex; gap: 12px; justify-content: space-between; }
 @media (max-width: 760px) { .portal-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* Impresión desde el portal: solo el informe abierto, en claro. */
+@media print {
+  body:has(.portal-report-open) .portal-header, body:has(.portal-report-open) .tab-nav,
+  body:has(.portal-report-open) .portal-shell > .card:not(.portal-report-open) { display: none !important; }
+  .portal-report-open { border: 0; box-shadow: none; }
+  .portal-report-open, .portal-report-open * { color: #000 !important; }
+  .portal-report-open .text-button { display: none; }
+  .portal-report-body h4 { color: #000 !important; }
+}

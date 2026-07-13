@@ -11,12 +11,12 @@ import { supabase } from "@/lib/supabase-client";
 export type PortalPatient = {
   id: string; identifier: string; identifierType: string; name: string; birthDate: string; sex: string;
   phone: string; email: string; address: string; comuna: string; prevision: string;
-  allergies: string; morbidHistory: string; consentAt: string | null;
+  allergies: string; morbidHistory: string; consentAt: string | null; institution: string;
 };
 
 export async function fetchCurrentPatient(): Promise<PortalPatient | null> {
   const { data, error } = await supabase.from("patients")
-    .select("id, identifier, identifier_type, full_name, birth_date, sex, phone, email, address, comuna, prevision, allergies, morbid_history, privacy_consent_at")
+    .select("id, identifier, identifier_type, full_name, birth_date, sex, phone, email, address, comuna, prevision, allergies, morbid_history, privacy_consent_at, tenant:tenants(name)")
     .limit(1).maybeSingle();
   if (error) throw error;
   if (!data) return null;
@@ -25,6 +25,7 @@ export async function fetchCurrentPatient(): Promise<PortalPatient | null> {
     birthDate: data.birth_date, sex: data.sex, phone: data.phone ?? "", email: data.email ?? "",
     address: data.address ?? "", comuna: data.comuna ?? "", prevision: data.prevision ?? "",
     allergies: data.allergies ?? "", morbidHistory: data.morbid_history ?? "", consentAt: data.privacy_consent_at,
+    institution: (data.tenant as unknown as { name: string } | null)?.name ?? "",
   };
 }
 
@@ -67,6 +68,23 @@ export async function fetchReleasedReports(): Promise<PortalReport[]> {
       signedAt: row.signed_at, signerName: row.signer_name ?? "", signerRegistration: row.signer_registration ?? "",
       releasedAt: row.released_to_patient_at,
     }));
+}
+
+export type PortalKeyImage = { id: string; appointmentId: string; caption: string; url: string };
+
+/** Imágenes clave tipo captura de informes liberados (RLS en filas y en storage).
+ * Las instancias PACS directas quedan fuera (requieren el proxy staff). */
+export async function fetchReleasedKeyImages(): Promise<PortalKeyImage[]> {
+  const { data, error } = await supabase.from("report_key_images")
+    .select("id, appointment_id, instance_id, caption").order("created_at");
+  if (error) throw error;
+  const captures = ((data ?? []) as { id: string; appointment_id: string; instance_id: string; caption: string }[])
+    .filter((row) => row.instance_id.includes("/"));
+  const signed = await Promise.all(captures.map(async (row) => {
+    const { data: url } = await supabase.storage.from("capturas").createSignedUrl(row.instance_id, 3600);
+    return url?.signedUrl ? { id: row.id, appointmentId: row.appointment_id, caption: row.caption ?? "", url: url.signedUrl } : null;
+  }));
+  return signed.filter((item): item is PortalKeyImage => !!item);
 }
 
 export type PortalAddendum = { id: string; appointmentId: string; text: string; signedAt: string; signerName: string };

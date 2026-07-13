@@ -4,8 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase-client";
 import { identifierTypeLabels, sexLabels, type Patient } from "@/features/patients/types";
 import {
-  fetchCurrentPatient, fetchPatientAppointments, fetchReleasedAddenda, fetchReleasedReports,
-  type PortalAddendum, type PortalAppointment, type PortalPatient, type PortalReport,
+  fetchCurrentPatient, fetchPatientAppointments, fetchReleasedAddenda, fetchReleasedKeyImages, fetchReleasedReports,
+  type PortalAddendum, type PortalAppointment, type PortalKeyImage, type PortalPatient, type PortalReport,
 } from "./repository";
 
 const statusLabels: Record<string, string> = {
@@ -41,6 +41,7 @@ export function PatientPortal() {
   const [appointments, setAppointments] = useState<PortalAppointment[]>([]);
   const [reports, setReports] = useState<PortalReport[]>([]);
   const [addenda, setAddenda] = useState<PortalAddendum[]>([]);
+  const [keyImages, setKeyImages] = useState<PortalKeyImage[]>([]);
   const [tab, setTab] = useState<TabId>("inicio");
   const [openReport, setOpenReport] = useState("");
   const [error, setError] = useState("");
@@ -53,10 +54,10 @@ export function PatientPortal() {
         // El portal es exclusivo de pacientes: una cuenta staff no debe consultar datos aquí.
         const profile = await supabase.from("profiles").select("id").eq("id", auth.data.user.id).maybeSingle();
         if (profile.data) { setIsStaff(true); return; }
-        const [nextPatient, nextAppointments, nextReports, nextAddenda] = await Promise.all([
-          fetchCurrentPatient(), fetchPatientAppointments(), fetchReleasedReports(), fetchReleasedAddenda(),
+        const [nextPatient, nextAppointments, nextReports, nextAddenda, nextKeyImages] = await Promise.all([
+          fetchCurrentPatient(), fetchPatientAppointments(), fetchReleasedReports(), fetchReleasedAddenda(), fetchReleasedKeyImages(),
         ]);
-        setPatient(nextPatient); setAppointments(nextAppointments); setReports(nextReports); setAddenda(nextAddenda);
+        setPatient(nextPatient); setAppointments(nextAppointments); setReports(nextReports); setAddenda(nextAddenda); setKeyImages(nextKeyImages);
       } catch {
         setError("No fue posible cargar tu información. Intenta nuevamente.");
       } finally {
@@ -91,7 +92,7 @@ export function PatientPortal() {
     <div className="portal-shell">
       <header className="portal-header">
         <div>
-          <p className="eyebrow">Portal de pacientes</p>
+          <p className="eyebrow">{patient.institution || "Portal de pacientes"}</p>
           <strong>{patient.name}</strong>
         </div>
         <button className="text-button" type="button" onClick={() => supabase.auth.signOut()}>Cerrar sesión</button>
@@ -161,19 +162,28 @@ export function PatientPortal() {
         {!reports.length && <section className="card portal-card"><h3>Mis informes</h3><p className="empty-inline">Todavía no hay informes disponibles. La institución los publica cuando están listos.</p></section>}
         {reports.map((report) => {
           const reportAddenda = addenda.filter((item) => item.appointmentId === report.appointmentId);
+          const reportImages = keyImages.filter((item) => item.appointmentId === report.appointmentId);
           const open = openReport === report.appointmentId;
           return (
-            <section className="card portal-card portal-report" key={report.id}>
+            <section className={open ? "card portal-card portal-report portal-report-open" : "card portal-card portal-report"} key={report.id}>
               <button className="portal-report-head" type="button" aria-expanded={open} onClick={() => setOpenReport(open ? "" : report.appointmentId)}>
                 <div><strong>{report.modality} · {report.reason}</strong><span>{formatDate(report.date)}{report.time && ` · ${report.time} h`} · Publicado el {new Date(report.releasedAt).toLocaleDateString("es-CL")}</span></div>
                 <span className="text-button">{open ? "Ocultar" : "Leer informe"}</span>
               </button>
               {open && <div className="portal-report-body">
                 {reportSections.map(([field, label]) => report[field] && <section key={field}><h4>{label}</h4><p>{String(report[field])}</p></section>)}
+                {reportImages.length > 0 && <section><h4>Imágenes del informe</h4>
+                  <div className="portal-image-grid">
+                    {reportImages.map((item) => <figure key={item.id}><img src={item.url} alt={item.caption || "Imagen del informe"} loading="lazy" />{item.caption && <figcaption>{item.caption}</figcaption>}</figure>)}
+                  </div>
+                </section>}
                 {reportAddenda.length > 0 && <section><h4>Información adicional</h4>
                   {reportAddenda.map((item) => <p key={item.id}>{item.text}<br /><small>{item.signerName} · {new Date(item.signedAt).toLocaleDateString("es-CL")}</small></p>)}
                 </section>}
-                <footer><small>{report.signerName}{report.signerRegistration && ` · ${report.signerRegistration}`}{report.signedAt && ` · Firmado el ${new Date(report.signedAt).toLocaleDateString("es-CL")}`}</small></footer>
+                <footer>
+                  <small>{report.signerName}{report.signerRegistration && ` · ${report.signerRegistration}`}{report.signedAt && ` · Firmado el ${new Date(report.signedAt).toLocaleDateString("es-CL")}`}</small>
+                  <button className="text-button" type="button" onClick={() => window.print()}>Imprimir / guardar PDF</button>
+                </footer>
               </div>}
             </section>
           );

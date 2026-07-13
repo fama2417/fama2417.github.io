@@ -100,6 +100,19 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({ ok: true });
 }
 
+/** Invita por correo una cuenta de PACIENTE (sin perfil staff). El vínculo patients.user_id
+ * lo hace después el admin desde el cliente, protegido por trigger + RLS. */
+export async function PUT(request: NextRequest) {
+  const context = await requireAdmin(request);
+  if ("error" in context) return context.error;
+  const { admin } = context;
+  const email = String(((await request.json().catch(() => ({}))) as { email?: string }).email ?? "").trim().toLowerCase();
+  if (!email.includes("@")) return NextResponse.json({ error: "Correo inválido." }, { status: 400 });
+  const { data: invited, error } = await admin.auth.admin.inviteUserByEmail(email, { redirectTo: request.nextUrl.origin });
+  if (error) return NextResponse.json({ error: error.message.includes("already been registered") ? "Ese correo ya tiene una cuenta: usa Vincular directamente." : error.message }, { status: 400 });
+  return NextResponse.json({ userId: invited.user.id });
+}
+
 export async function PATCH(request: NextRequest) {
   const context = await requireAdmin(request);
   if ("error" in context) return context.error;
