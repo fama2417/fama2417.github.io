@@ -583,9 +583,12 @@ body:has(.report-workstation) .app-shell-main { min-height: 0; overflow: hidden;
 .ai-view-switch button[aria-pressed="true"] { border-bottom-color: var(--report-accent); color: var(--text); font-weight: 700; }
 .ai-clinical-summary, .ai-technical-detail { display: grid; gap: 12px; }
 .ai-summary-header { background: var(--surface-muted); border: 1px solid var(--border); border-radius: 6px; display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(150px, 1fr)); padding: 12px; }
-.ai-summary-assessment { grid-column: span 2; }
 .ai-summary-header div { display: grid; gap: 3px; }
 .ai-summary-header span, .ai-summary-header small { color: var(--muted); font-size: 0.74rem; }
+.ai-review-grid { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.ai-review-section { align-content: start; background: var(--surface-muted); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; }
+.ai-review-section > h4 { color: var(--report-accent); margin-top: 0; }
+.ai-review-section > .notice, .ai-review-section > .empty-inline { margin: 6px 0 0; }
 .ai-summary-group { display: grid; gap: 6px; }
 .ai-summary-group h4 { color: var(--muted); font-size: 0.76rem; margin: 5px 0 0; text-transform: uppercase; }
 .ai-summary-group article { align-items: start; border-top: 1px solid var(--border); display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr) auto; padding: 9px 0; }
@@ -704,7 +707,7 @@ body:has(.report-workstation) .app-shell-main { min-height: 0; overflow: hidden;
   .report-action-buttons { width: 100%; }
   .report-action-buttons .button { flex: 1; justify-content: center; }
   .ai-summary-header { grid-template-columns: minmax(0, 1fr); }
-  .ai-summary-assessment { grid-column: auto; }
+  .ai-review-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
 .offering-branch { display: grid; gap: 6px; max-width: 420px; margin: 18px 0 24px; }
