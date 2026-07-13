@@ -273,6 +273,12 @@ export async function fetchMyProfile() {
   return { tenantId: effectiveTenantId(row ?? {}), role: row?.role ?? "" };
 }
 
+export async function canSignReport(appointmentId: string) {
+  const { data, error } = await supabase.rpc("can_sign_report", { p_appointment_id: appointmentId });
+  if (error) throw error;
+  return data === true;
+}
+
 export async function updateFollowUpStatus(id: string, status: FollowUpStatus) {
   const { data, error } = await supabase.from("report_follow_ups").update({ status }).eq("id", id).select("id, recommendation, due_date, responsible, status, acknowledged_at, completed_at").single();
   if (error) throw error;

@@ -4,6 +4,7 @@ import { clinicalProfileForCategory, supportsRadiologyAi } from "../clinical-wor
 import { criticalFindingState, validateFinalReport } from "./validation.ts";
 
 const valid = {
+  clinicalIndication: "Control.", technique: "Técnica habitual.", comparison: "Sin comparación.",
   findings: "Sin hallazgos agudos.", impression: "Examen sin alteraciones.", identityConfirmed: true,
   clinicalQuestionAnswered: true, criticalFinding: false, criticalFindingType: "",
 };
@@ -14,6 +15,9 @@ test("valida los requisitos de un informe definitivo", () => {
   assert.match(validateFinalReport({ ...valid, criticalFinding: true }, false), /tipo de hallazgo crítico/);
   assert.match(validateFinalReport({ ...valid, criticalFinding: true, criticalFindingType: "Hemorragia intracraneal" }, false), /comunicación/);
   assert.equal(validateFinalReport({ ...valid, criticalFinding: true, criticalFindingType: "Hemorragia intracraneal" }, true), "");
+  assert.equal(validateFinalReport({ ...valid, findings: "", impression: "" }, false, "laboratory"), "Completa Resultados antes de firmar.");
+  assert.equal(validateFinalReport({ ...valid, findings: "", impression: "Diagnóstico" }, false, "pathology"), "");
+  assert.equal(validateFinalReport({ ...valid, technique: "", findings: "", impression: "Plan" }, false, "procedure"), "Completa Técnica / procedimiento antes de firmar.");
 });
 
 test("deriva el estado crítico y elige la última comunicación confirmada", () => {

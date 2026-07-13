@@ -11,7 +11,7 @@ import { appointmentStatusLabels } from "@/features/appointments/status";
 import { fetchMyTenant, renderHeader, type Tenant } from "@/features/tenant/repository";
 import { supabase } from "@/lib/supabase-client";
 import {
-  addAddendum, addCommunication, addFollowUp, addKeyImage, captureUrl, deleteReport, fetchAddenda, fetchCommunications,
+  addAddendum, addCommunication, addFollowUp, addKeyImage, canSignReport, captureUrl, deleteReport, fetchAddenda, fetchCommunications,
   fetchFollowUps, fetchKeyImages, fetchMyProfile, fetchReport, fetchSignatureUrl, isCaptureKeyImage, removeKeyImage,
   reopenReport, saveReport, updateFollowUpStatus, updateKeyImageCaption, uploadKeyImageCapture, type FollowUpStatus,
   type RadiologyReport, type ReportAddendum, type ReportCommunication, type ReportFollowUp, type ReportKeyImage,
@@ -91,6 +91,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
   const [keyImages, setKeyImages] = useState<ReportKeyImage[]>([]);
   const [captureUrls, setCaptureUrls] = useState<Record<string, string>>({});
   const [role, setRole] = useState<string>("");
+  const [canSign, setCanSign] = useState(false);
   const [reportAction, setReportAction] = useState<{ kind: "reopen" | "delete"; reason: string } | null>(null);
   const viewerRef = useRef<HTMLIFrameElement>(null);
   const criticalPanelRef = useRef<HTMLDetailsElement>(null);
@@ -125,6 +126,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
         else if (current) setReport(emptyReport(appointmentId, current));
         setCommunications(storedCommunications); setAddenda(storedAddenda); setFollowUps(storedFollowUps);
         setRole(profile.role);
+        setCanSign(current ? await canSignReport(current.id) : false);
       })
       .catch(() => setError("No fue posible cargar el estudio. Verifica que la migración clínica esté aplicada."))
       .finally(() => setLoading(false));
@@ -181,7 +183,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
 
   function finalReportError() {
     const criticalState = criticalFindingState(report.criticalFinding, report.id, communications);
-    return validateFinalReport(report, criticalState.status === "confirmed") || [
+    return validateFinalReport(report, criticalState.status === "confirmed", appointment?.serviceCategory ?? report.reportCategory) || [
       codingError(report.reportCodeSystem, report.reportCode, report.reportCodeDisplay, "Reporte/prestación", true),
       codingError(report.findingCodeSystem, report.findingCode, report.findingCodeDisplay, "Hallazgo principal"),
       codingError(report.diagnosisCodeSystem, report.diagnosisCode, report.diagnosisCodeDisplay, "Diagnóstico"),
@@ -336,7 +338,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
   const sections = profile.sections;
   const orderedSections = [...sections].sort((a, b) => reportSectionOrder[a.name] - reportSectionOrder[b.name]);
   const examLabel = `${appointment.serviceCategory === "imaging" && appointment.modality !== "OT" ? `${appointment.modality} · ` : ""}${appointment.reason}`;
-  if (role === "operator") return <div className="report-workstation read-only-report">
+  if (role === "operator" || (role !== "admin" && !canSign)) return <div className="report-workstation read-only-report">
     <header className="report-workstation-header"><div><p className="eyebrow">{profile.title}</p><h2>{appointment.patientName}</h2><p className="report-meta"><span>{appointment.date}</span><span>{examLabel}</span></p></div>{report.status === "final" && <button className="text-button" type="button" onClick={() => window.print()}>Imprimir</button>}</header>
     {report.status !== "final" ? <p className="notice">El informe definitivo aún no está disponible.</p> : <article className="card legal-content">
       {tenant?.reportHeader && <p>{renderHeader(tenant.reportHeader, { paciente: appointment.patientName, id: appointment.patientIdentifier || "—", medico: appointment.treatingPhysician || appointment.requesterName || "—", examen: examLabel, fecha: appointment.date, institucion: tenant.name })}</p>}
@@ -445,8 +447,8 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
             {section.name === "impression" && criticalFindingControl}
           </Fragment>)}
           <div className="report-confirmations">
-            <label className="consent-field"><input type="checkbox" checked={report.identityConfirmed} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, identityConfirmed: event.target.checked }))} />Confirmo la identidad del paciente y el estudio.</label>
-            <label className="consent-field"><input type="checkbox" checked={report.clinicalQuestionAnswered} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, clinicalQuestionAnswered: event.target.checked }))} />Confirmo que la impresión responde la pregunta clínica.</label>
+            <label className="consent-field"><input type="checkbox" checked={report.identityConfirmed} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, identityConfirmed: event.target.checked }))} />Confirmo la identidad del paciente.</label>
+            <label className="consent-field"><input type="checkbox" checked={report.clinicalQuestionAnswered} disabled={report.status === "final"} onChange={(event) => setReport((current) => ({ ...current, clinicalQuestionAnswered: event.target.checked }))} />{profile.confirmationLabel}</label>
           </div>
 
           {appointment.serviceCategory === "imaging" && <details className="report-clinical-panel collapsible kin-panel" open>
@@ -499,7 +501,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
             <form className="report-inline-form" onSubmit={signAddendum}>
               <label className="span-2">Nueva adenda<textarea required value={addendumText} onChange={(event) => setAddendumText(event.target.value)} placeholder="Corrección o información adicional; no reemplaza el informe original." /></label>
               <label className="span-2">Imágenes de la adenda (opcional)<input type="file" accept="image/png,image/jpeg" multiple onChange={(event) => setAddendumFiles(Array.from(event.target.files ?? []))} /><span className="empty-inline">{addendumFiles.length ? `${addendumFiles.length} imagen(es) adjunta(s).` : "Captura desde OHIF y adjunta el corte con la anotación."}</span></label>
-              <button className="button secondary" disabled={saving} type="submit">Firmar adenda</button>
+              <button className="button secondary" disabled={saving || !canSign} type="submit">Firmar adenda</button>
             </form>
           </details>}
         </div>
@@ -541,7 +543,7 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
               {report.status === "draft" && (aiOperationActive || signingError) && <span className="report-signing-error" role="status">{aiOperationActive ? "Espera a que finalice el análisis antes de firmar." : signingError}</span>}
             </div>
             <div className="report-action-buttons">
-              {report.status === "draft" && <><button className="button secondary" type="button" disabled={saving} onClick={() => persist("draft")}>Guardar borrador</button><button className="button primary" type="button" disabled={saving || aiOperationActive} title={aiOperationActive ? "Espera a que finalice el análisis antes de firmar." : undefined} onClick={() => persist("final")}>Firmar definitivo</button></>}
+              {report.status === "draft" && <><button className="button secondary" type="button" disabled={saving} onClick={() => persist("draft")}>Guardar borrador</button><button className="button primary" type="button" disabled={saving || aiOperationActive || !canSign} title={!canSign ? "Tu ámbito profesional no permite firmar esta prestación." : aiOperationActive ? "Espera a que finalice el análisis antes de firmar." : undefined} onClick={() => persist("final")}>Firmar definitivo</button></>}
               {report.status === "final" && role === "admin" && <><button className="button secondary" type="button" disabled={saving} onClick={() => setReportAction({ kind: "reopen", reason: "" })}>Reabrir informe</button><button className="text-button danger" type="button" disabled={saving} onClick={() => setReportAction({ kind: "delete", reason: "" })}>Eliminar informe</button></>}
             </div>
           </footer>

@@ -5,7 +5,7 @@ import type { AuthError, Session } from "@supabase/supabase-js";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase-client";
 import { effectiveTenantId } from "@/lib/tenant";
 
-const roleLabels: Record<string, string> = { admin: "Administrador", operator: "Operador", radiologist: "Radiólogo" };
+const roleLabels: Record<string, string> = { admin: "Administrador", operator: "Operador", radiologist: "Radiólogo", clinician: "Profesional clínico" };
 
 type Tenant = { id: string; name: string; active: boolean };
 

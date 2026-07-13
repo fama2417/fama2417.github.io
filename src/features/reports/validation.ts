@@ -1,4 +1,10 @@
+import type { Appointment } from "../appointments/mock-data.ts";
+import { profileFor, type ReportSection } from "./profiles.ts";
+
 type FinalReport = {
+  clinicalIndication: string;
+  technique: string;
+  comparison: string;
   findings: string;
   impression: string;
   identityConfirmed: boolean;
@@ -16,10 +22,11 @@ export function criticalFindingState<T extends CriticalCommunication>(active: bo
   return { status: !active ? "inactive" as const : communication ? "confirmed" as const : "pending" as const, communication };
 }
 
-export function validateFinalReport(report: FinalReport, hasAcknowledgedCriticalCommunication: boolean) {
-  if (!report.findings.trim() || !report.impression.trim()) return "Completa Hallazgos e Impresión antes de firmar.";
+export function validateFinalReport(report: FinalReport, hasAcknowledgedCriticalCommunication: boolean, category: Appointment["serviceCategory"] = "imaging") {
+  const missing = profileFor(category).sections.filter((section) => section.required && !report[section.name as ReportSection["name"]].trim()).map((section) => section.label);
+  if (missing.length) return `Completa ${missing.join(" y ")} antes de firmar.`;
   if (!report.identityConfirmed) return "Confirma la identidad del paciente antes de firmar.";
-  if (!report.clinicalQuestionAnswered) return "Confirma que la impresión responde la pregunta clínica.";
+  if (!report.clinicalQuestionAnswered) return profileFor(category).confirmationLabel;
   if (report.criticalFinding && !report.criticalFindingType) return criticalFindingTypeError;
   if (report.criticalFinding && !hasAcknowledgedCriticalCommunication) return "Registra una comunicación crítica confirmada antes de firmar.";
   return "";
