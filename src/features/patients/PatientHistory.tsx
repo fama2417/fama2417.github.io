@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase-client";
 import type { Patient } from "./types";
 import { PatientClinicalHeader } from "./PatientClinicalHeader";
 import { PatientEditDialog } from "./PatientEditDialog";
+import { PatientAccountSection } from "./PatientAccountSection";
 import { PatientClinicalSummaryCards } from "./PatientClinicalSummaryCards";
 import { PatientClinicalTimeline } from "./PatientClinicalTimeline";
 import { PatientImagingSection } from "./PatientImagingSection";
@@ -94,6 +95,7 @@ export function PatientHistory({ patientId }: { patientId: string }) {
   return <div className="patient-workspace">
     <PatientClinicalHeader patient={patient} onEdit={role === "admin" ? () => setEditing(true) : undefined} />
     {editing && role === "admin" && <PatientEditDialog patient={patient} onClose={() => setEditing(false)} onSaved={(updated) => { setPatient(updated); setEditing(false); }} />}
+    {role === "admin" && <PatientAccountSection patient={patient} onChanged={(userId) => setPatient((current) => current ? { ...current, userId } : current)} />}
     {openCommunications > 0 && (
       <div className="critical-banner" role="alert">
         <strong>{openCommunications === 1 ? "1 comunicación crítica sin acuse de recibo." : `${openCommunications} comunicaciones críticas sin acuse de recibo.`}</strong>
