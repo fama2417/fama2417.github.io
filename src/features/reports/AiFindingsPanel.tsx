@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase-client";
+import { isAiOperationActive, runAiExtractionWorkflow, type AiOperationState } from "./ai-extraction-workflow";
 
 type Item = {
   id: string; findingText: string; status: string; importance: string; sourceSection: string; sourceSentence: string;
@@ -72,7 +73,13 @@ function CompactClinicalText({ text }: { text: string }) {
   return <><strong>{text.slice(0, 217)}...</strong><details className="ai-finding-source"><summary>Ver explicación completa</summary><span>{text}</span></details></>;
 }
 
-export function AiFindingsPanel({ reportId, reportStatus, disabled }: { reportId?: string; reportStatus?: string; disabled?: boolean }) {
+export function AiFindingsPanel({ reportId, reportStatus, disabled, ensureDraftSaved, onOperationActiveChange }: {
+  reportId?: string;
+  reportStatus?: string;
+  disabled?: boolean;
+  ensureDraftSaved: () => Promise<void>;
+  onOperationActiveChange?: (active: boolean) => void;
+}) {
   const [items, setItems] = useState<Item[]>([]);
   const [clinicalSummary, setClinicalSummary] = useState<ClinicalSummary | null>(null);
   const [mode, setMode] = useState<"summary" | "detail">("summary");
@@ -80,39 +87,100 @@ export function AiFindingsPanel({ reportId, reportStatus, disabled }: { reportId
   const [loading, setLoading] = useState(false);
   const [acting, setActing] = useState("");
   const [error, setError] = useState("");
+  const [operationState, setOperationState] = useState<AiOperationState>("idle");
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const mountedRef = useRef(true);
+  const runningRef = useRef(false);
+  const runIdRef = useRef(0);
   const locked = disabled || reportStatus === "final";
+  const operationActive = isAiOperationActive(operationState);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; runIdRef.current += 1; };
+  }, []);
+
+  useEffect(() => { onOperationActiveChange?.(operationActive); }, [onOperationActiveChange, operationActive]);
+  useEffect(() => () => onOperationActiveChange?.(false), [onOperationActiveChange]);
+
+  useEffect(() => {
+    if (operationState !== "analyzing") { setElapsedSeconds(0); return; }
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => {
+      if (mountedRef.current) setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [operationState]);
+
+  async function fetchResults() {
+    if (!reportId) return { items: [] as Item[], clinicalSummary: null as ClinicalSummary | null };
+    const response = await fetch(`/api/reports/${encodeURIComponent(reportId)}/extracted-findings`, { headers: await authHeaders() });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(apiMessage(response.status, payload.error));
+    if (!Array.isArray(payload.items) || !("clinicalSummary" in payload)) throw new Error("No fue posible completar el análisis.");
+    return { items: payload.items as Item[], clinicalSummary: (payload.clinicalSummary ?? null) as ClinicalSummary | null };
+  }
 
   async function load() {
     if (!reportId) return;
     setLoading(true); setError("");
     try {
-      const response = await fetch(`/api/reports/${encodeURIComponent(reportId)}/extracted-findings`, { headers: await authHeaders() });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(apiMessage(response.status, payload.error));
-      setItems(payload.items ?? []); setClinicalSummary(payload.clinicalSummary ?? null);
+      const result = await fetchResults();
+      if (mountedRef.current) { setItems(result.items); setClinicalSummary(result.clinicalSummary); }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "No fue posible cargar la extraccion IA.");
-    } finally { setLoading(false); }
+      if (mountedRef.current) setError(cause instanceof Error ? cause.message : "No fue posible cargar la extraccion IA.");
+    } finally {
+      if (mountedRef.current) setLoading(false);
+    }
   }
 
-  useEffect(() => { load(); }, [reportId]);
+  useEffect(() => {
+    runIdRef.current += 1;
+    runningRef.current = false;
+    setOperationState("idle");
+    load();
+  }, [reportId]);
 
   async function extract() {
-    if (!reportId || locked) return;
+    if (!reportId || locked || runningRef.current) return;
     const force = items.length > 0 || clinicalSummary !== null;
     if (force && !window.confirm("Ya existen hallazgos IA para este informe. Deseas recalcularlos?")) return;
-    setActing("extract"); setError("");
+    runningRef.current = true;
+    const runId = ++runIdRef.current;
+    const isCurrent = () => mountedRef.current && runIdRef.current === runId;
+    setError("");
     try {
-      const response = await fetch(`/api/reports/${encodeURIComponent(reportId)}/ai/extract-findings`, { method: "POST", headers: await authHeaders(), body: JSON.stringify({ force }) });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(apiMessage(response.status, payload.error));
-      await load();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "No fue posible analizar el informe.");
-    } finally { setActing(""); }
+      const result = await runAiExtractionWorkflow({
+        saveDraft: async () => {
+          await ensureDraftSaved();
+          if (!isCurrent()) throw new Error("Obsolete extraction");
+        },
+        analyze: async () => {
+          const response = await fetch(`/api/reports/${encodeURIComponent(reportId)}/ai/extract-findings`, { method: "POST", headers: await authHeaders(), body: JSON.stringify({ force }) });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(apiMessage(response.status, payload.error));
+          if (!isCurrent()) throw new Error("Obsolete extraction");
+        },
+        refresh: async () => {
+          const refreshed = await fetchResults();
+          if (!isCurrent()) throw new Error("Obsolete extraction");
+          return refreshed;
+        },
+      }, (state) => { if (isCurrent()) setOperationState(state); });
+      if (!isCurrent()) return;
+      if (result.ok) {
+        setItems(result.value.items);
+        setClinicalSummary(result.value.clinicalSummary);
+      } else {
+        setError(result.phase === "saving" ? "No fue posible guardar el borrador. El análisis no se inició." : "No fue posible completar el análisis.");
+      }
+    } finally {
+      if (runIdRef.current === runId) runningRef.current = false;
+    }
   }
 
   async function patch(item: Item, body: Record<string, string>) {
+    if (operationActive) return;
     setActing(item.id); setError("");
     try {
       const response = await fetch(`/api/extracted-findings/${encodeURIComponent(item.id)}`, { method: "PATCH", headers: await authHeaders(), body: JSON.stringify(body) });
@@ -120,13 +188,15 @@ export function AiFindingsPanel({ reportId, reportStatus, disabled }: { reportId
       if (!response.ok) throw new Error(apiMessage(response.status, payload.error));
       await load();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "No fue posible actualizar el hallazgo.");
-    } finally { setActing(""); }
+      if (mountedRef.current) setError(cause instanceof Error ? cause.message : "No fue posible actualizar el hallazgo.");
+    } finally {
+      if (mountedRef.current) setActing("");
+    }
   }
 
   async function confirmAll() {
     const pending = confirmableItems(items);
-    if (locked || !pending.length || !window.confirm(`Confirmar ${pending.length} hallazgos? Se excluyen negativos rutinarios y confianza menor a 75%.`)) return;
+    if (locked || operationActive || !pending.length || !window.confirm(`Confirmar ${pending.length} hallazgos? Se excluyen negativos rutinarios y confianza menor a 75%.`)) return;
     setActing("confirm-all"); setError("");
     try {
       for (const item of pending) {
@@ -135,8 +205,10 @@ export function AiFindingsPanel({ reportId, reportStatus, disabled }: { reportId
       }
       await load();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "No fue posible confirmar los hallazgos.");
-    } finally { setActing(""); }
+      if (mountedRef.current) setError(cause instanceof Error ? cause.message : "No fue posible confirmar los hallazgos.");
+    } finally {
+      if (mountedRef.current) setActing("");
+    }
   }
 
   const pendingReview = items.filter((item) => item.codingStatus === "suggested").length;
@@ -159,6 +231,14 @@ export function AiFindingsPanel({ reportId, reportStatus, disabled }: { reportId
   const lowAssessmentConfidence = Number(assessment?.confidence ?? 1) < 0.6;
   const assessmentText = assessment ? (lowAssessmentConfidence ? `Evaluación orientativa: ${assessment.text}` : assessment.text) : "";
   const trackedLesions = clinicalSummary?.lesionTracking.filter((lesion) => /^LT[1-3]$/i.test(lesion.label) && lesion.site && lesion.sourceSentence && (lesion.currentSize || lesion.priorSize || lesion.currentSuv || lesion.priorSuv)) ?? [];
+  const operationMessage: Record<AiOperationState, string> = {
+    idle: "",
+    saving: "Guardando borrador antes del análisis…",
+    analyzing: "Analizando el informe…",
+    refreshing: "Actualizando resultados…",
+    success: "Resumen actualizado.",
+    error: error || "No fue posible completar el análisis.",
+  };
 
   return <details className="report-clinical-panel collapsible ai-findings-panel" open>
     <summary><span className="collapsible-icon">IA</span>Resumen IA<span className="collapsible-count">{summaryItems.length || items.length}</span></summary>
@@ -166,10 +246,19 @@ export function AiFindingsPanel({ reportId, reportStatus, disabled }: { reportId
     {!reportId && <p className="notice">Guarda el borrador antes de ejecutar la extraccion con IA.</p>}
     {reportStatus === "final" && <p className="empty-inline">El informe esta firmado: la extraccion queda en solo lectura.</p>}
     <div className="ai-panel-actions">
-      <button className="button secondary" type="button" onClick={extract} disabled={!reportId || locked || !!acting}>{acting === "extract" ? "Analizando informe..." : clinicalSummary || items.length ? "Recalcular resumen IA" : "Detectar hallazgos con IA"}</button>
-      <button className="text-button" type="button" onClick={load} disabled={!reportId || loading}>Actualizar</button>
+      <button className="button secondary" type="button" onClick={extract} disabled={!reportId || locked || !!acting || operationActive}>{clinicalSummary || items.length ? "Recalcular resumen IA" : "Detectar hallazgos con IA"}</button>
+      <button className="text-button" type="button" onClick={load} disabled={!reportId || loading || operationActive}>Actualizar</button>
     </div>
-    {error && <p className="notice" role="alert">{error}</p>}
+    {operationState !== "idle" && <div className={`ai-operation-status ${operationState}`} role={operationState === "error" ? "alert" : "status"} aria-live={operationState === "error" ? "assertive" : "polite"} aria-busy={operationActive}>
+      <strong>{operationMessage[operationState]}</strong>
+      {operationState === "analyzing" && <>
+        <div className="ai-operation-progress" role="progressbar" aria-label="Análisis IA en curso"><span /></div>
+        <span>{elapsedSeconds} s transcurridos</span>
+        {elapsedSeconds >= 15 && <span>El análisis está tomando más de lo habitual. Puedes continuar revisando las imágenes.</span>}
+      </>}
+      {operationState === "error" && <button className="text-button" type="button" disabled={locked || !!acting} onClick={extract}>Reintentar</button>}
+    </div>}
+    {error && operationState !== "error" && <p className="notice" role="alert">{error}</p>}
     <div className="ai-view-switch" role="group" aria-label="Vista de extraccion IA">
       <button type="button" aria-pressed={mode === "summary"} onClick={() => setMode("summary")}>Resumen clinico</button>
       <button type="button" aria-pressed={mode === "detail"} onClick={() => setMode("detail")}>Detalle tecnico / diccionario</button>
@@ -207,16 +296,16 @@ export function AiFindingsPanel({ reportId, reportStatus, disabled }: { reportId
     </div> : <div className="ai-technical-detail">
       <p className="ai-finding-summary">{items.length} hallazgos tecnicos extraidos. {items.length > 10 && !showAll ? "Se muestran los 10 de mayor prioridad." : ""}</p>
       <p className="empty-inline">La codificacion SNOMED/CIE-11 se realizara en el diccionario, no en esta vista.</p>
-      {!locked && confirmableItems(items).length > 0 && <button className="text-button" type="button" onClick={confirmAll} disabled={!!acting}>Confirmar {confirmableItems(items).length} revisables</button>}
+      {!locked && confirmableItems(items).length > 0 && <button className="text-button" type="button" onClick={confirmAll} disabled={!!acting || operationActive}>Confirmar {confirmableItems(items).length} revisables</button>}
       {technicalGroups.map((group) => {
         const content = group.items.map((item) => <article className="ai-finding-row" key={item.id}>
           <div><strong title={item.findingText}>{titleOf(item)}</strong><span>{[item.bodySite, item.laterality && lateralityLabels[item.laterality], item.severity && severityLabels[item.severity]].filter(Boolean).join(" - ")}</span></div>
           <div className="ai-finding-badges"><span>{statusLabels[item.status] ?? item.status}</span><span>{importanceLabels[item.importance] ?? item.importance}</span><span>{reviewLabels[item.codingStatus] ?? item.codingStatus}</span>{item.candidate && <span>Pendiente diccionario</span>}{!item.dictionary && !item.candidate && <span>Sin codificacion</span>}<span>{Math.round(Number(item.confidence) * 100)}%</span></div>
           <details className="ai-finding-source"><summary>Ver fuente</summary><span>{item.sourceSentence}</span></details>
           {!locked && <div className="ai-finding-actions">
-            {item.codingStatus === "suggested" && <button className="text-button" type="button" disabled={!!acting} onClick={() => patch(item, { action: "confirm" })}>Confirmar</button>}
-            {item.codingStatus !== "rejected" && <button className="text-button danger" type="button" disabled={!!acting} onClick={() => patch(item, { action: "reject", reason: window.prompt("Motivo del rechazo (opcional)") ?? "" })}>Rechazar</button>}
-            <button className="text-button" type="button" disabled={!!acting} onClick={() => { const correctedText = window.prompt("Texto corregido", item.findingText)?.trim(); if (correctedText) patch(item, { action: "correct", correctedText }); }}>Corregir</button>
+            {item.codingStatus === "suggested" && <button className="text-button" type="button" disabled={!!acting || operationActive} onClick={() => patch(item, { action: "confirm" })}>Confirmar</button>}
+            {item.codingStatus !== "rejected" && <button className="text-button danger" type="button" disabled={!!acting || operationActive} onClick={() => patch(item, { action: "reject", reason: window.prompt("Motivo del rechazo (opcional)") ?? "" })}>Rechazar</button>}
+            <button className="text-button" type="button" disabled={!!acting || operationActive} onClick={() => { const correctedText = window.prompt("Texto corregido", item.findingText)?.trim(); if (correctedText) patch(item, { action: "correct", correctedText }); }}>Corregir</button>
           </div>}
         </article>);
         return group.key === "negative" ? <details className="ai-finding-group" key={group.key}><summary>{groupLabels[group.key]} ({group.items.length})</summary>{content}</details> : <section className="ai-finding-group" key={group.key}><h4>{groupLabels[group.key]} <span>{group.items.length}</span></h4>{content}</section>;

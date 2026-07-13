@@ -534,6 +534,16 @@ body:has(.report-workstation) .app-shell-main { min-height: 0; overflow: hidden;
 .workflow-entry label { align-items: center; display: flex; gap: 8px; }
 .workflow-entry select { padding: 5px 8px; }
 .ai-panel-actions, .ai-finding-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; }
+.ai-operation-status { background: var(--surface-muted); border: 1px solid var(--border); border-radius: 6px; display: grid; gap: 7px; padding: 10px 12px; }
+.ai-operation-status > strong { color: var(--report-accent); }
+.ai-operation-status > span { color: var(--muted); font-size: 0.78rem; }
+.ai-operation-status.success > strong { color: var(--success); }
+.ai-operation-status.error > strong { color: var(--danger); }
+.ai-operation-status .text-button { justify-self: start; }
+.ai-operation-progress { background: var(--border); border-radius: 999px; height: 5px; overflow: hidden; }
+.ai-operation-progress span { animation: ai-progress 1.2s ease-in-out infinite; background: var(--report-accent); display: block; height: 100%; width: 40%; }
+@keyframes ai-progress { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+@media (prefers-reduced-motion: reduce) { .ai-operation-progress span { animation: none; opacity: 0.7; width: 100%; } }
 .ai-finding-summary { color: var(--muted); font-size: 0.82rem; margin: 0; }
 .ai-view-switch { border-bottom: 1px solid var(--border); display: flex; gap: 4px; }
 .ai-view-switch button { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--muted); cursor: pointer; padding: 9px 12px; }
