@@ -8,7 +8,7 @@ import { createPatient, fetchPatients } from "./repository";
 import { hasMinimumPatientSearch } from "./search";
 
 const PAGE_SIZE = 50;
-const STAFF_ROLES = ["admin", "operator", "radiologist"];
+const STAFF_ROLES = ["admin", "operator", "radiologist", "clinician"];
 const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9áéíóúñ]/g, "");
 
 export function PatientsManager() {
