@@ -125,10 +125,26 @@ Las columnas `user_id` y `released_to_patient_*` pueden quedarse (inertes sin po
    eliminar la cuenta temporal en Authentication → Users. Todo queda auditado
    (updates de `released_to_patient_*` y `user_id` en `audit_log`).
 
+## Fase 3C — Invitaciones, institución, imágenes y E2E (implementada)
+
+- **Invitación desde la UI**: si el correo no tiene cuenta, la sección "Cuenta de paciente"
+  ofrece "Invitar y vincular" (`PUT /api/admin/users`, admin): GoTrue envía el correo de
+  invitación; al aceptarla, la app pide definir contraseña (hash `type=invite`) y el paciente
+  entra directo al portal. Requiere SMTP habilitado (el default del free tier limita ~3/hora).
+- **Institución en el portal**: migración `202607130001` — política `patients read own tenant`
+  (solo el tenant de su propia ficha) + GRANT select explícito en `tenants`.
+- **Imágenes clave**: el portal muestra las capturas (bucket `capturas`) de informes liberados;
+  política de storage `patients read released captures` reutilizando el helper de 3A.
+  Las instancias PACS directas siguen fuera (requieren el proxy staff — deuda).
+- **Imprimir/guardar PDF**: botón en el informe abierto del portal (impresión del navegador,
+  solo el informe visible, en claro).
+- **E2E automatizado**: `npm run test:e2e:portal` contra Supabase local (`supabase start` +
+  migraciones): crea staff/paciente reales por GoTrue, vincula, firma, libera, verifica el
+  alcance RLS del paciente (borradores/no liberados invisibles, escritura negada, institución
+  visible), revoca y desvincula; limpia todo al final.
+
 ### Deuda pendiente
 
-- Creación de cuentas e invitaciones por email desde la UI.
-- Nombre de la institución en el portal (RLS de `tenants` no lo permite para pacientes).
-- Imágenes clave en el portal (requiere políticas de storage/PACS propias).
-- PDF del informe para el paciente.
-- E2E automatizado del flujo paciente.
+- Previews de instancias PACS en el portal (proxy con auth de paciente).
+- PDF servidor (hoy es impresión del navegador).
+- Paginación en la resolución por email (hoy hasta 1000 cuentas).

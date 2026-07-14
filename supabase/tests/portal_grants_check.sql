@@ -53,9 +53,10 @@ begin
       ('appointments', 'patients read own appointments'),
       ('imaging_studies', 'patients read own study metadata'),
       ('radiology_reports', 'patients read released final reports'),
-      ('radiology_reports', 'radiology staff manage reports'),
+      ('radiology_reports', 'report authors manage reports'),
       ('report_addenda', 'patients read released addenda'),
       ('report_key_images', 'patients read released key images'),
+      ('tenants', 'patients read own tenant'),
       ('audit_log', 'admins read tenant audit')
     ) as expected(tablename, policyname)
   loop
@@ -72,6 +73,12 @@ begin
   loop
     problems := problems || format('- Política de escritura inesperada "%s" en public.%s%s', pol.policyname, pol.tablename, chr(10));
   end loop;
+
+  -- 5b. Política de storage para capturas liberadas al paciente (Fase 3C).
+  if not exists (select 1 from pg_policies p
+                 where p.schemaname = 'storage' and p.tablename = 'objects' and p.policyname = 'patients read released captures') then
+    problems := problems || '- Falta la política "patients read released captures" en storage.objects' || chr(10);
+  end if;
 
   -- 6. Triggers de identidad presentes.
   if not exists (select 1 from pg_trigger where tgname = 'protect_patient_link' and tgrelid = 'public.patients'::regclass) then
