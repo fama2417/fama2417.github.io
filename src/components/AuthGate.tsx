@@ -148,7 +148,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   );
   if (!session && (pathname === "/portal/privacidad" || pathname.startsWith("/compartir/"))) return <>{children}</>;
   if (!session && pathname === "/portal") return (
-    <main className="login-page phr-login-page">
+    <main className="login-page phr-login-page phr-app">
       <section className="phr-login-copy">
         <p className="eyebrow">Mi Salud</p><h1>Todos tus exámenes, en un solo lugar.</h1>
         <p>Guarda documentos de cualquier institución y construye un historial personal que tú controlas.</p>

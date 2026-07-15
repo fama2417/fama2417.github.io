@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { labCategory, labCategoryLabels, labCategoryOrder, labFlagLabels, type LabCategory } from "@/features/reports/lab-observations.ts";
 import { buildPhrLabTrend, phrLabDraftOf, phrLabTrendKey, type PhrLabDraft, type PhrLabResult } from "./labs";
 import { measurementExplanation, reportedRangeLabel } from "./longitudinal";
+import { PhrPeriodComparison } from "./PhrLongitudinal";
 import { analyzePhrLabDocument, discardPhrLabResult, downloadPhrFile, fetchPhrFavorites, fetchPhrLabResults, savePhrLabResult, setPhrFavorite, type PortalDocument, type PhrFavorite } from "./repository";
 
 const resultValue = (result: PhrLabResult) => `${result.valueNum ?? result.valueText}${result.unit ? ` ${result.unit}` : ""}`;
@@ -94,6 +95,7 @@ export function PhrLaboratories({ documents, ownerUserId, readOnly, onUpload }: 
     </section>}
 
     {confirmed.length > 0 && <section className="card portal-card"><p className="eyebrow">Evolución</p><h2>Tendencias</h2>{trends.length ? <div className="phr-trends-grid">{trends.map((result) => <TrendChart key={phrLabTrendKey(result)} result={result} all={confirmed} />)}</div> : <p className="empty-state">Las tendencias aparecerán al confirmar dos mediciones comparables del mismo analito.</p>}</section>}
+    {!loading && <PhrPeriodComparison results={confirmed} />}
     {loading && <p className="empty-state">Cargando resultados…</p>}
   </div>;
 }
