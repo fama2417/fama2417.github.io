@@ -17,14 +17,17 @@ test("el perfil PHR habilita el portal sin tenant y una cuenta nueva entra a onb
   assert.equal(resolveSessionKind({ hasProfile: false, hasPatient: false, hasPhrProfile: false }), "onboarding");
 });
 
-// El repository importa el cliente supabase (alias @/), así que se valida su contrato por fuente:
-// las lecturas no reciben parámetros (el alcance lo decide auth.uid() + RLS).
-test("las lecturas del portal no aceptan patientId ni filtros del cliente", () => {
+test("un cuidador activo entra al portal aunque no tenga PHR propio", () => {
+  assert.equal(resolveSessionKind({ hasProfile: false, hasPatient: false, hasCaregiverAccess: true }), "patient");
+});
+
+// El selector ownerUserId solo acota perfiles ya visibles por RLS; nunca acepta patientId institucional.
+test("las lecturas longitudinales no aceptan patientId institucional", () => {
   const source = readFileSync(new URL("./repository.ts", import.meta.url), "utf8")
     .replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
   const exported = [...source.matchAll(/export async function (fetch\w+)\(([^)]*)\)/g)];
   assert.ok(exported.length >= 4, "se esperan al menos 4 funciones exportadas");
-  for (const [, name, params] of exported) assert.equal(params.trim(), "", `${name} no debe recibir argumentos`);
+  for (const [, name, params] of exported) assert.ok(!/patientId/i.test(params), `${name} no debe aceptar patientId`);
 });
 
 // El portal no debe renderizar navegación staff ni enlazar rutas internas.

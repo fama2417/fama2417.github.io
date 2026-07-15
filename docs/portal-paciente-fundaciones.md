@@ -213,3 +213,30 @@ en rutas de servidor.
 3. Mantener `AI_EXTRACTION_ENABLED=true` y ajustar `PHR_AI_MAX_PER_DAY` según presupuesto.
 4. En Supabase Auth habilitar registro, SMTP y la URL pública de `/portal` como redirect URL.
 5. Ejecutar `portal_grants_check.sql` y `phr_rls_test.sql` después del push de esquema.
+
+## PHR autónomo — Fase 4: experiencia longitudinal
+
+- Inicio resume último laboratorio, resultados fuera del rango informado, favoritos y documentos recientes.
+- La comparación usa el último valor numérico de cada período y convierte solo unidades dimensionalmente compatibles.
+- Laboratorios filtra por hematología, lípidos, metabolismo, renal, hepático y hormonas; cada grupo explica qué tipo de medición contiene sin interpretar clínicamente a la persona.
+- La línea de tiempo mezcla documentos y fechas de muestra confirmadas.
+- `/api/portal/trends` descarga CSV o PDF y `/api/portal/summary` genera un resumen descriptivo para consulta.
+- El exportador FHIR R4 incluye `Patient`, `DocumentReference`, `Observation` y un `DiagnosticReport` por documento de laboratorio con resultados confirmados.
+- La interfaz usa siempre “fuera del rango informado por el laboratorio”; no deriva enfermedades ni diagnósticos.
+
+## PHR autónomo — Fase 5: compartir y cuidadores
+
+- Los enlaces temporales son de solo lectura, expiran entre 1 y 30 días y guardan solo SHA-256 del token.
+- El propietario selecciona documentos, biomarcadores completos y opcionalmente su perfil de emergencia.
+- Cada apertura registra fecha, agente e IP pseudonimizada; el propietario ve el conteo y puede revocar inmediatamente.
+- `phr_caregiver_grants` permite acceso familiar/cuidador de solo lectura, revocable y fuera de tenants. RLS sigue siendo la autoridad.
+- El perfil de emergencia contiene datos declarados: grupo sanguíneo, alergias, condiciones, medicamentos, contacto y notas.
+- Apple Health y Health Connect requieren aplicaciones nativas y credenciales propias; la PWA no simula conexiones. FHIR es la frontera interoperable actual.
+- Las conexiones automáticas con instituciones permanecen fuera hasta demostrar uso repetido y contar con APIs, contratos y consentimiento verificable.
+
+### Migración y verificación
+
+- Aplicar `202607150009_phr_longitudinal_sharing.sql`.
+- Ejecutar `portal_grants_check.sql` y `phr_rls_test.sql`.
+- Validar creación, apertura, auditoría, expiración y revocación de un enlace con datos sintéticos.
+- Validar que un cuidador ve el PHR pero recibe `403` al intentar escribir o compartir.
