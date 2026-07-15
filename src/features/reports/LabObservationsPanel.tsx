@@ -2,12 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { labFlag, labFlagLabels, parseLabNumber, parseLabReference, type LabObservation } from "./lab-observations";
-import { confirmLabObservation, deleteLabObservation, fetchLabObservations, ingestLabPdf, updateLabObservation } from "./lab-repository";
+import { confirmLabObservation, confirmLabObservations, deleteLabObservation, fetchLabObservations, ingestLabPdf, updateLabObservation } from "./lab-repository";
 
-type Draft = { analyte: string; value: string; unit: string; reference: string; observedAt: string };
+type Draft = { loincCode: string; analyte: string; value: string; unit: string; reference: string; observedAt: string };
 const showValue = (o: LabObservation) => `${o.valueNum ?? o.valueText}${o.unit ? ` ${o.unit}` : ""}`;
 const showReference = (o: LabObservation) => o.refLow !== null || o.refHigh !== null ? `${o.refLow ?? "…"}–${o.refHigh ?? "…"}` : o.refText;
-const draftOf = (o: LabObservation): Draft => ({ analyte: o.analyte, value: String(o.valueNum ?? o.valueText), unit: o.unit, reference: showReference(o), observedAt: o.observedAt.slice(0, 10) });
+const draftOf = (o: LabObservation): Draft => ({ loincCode: o.loincCode, analyte: o.analyte, value: String(o.valueNum ?? o.valueText), unit: o.unit, reference: showReference(o), observedAt: o.observedAt.slice(0, 10) });
 
 export function LabObservationsPanel({ appointmentId, appointmentCompleted, disabled }: {
   appointmentId: string; disabled: boolean; appointmentCompleted: boolean;
@@ -51,7 +51,7 @@ export function LabObservationsPanel({ appointmentId, appointmentCompleted, disa
     const currentFlag = items.find((item) => item.id === id)?.flag;
     const flag = currentFlag && ["abnormal", "critical_low", "critical_high"].includes(currentFlag) ? currentFlag : labFlag(valueNum, reference.refLow, reference.refHigh);
     return updateLabObservation(id, {
-      analyte: draft.analyte.trim(), valueNum, valueText: valueNum === null ? draft.value.trim() : "", unit: draft.unit.trim(),
+      loincCode: draft.loincCode.trim(), analyte: draft.analyte.trim(), valueNum, valueText: valueNum === null ? draft.value.trim() : "", unit: draft.unit.trim(),
       ...reference, flag, observedAt: draft.observedAt,
     });
   }
@@ -74,6 +74,18 @@ export function LabObservationsPanel({ appointmentId, appointmentCompleted, disa
     } catch (cause) { setError(cause instanceof Error ? cause.message : "No fue posible confirmar el resultado."); }
   }
 
+  async function confirmAll() {
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const changed = suggested.filter((item) => JSON.stringify(drafts[item.id] ?? draftOf(item)) !== JSON.stringify(draftOf(item)));
+      await Promise.all(changed.map((item) => persist(item.id)));
+      await confirmLabObservations(suggested.map((item) => item.id));
+      await reload();
+      setNotice(`${suggested.length} resultados confirmados.`);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "No fue posible confirmar los resultados."); }
+    finally { setBusy(false); }
+  }
+
   async function remove(id: string) {
     setError("");
     try { await deleteLabObservation(id); setItems((current) => current.filter((item) => item.id !== id)); }
@@ -91,11 +103,11 @@ export function LabObservationsPanel({ appointmentId, appointmentCompleted, disa
       {!disabled && <label className="key-image-dropzone">
         <input type="file" accept="application/pdf" hidden disabled={busy} onChange={(event) => { upload(event.target.files?.[0]); event.target.value = ""; }} />
         <strong>{busy ? "Procesando PDF…" : "Subir PDF de resultados"}</strong>
-        <span className="empty-inline">Primero se leen tablas localmente. Nano se usa sólo si el texto es ambiguo y la lectura visual queda como respaldo para PDFs escaneados.</span>
+        <span className="empty-inline">Primero se leen tablas localmente. Nano se usa sólo si el texto es ambiguo o para sugerir la homologación LOINC desde la lista compacta de analitos.</span>
       </label>}
 
       {suggested.length > 0 && <section className="lab-review-group">
-        <h4>Pendientes de validación <span className="collapsible-count">{suggested.length}</span></h4>
+        <div className="card-heading"><h4>Pendientes de validación <span className="collapsible-count">{suggested.length}</span></h4><button className="button primary" type="button" disabled={busy} onClick={confirmAll}>Confirmar los {suggested.length} resultados</button></div>
         {suggested.map((item) => {
           const draft = drafts[item.id] ?? draftOf(item);
           return <form className="workflow-entry report-inline-form lab-observation" key={item.id} onSubmit={(event) => { event.preventDefault(); confirm(item.id); }}>
@@ -104,11 +116,12 @@ export function LabObservationsPanel({ appointmentId, appointmentCompleted, disa
             <label>Unidad<input value={draft.unit} onChange={(event) => change(item.id, { unit: event.target.value })} /></label>
             <label className="span-2">Referencia<input value={draft.reference} onChange={(event) => change(item.id, { reference: event.target.value })} /></label>
             <label>Fecha de muestra<input type="date" value={draft.observedAt} onChange={(event) => change(item.id, { observedAt: event.target.value })} /></label>
+            <label>LOINC sugerido<input value={draft.loincCode} placeholder="Sin homologar" onChange={(event) => change(item.id, { loincCode: event.target.value })} /></label>
             {item.sourceSentence && <span className="empty-inline span-2">Origen: {item.sourceSentence}</span>}
             <div className="lab-observation-actions span-2">
-              <button className="text-button" type="button" onClick={() => save(item.id)}>Guardar cambios</button>
-              <button className="button secondary" type="submit">Confirmar resultado</button>
-              <button className="text-button danger" type="button" onClick={() => remove(item.id)}>Descartar</button>
+              <button className="text-button" type="button" disabled={busy} onClick={() => save(item.id)}>Guardar cambios</button>
+              <button className="button secondary" type="submit" disabled={busy}>Confirmar resultado</button>
+              <button className="text-button danger" type="button" disabled={busy} onClick={() => remove(item.id)}>Descartar</button>
             </div>
           </form>;
         })}

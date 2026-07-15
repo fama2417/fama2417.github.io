@@ -23,6 +23,14 @@ export const LabExtractionSchema = z.object({
 });
 export type LabExtraction = z.infer<typeof LabExtractionSchema>;
 
+const LabLoincSuggestionSchema = z.object({
+  sourceId: z.string(),
+  loincCode: z.string(),
+  confidence: z.number().min(0).max(1),
+});
+const LabLoincExtractionSchema = z.object({ rows: z.array(LabLoincSuggestionSchema) });
+export type LabLoincSuggestion = z.infer<typeof LabLoincSuggestionSchema>;
+
 export type LabCandidate = {
   analyte: string;
   valueNum: number | null;
@@ -307,6 +315,14 @@ export function dedupeLabCandidates(rows: LabCandidate[]) {
   });
 }
 
+export function verifiedLabLoinc(suggestions: LabLoincSuggestion[], knownCodes: Iterable<string>, minConfidence: number) {
+  const known = new Set(knownCodes);
+  return new Map(suggestions
+    .map((row) => ({ ...row, loincCode: row.loincCode.trim() }))
+    .filter((row) => row.confidence >= minConfidence && known.has(row.loincCode))
+    .map((row) => [row.sourceId, row.loincCode] as const));
+}
+
 const structuredPayload = (response: unknown) => {
   const parsed = (response as any)?.output_parsed
     ?? (response as any)?.output?.flatMap((item: any) => item.content ?? []).find((content: any) => content?.parsed)?.parsed;
@@ -338,6 +354,31 @@ export async function structureLabDocument(input: { text?: string; pdfBytes?: Ui
   return {
     extraction,
     observations: extraction.rows.map((row) => normalizedCandidate(row, extraction.observedAt, "ai")).filter((row): row is LabCandidate => !!row),
+    usage: {
+      inputTokens: usage.input_tokens ?? usage.prompt_tokens ?? null,
+      outputTokens: usage.output_tokens ?? usage.completion_tokens ?? null,
+      totalTokens: usage.total_tokens ?? null,
+    },
+  };
+}
+
+export async function suggestLabLoinc(rows: Pick<LabCandidate, "analyte" | "unit" | "valueNum" | "valueText">[]) {
+  const config = aiConfig();
+  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const response = await client.responses.parse({
+    model: config.model,
+    input: [
+      { role: "system", content: `Homologa analitos de laboratorio a LOINC. Devuelve un código sólo cuando el analito y la unidad permitan una equivalencia suficientemente específica; si muestra, método o significado son ambiguos, usa loincCode vacío y confidence baja. No inventes códigos. sourceId debe copiarse exactamente.` },
+      { role: "user", content: JSON.stringify(rows.map((row, index) => ({ sourceId: String(index), analyte: row.analyte, unit: row.unit, valueType: row.valueNum === null ? "text" : "number" }))) },
+    ],
+    text: { format: zodTextFormat(LabLoincExtractionSchema, "lab_loinc") },
+    max_output_tokens: Math.min(config.maxOutputTokens, 2000),
+    store: false,
+  } as any, { timeout: config.timeoutMs });
+  const extraction = LabLoincExtractionSchema.parse(structuredPayload(response));
+  const usage = (response as any)?.usage ?? {};
+  return {
+    suggestions: extraction.rows,
     usage: {
       inputTokens: usage.input_tokens ?? usage.prompt_tokens ?? null,
       outputTokens: usage.output_tokens ?? usage.completion_tokens ?? null,

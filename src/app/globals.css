@@ -446,6 +446,7 @@ tr.row-link:hover td { background: var(--surface-muted); }
   min-width: 0;
   overflow: hidden;
 }
+.lab-workstation { overflow-y: auto; }
 body:has(.report-workstation) { display: flex; flex-direction: column; height: 100dvh; min-height: 0; overflow: hidden; }
 body:has(.report-workstation) .app-shell { flex: 1; height: 100dvh; min-height: 0; overflow: hidden; }
 body:has(.report-workstation) .app-shell-main { min-height: 0; overflow: hidden; }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { StructuredTextItem } from "unpdf";
-import { labPatientMatches, parseLabLayoutPages } from "./lab-ai.ts";
+import { labPatientMatches, parseLabLayoutPages, verifiedLabLoinc } from "./lab-ai.ts";
 
 const item = (str: string, x: number, y: number): StructuredTextItem => ({
   str, x, y, width: str.length * 5, height: 10, fontSize: 10, fontFamily: "sans", dir: "ltr", hasEOL: false,
@@ -65,4 +65,13 @@ test("parseLabLayoutPages reconoce el formato monoespaciado de INDISA", () => {
     { analyte: "INR", valueNum: 0.99, valueText: "", unit: "", flag: "" },
     { analyte: "GLOBULOS ROJOS", valueNum: null, valueText: "Normales.", unit: "", flag: "" },
   ]);
+});
+
+test("verifiedLabLoinc acepta sólo sugerencias confiables presentes en el catálogo", () => {
+  const mapped = verifiedLabLoinc([
+    { sourceId: "0", loincCode: "718-7", confidence: 0.95 },
+    { sourceId: "1", loincCode: "4544-3", confidence: 0.4 },
+    { sourceId: "2", loincCode: "inventado", confidence: 0.99 },
+  ], ["718-7", "4544-3"], 0.65);
+  assert.deepEqual([...mapped], [["0", "718-7"]]);
 });
