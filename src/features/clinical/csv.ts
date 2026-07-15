@@ -46,3 +46,21 @@ export function codeColumns(header: string[]): { code: number; display: number }
   const display = byPriority([/^long_common_name$/, /^term$/, /^title$/, /descripci[oó]n/, /^description$/, /^display$/, /^nombre$/, /^glosa$/]);
   return { code: code >= 0 ? code : 0, display: display >= 0 ? display : (code === 0 ? 1 : Math.max(1, code + 1)) };
 }
+
+export type LoincImportRow = {
+  code: string; display: string; component: string; property: string; timeAspect: string;
+  specimen: string; scaleType: string; methodType: string; className: string; status: string;
+  exampleUcumUnits: string;
+};
+
+/** Extrae del Loinc.csv oficial sólo los campos usados por búsqueda, categorías y tendencias. */
+export function loincImportRow(header: string[], row: string[]): LoincImportRow {
+  const indexes = new Map(header.map((name, index) => [name.trim().toUpperCase(), index]));
+  const value = (name: string) => (row[indexes.get(name) ?? -1] ?? "").trim();
+  return {
+    code: value("LOINC_NUM"), display: value("LONG_COMMON_NAME"), component: value("COMPONENT"),
+    property: value("PROPERTY"), timeAspect: value("TIME_ASPCT"), specimen: value("SYSTEM"),
+    scaleType: value("SCALE_TYP"), methodType: value("METHOD_TYP"), className: value("CLASS"),
+    status: value("STATUS"), exampleUcumUnits: value("EXAMPLE_UCUM_UNITS"),
+  };
+}

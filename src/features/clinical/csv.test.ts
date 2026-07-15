@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { codeColumns, detectDelimiter, parseDelimited } from "./csv.ts";
+import { codeColumns, detectDelimiter, loincImportRow, parseDelimited } from "./csv.ts";
 
 test("parsea CSV con comillas, comas internas y CRLF", () => {
   const rows = parseDelimited('code,name\r\n"R10.4","Dolor abdominal, otro"\r\nA00,"Cólera"');
@@ -22,4 +22,13 @@ test("codeColumns reconoce encabezados LOINC, SNOMED y genéricos", () => {
   assert.deepEqual(codeColumns(["id", "effectiveTime", "conceptId", "term"]), { code: 2, display: 3 }); // conceptId gana sobre id (RF2)
   assert.deepEqual(codeColumns(["Código", "Descripción"]), { code: 0, display: 1 });
   assert.deepEqual(codeColumns(["foo", "bar"]), { code: 0, display: 1 });
+});
+
+test("loincImportRow conserva metadatos oficiales para agrupar y normalizar", () => {
+  const header = ["LOINC_NUM", "COMPONENT", "PROPERTY", "TIME_ASPCT", "SYSTEM", "SCALE_TYP", "METHOD_TYP", "CLASS", "STATUS", "LONG_COMMON_NAME", "EXAMPLE_UCUM_UNITS"];
+  assert.deepEqual(loincImportRow(header, ["1558-6", "Glucose^fasting", "MCnc", "Pt", "Ser/Plas", "Qn", "", "CHEM", "ACTIVE", "Glucose fasting [Mass/volume] in Serum or Plasma", "mg/dL"]), {
+    code: "1558-6", display: "Glucose fasting [Mass/volume] in Serum or Plasma", component: "Glucose^fasting",
+    property: "MCnc", timeAspect: "Pt", specimen: "Ser/Plas", scaleType: "Qn", methodType: "",
+    className: "CHEM", status: "ACTIVE", exampleUcumUnits: "mg/dL",
+  });
 });
