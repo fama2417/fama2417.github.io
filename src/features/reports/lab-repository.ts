@@ -24,8 +24,9 @@ export async function fetchLabObservations(appointmentId: string) {
   return (data as LabRow[]).map(mapLabObservation);
 }
 
-export async function updateLabObservation(id: string, patch: Partial<Pick<LabObservation, "analyte" | "valueNum" | "valueText" | "unit" | "refLow" | "refHigh" | "refText" | "flag" | "observedAt">>) {
+export async function updateLabObservation(id: string, patch: Partial<Pick<LabObservation, "loincCode" | "analyte" | "valueNum" | "valueText" | "unit" | "refLow" | "refHigh" | "refText" | "flag" | "observedAt">>) {
   const data = {
+    ...(patch.loincCode !== undefined ? { loinc_code: patch.loincCode } : {}),
     ...(patch.analyte !== undefined ? { analyte: patch.analyte } : {}),
     ...(patch.valueNum !== undefined ? { value_num: patch.valueNum } : {}),
     ...(patch.valueText !== undefined ? { value_text: patch.valueText } : {}),
@@ -45,6 +46,14 @@ export async function confirmLabObservation(id: string) {
   const { data, error } = await supabase.from("lab_observations").update({ review_status: "confirmed" }).eq("id", id).select(labColumns).single();
   if (error) throw error;
   return mapLabObservation(data as LabRow);
+}
+
+export async function confirmLabObservations(ids: string[]) {
+  if (!ids.length) return [];
+  const { data, error } = await supabase.from("lab_observations").update({ review_status: "confirmed" })
+    .in("id", ids).eq("review_status", "suggested").select(labColumns);
+  if (error) throw error;
+  return (data as LabRow[]).map(mapLabObservation);
 }
 
 export async function deleteLabObservation(id: string) {

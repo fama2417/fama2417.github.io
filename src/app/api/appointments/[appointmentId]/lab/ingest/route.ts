@@ -3,13 +3,18 @@ import { NextRequest, NextResponse } from "next/server";
 import { aiConfig, canRunAiExtraction, estimateAiCost } from "@/features/reports/ai-budget.ts";
 import { insertAiUsageLog } from "@/features/reports/ai-repository.ts";
 import { requireAiRouteUser } from "@/features/reports/ai-route-auth.ts";
-import { dedupeLabCandidates, labPatientMatches, prepareLabPdf, structureLabDocument, type LabCandidate } from "@/features/reports/lab-ai.ts";
+import { dedupeLabCandidates, labPatientMatches, normalizeIdentity, prepareLabPdf, structureLabDocument, suggestLabLoinc, verifiedLabLoinc, type LabCandidate } from "@/features/reports/lab-ai.ts";
 import { sanitizeTextForAi } from "@/features/reports/ai-sanitizer.ts";
 
 const MAX_BYTES = 10 * 1024 * 1024;
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const removePatientName = (text: string, name: string) => name.trim() ? text.replace(new RegExp(escapeRegExp(name.trim()), "gi"), "[PATIENT]") : text;
 const observedAt = (value: string, fallback: string) => `${/^20\d{2}-\d{2}-\d{2}$/.test(value) ? value : fallback}T00:00:00.000Z`;
+const loincKey = (row: Pick<LabCandidate, "analyte" | "unit">) => `${normalizeIdentity(row.analyte)}|${normalizeIdentity(row.unit)}`;
+type AiUsage = { inputTokens: number | null; outputTokens: number | null; totalTokens: number | null };
+const combinedUsage = (rows: AiUsage[]) => Object.fromEntries((["inputTokens", "outputTokens", "totalTokens"] as const).map((key) => [key,
+  rows.every((row) => row[key] === null) ? null : rows.reduce((sum, row) => sum + (row[key] ?? 0), 0),
+])) as AiUsage;
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ appointmentId: string }> }) {
   const auth = await requireAiRouteUser(request, ["admin", "clinician", "radiologist"]);
@@ -55,8 +60,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   let candidates: LabCandidate[] = prepared.observations;
   let aiResult: Awaited<ReturnType<typeof structureLabDocument>> | null = null;
   let aiWarning: string | undefined;
+  let budgetResult: Awaited<ReturnType<typeof canRunAiExtraction>> | null = null;
+  const aiBudget = async () => budgetResult ??= await canRunAiExtraction({ tenantId: auth.tenantId, reportId: appointmentId, supabase: auth.supabase });
   if (prepared.needsAi) {
-    const budget = await canRunAiExtraction({ tenantId: auth.tenantId, reportId: appointmentId, supabase: auth.supabase });
+    const budget = await aiBudget();
     if (!budget.allowed) return NextResponse.json({ error: budget.reason ?? "IA no disponible para este PDF." }, { status: 429 });
     aiWarning = budget.warning;
     const model = aiConfig().model;
@@ -86,6 +93,46 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   const rows = dedupeLabCandidates(candidates).filter((row) => row.analyte && (row.valueNum !== null || row.valueText));
   if (!rows.length) return NextResponse.json({ error: "No se detectaron filas de resultados para revisar." }, { status: 422 });
+  let loincResult: Awaited<ReturnType<typeof suggestLabLoinc>> | null = null;
+  let loincWarning: string | undefined;
+  let loincBySource = new Map<string, string>();
+  let reusedLoinc = 0;
+  const loincCatalog = await auth.supabase.from("terminology_codes").select("code", { count: "exact", head: true }).eq("system", "LOINC");
+  if (loincCatalog.error) loincWarning = "No fue posible consultar el catálogo LOINC; los resultados quedaron sin homologar.";
+  else if (!loincCatalog.count) loincWarning = "El catálogo LOINC está vacío; cárgalo para habilitar la homologación automática.";
+  else {
+    const prior = await auth.supabase.from("lab_observations").select("analyte, unit, loinc_code")
+      .eq("review_status", "confirmed").neq("loinc_code", "").in("analyte", [...new Set(rows.map((row) => row.analyte))]);
+    const priorByKey = new Map<string, Set<string>>();
+    for (const row of prior.data ?? []) {
+      const key = loincKey(row);
+      priorByKey.set(key, (priorByKey.get(key) ?? new Set()).add(row.loinc_code));
+    }
+    rows.forEach((row, index) => {
+      const codes = priorByKey.get(loincKey(row));
+      if (codes?.size === 1) loincBySource.set(String(index), [...codes][0]);
+    });
+    reusedLoinc = loincBySource.size;
+    const unresolved = rows.map((row, index) => ({ row, index })).filter(({ index }) => !loincBySource.has(String(index)));
+    if (unresolved.length) {
+      const budget = await aiBudget();
+      if (!budget.allowed) loincWarning = "Nano no estaba disponible para homologar los analitos nuevos; los resultados igualmente quedaron listos para revisión.";
+      else try {
+        loincResult = await suggestLabLoinc(unresolved.map(({ row }) => row));
+        const proposedCodes = [...new Set(loincResult.suggestions.map((row) => row.loincCode.trim()).filter(Boolean))];
+        const known = proposedCodes.length
+          ? await auth.supabase.from("terminology_codes").select("code").eq("system", "LOINC").in("code", proposedCodes)
+          : { data: [], error: null };
+        if (known.error) throw known.error;
+        for (const [sourceId, code] of verifiedLabLoinc(loincResult.suggestions, (known.data ?? []).map((row) => row.code), aiConfig().minConfidenceToAutoSuggest)) {
+          const original = unresolved[Number(sourceId)];
+          if (original) loincBySource.set(String(original.index), code);
+        }
+      } catch {
+        loincWarning = "No fue posible homologar LOINC automáticamente; los resultados igualmente quedaron listos para revisión.";
+      }
+    }
+  }
   const extractionMethod = !prepared.needsAi ? "local" : prepared.scanned ? "ai_visual" : "ai_text";
   const imported = await auth.supabase.from("lab_result_imports").insert({
     tenant_id: auth.tenantId,
@@ -102,13 +149,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
 
   const fallbackDate = appointment.appointment_date;
-  const inserts = rows.map((row) => ({
+  const inserts = rows.map((row, index) => ({
     tenant_id: auth.tenantId,
     report_id: null,
     import_id: imported.data.id,
     appointment_id: appointmentId,
     patient_id: appointment.patient_id,
-    loinc_code: "",
+    loinc_code: loincBySource.get(String(index)) ?? "",
     analyte: row.analyte,
     value_num: row.valueNum,
     value_text: row.valueText,
@@ -131,19 +178,23 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const warnings = [
     ...(aiResult?.extraction.warnings ?? []),
     aiWarning,
+    loincWarning,
     rows.some((row) => !row.observedAt) ? "No se encontró fecha de muestra; se usó la fecha de la atención." : undefined,
-    extractionMethod === "local" ? "Extracción local: no se consumieron tokens de IA." : undefined,
+    loincResult ? `Nano recibió sólo los analitos nuevos y sugirió ${loincBySource.size - reusedLoinc} homologación(es) LOINC verificadas contra el catálogo; ${reusedLoinc} se reutilizaron.` : undefined,
+    extractionMethod === "local" && !loincResult ? "Extracción local: no se consumieron tokens de IA." : undefined,
   ].filter(Boolean) as string[];
 
-  if (aiResult) {
+  const usageRows = [aiResult?.usage, loincResult?.usage].filter((usage): usage is AiUsage => !!usage);
+  if (usageRows.length) {
+    const usage = combinedUsage(usageRows);
     const model = aiConfig().model;
-    const estimatedCost = await estimateAiCost({ model, inputTokens: aiResult.usage.inputTokens, outputTokens: aiResult.usage.outputTokens, supabase: auth.supabase });
+    const estimatedCost = await estimateAiCost({ model, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, supabase: auth.supabase });
     await insertAiUsageLog(auth.supabase, {
       tenant_id: auth.tenantId, appointment_id: appointmentId, provider: "openai", model, request_type: "lab_ingest",
-      input_tokens: aiResult.usage.inputTokens, output_tokens: aiResult.usage.outputTokens, total_tokens: aiResult.usage.totalTokens,
+      input_tokens: usage.inputTokens, output_tokens: usage.outputTokens, total_tokens: usage.totalTokens,
       estimated_cost_usd: estimatedCost, success: true, error_message: warnings.join("; ") || null,
     }).catch(() => undefined);
   }
 
-  return NextResponse.json({ success: true, created: inserted.data?.length ?? 0, duplicate: false, warnings });
+  return NextResponse.json({ success: true, created: inserted.data?.length ?? 0, loincMapped: loincBySource.size, duplicate: false, warnings });
 }
