@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase-client";
-import { codeColumns, parseDelimited } from "./csv";
+import { codeColumns, loincImportRow, parseDelimited } from "./csv";
 
 const SYSTEMS = [
   ["ICD-10", "CIE-10", "CSV con columnas código y descripción (DEIS/eCIEMaps)."],
@@ -46,12 +46,14 @@ export function TerminologyManager() {
       if (rows.length < 2) throw new Error("El archivo no tiene filas de datos.");
       const { code, display } = codeColumns(rows[0]);
       const items = rows.slice(1)
-        .map((row) => ({ code: (row[code] ?? "").trim(), display: (row[display] ?? "").trim() }))
+        .map((row) => system === "LOINC" ? loincImportRow(rows[0], row) : ({ code: (row[code] ?? "").trim(), display: (row[display] ?? "").trim() }))
         .filter((item) => item.code && item.display);
       if (!items.length) throw new Error("No se reconocieron columnas de código y descripción.");
       let done = 0;
       for (let i = 0; i < items.length; i += BATCH) {
-        const { error: rpcError } = await supabase.rpc("import_terminology", { p_system: system, p_rows: items.slice(i, i + BATCH) });
+        const { error: rpcError } = system === "LOINC"
+          ? await supabase.rpc("import_loinc_terminology", { p_rows: items.slice(i, i + BATCH) })
+          : await supabase.rpc("import_terminology", { p_system: system, p_rows: items.slice(i, i + BATCH) });
         if (rpcError) throw new Error(rpcError.message);
         done = Math.min(i + BATCH, items.length);
         setProgress(`Importando ${system}: ${done.toLocaleString()} / ${items.length.toLocaleString()}…`);

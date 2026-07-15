@@ -162,11 +162,21 @@ export async function fetchPatientLabObservations(patientId: string): Promise<Pa
     flag: LabObservation["flag"]; observed_at: string; source: LabObservation["source"]; source_sentence: string;
     review_status: LabObservation["reviewStatus"]; appointment: ExamRefRow;
   };
-  return ((data ?? []) as unknown as LabRow[]).map((row) => ({
+  const rows = (data ?? []) as unknown as LabRow[];
+  const codes = [...new Set(rows.map((row) => row.loinc_code).filter(Boolean))];
+  const metadata = codes.length ? await supabase.from("loinc_metadata")
+    .select("code, component, property, time_aspect, specimen, scale_type, method_type, class_name, status, example_ucum_units").in("code", codes) : { data: [], error: null };
+  if (metadata.error) throw metadata.error;
+  const metadataByCode = new Map((metadata.data ?? []).map((item) => [item.code as string, {
+    component: item.component as string, property: item.property as string, timeAspect: item.time_aspect as string,
+    specimen: item.specimen as string, scaleType: item.scale_type as string, methodType: item.method_type as string,
+    className: item.class_name as string, status: item.status as string, exampleUcumUnits: item.example_ucum_units as string,
+  }]));
+  return rows.map((row) => ({
     id: row.id, reportId: row.report_id, importId: row.import_id, appointmentId: row.appointment_id, patientId: row.patient_id, loincCode: row.loinc_code, analyte: row.analyte,
     valueNum: row.value_num, valueText: row.value_text, unit: row.unit, refLow: row.ref_low, refHigh: row.ref_high,
     refText: row.ref_text, flag: row.flag, observedAt: row.observed_at, source: row.source, sourceSentence: row.source_sentence,
-    reviewStatus: row.review_status, exam: mapExamRef(row.appointment),
+    reviewStatus: row.review_status, loincMetadata: metadataByCode.get(row.loinc_code), exam: mapExamRef(row.appointment),
   }));
 }
 
