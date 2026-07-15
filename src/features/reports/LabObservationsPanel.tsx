@@ -1,85 +1,127 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { labFlagLabels, type LabObservation } from "./lab-observations";
-import { confirmLabObservation, deleteLabObservation, fetchLabObservations, ingestLabPdf } from "./lab-repository";
+import { labFlag, labFlagLabels, parseLabNumber, parseLabReference, type LabObservation } from "./lab-observations";
+import { confirmLabObservation, deleteLabObservation, fetchLabObservations, ingestLabPdf, updateLabObservation } from "./lab-repository";
 
+type Draft = { analyte: string; value: string; unit: string; reference: string; observedAt: string };
 const showValue = (o: LabObservation) => `${o.valueNum ?? o.valueText}${o.unit ? ` ${o.unit}` : ""}`;
-const refText = (o: LabObservation) => o.refLow !== null || o.refHigh !== null ? `Ref ${o.refLow ?? "…"}–${o.refHigh ?? "…"}` : o.refText;
+const showReference = (o: LabObservation) => o.refLow !== null || o.refHigh !== null ? `${o.refLow ?? "…"}–${o.refHigh ?? "…"}` : o.refText;
+const draftOf = (o: LabObservation): Draft => ({ analyte: o.analyte, value: String(o.valueNum ?? o.valueText), unit: o.unit, reference: showReference(o), observedAt: o.observedAt.slice(0, 10) });
 
-export function LabObservationsPanel({ reportId, appointmentCompleted, disabled }: {
-  reportId?: string; appointmentId: string; patientId: string; defaultObservedAt: string; disabled: boolean; appointmentCompleted: boolean;
+export function LabObservationsPanel({ appointmentId, appointmentCompleted, disabled }: {
+  appointmentId: string; disabled: boolean; appointmentCompleted: boolean;
 }) {
   const [items, setItems] = useState<LabObservation[]>([]);
+  const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    if (reportId) fetchLabObservations(reportId).then(setItems).catch(() => setError("No fue posible cargar los resultados."));
-  }, [reportId]);
+  async function reload() {
+    const next = await fetchLabObservations(appointmentId);
+    setItems(next);
+    setDrafts(Object.fromEntries(next.filter((item) => item.reviewStatus === "suggested").map((item) => [item.id, draftOf(item)])));
+  }
 
-  // Los resultados solo se cargan una vez que el paciente fue atendido (cita = Atendida).
-  const gateMessage = !appointmentCompleted
-    ? "Marca la cita como «Atendida» para cargar resultados."
-    : !reportId ? "Guarda el borrador para cargar resultados." : "";
+  useEffect(() => { reload().catch(() => setError("No fue posible cargar los resultados.")); }, [appointmentId]);
 
   async function upload(file: File | undefined) {
-    if (!file || !reportId) return;
+    if (!file) return;
     setBusy(true); setError(""); setNotice("");
     try {
-      const result = await ingestLabPdf(reportId, file);
-      setItems(await fetchLabObservations(reportId));
-      setNotice(result.created ? `${result.created} resultado(s) extraído(s) para revisión.${result.warnings.length ? " " + result.warnings.join(" ") : ""}` : "No se detectaron resultados en el PDF." + (result.warnings.length ? " " + result.warnings.join(" ") : ""));
+      const result = await ingestLabPdf(appointmentId, file);
+      await reload();
+      const message = result.duplicate ? "El PDF ya estaba importado; no se duplicaron resultados." : `${result.created} resultado(s) extraído(s) para revisión.`;
+      setNotice(`${message}${result.warnings.length ? ` ${result.warnings.join(" ")}` : ""}`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "No fue posible procesar el PDF.");
     } finally { setBusy(false); }
   }
 
+  function change(id: string, patch: Partial<Draft>) {
+    setDrafts((current) => ({ ...current, [id]: { ...current[id], ...patch } }));
+  }
+
+  async function persist(id: string) {
+    const draft = drafts[id];
+    if (!draft?.analyte.trim() || !draft.value.trim()) throw new Error("Analito y resultado son obligatorios.");
+    const valueNum = parseLabNumber(draft.value);
+    const reference = parseLabReference(draft.reference);
+    const currentFlag = items.find((item) => item.id === id)?.flag;
+    const flag = currentFlag && ["abnormal", "critical_low", "critical_high"].includes(currentFlag) ? currentFlag : labFlag(valueNum, reference.refLow, reference.refHigh);
+    return updateLabObservation(id, {
+      analyte: draft.analyte.trim(), valueNum, valueText: valueNum === null ? draft.value.trim() : "", unit: draft.unit.trim(),
+      ...reference, flag, observedAt: draft.observedAt,
+    });
+  }
+
+  async function save(id: string) {
+    setError("");
+    try {
+      const saved = await persist(id);
+      setItems((current) => current.map((item) => item.id === id ? saved : item));
+      setNotice("Cambios guardados; el resultado sigue pendiente de confirmación.");
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "No fue posible guardar el resultado."); }
+  }
+
   async function confirm(id: string) {
     setError("");
-    try { setItems((current) => current.map((o) => o.id === id ? { ...o, reviewStatus: "confirmed" } : o)); await confirmLabObservation(id); }
-    catch { setError("No fue posible confirmar el resultado."); if (reportId) setItems(await fetchLabObservations(reportId)); }
+    try {
+      await persist(id);
+      const confirmed = await confirmLabObservation(id);
+      setItems((current) => current.map((item) => item.id === id ? confirmed : item));
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "No fue posible confirmar el resultado."); }
   }
 
   async function remove(id: string) {
     setError("");
-    try { await deleteLabObservation(id); setItems((current) => current.filter((o) => o.id !== id)); }
-    catch { setError("No fue posible eliminar el resultado."); }
+    try { await deleteLabObservation(id); setItems((current) => current.filter((item) => item.id !== id)); }
+    catch { setError("No fue posible descartar el resultado."); }
   }
 
-  const suggested = items.filter((o) => o.reviewStatus === "suggested");
-  const confirmed = items.filter((o) => o.reviewStatus === "confirmed");
+  const suggested = disabled ? [] : items.filter((item) => item.reviewStatus === "suggested");
+  const confirmed = items.filter((item) => item.reviewStatus === "confirmed");
 
-  const row = (o: LabObservation, review: boolean) => <div className="workflow-entry lab-observation" key={o.id}>
-    <strong>{o.analyte}{o.loincCode && <span className="lab-loinc"> · LOINC {o.loincCode}</span>}</strong>
-    <span>{showValue(o)}{refText(o) && ` · ${refText(o)}`}{o.flag && <span className={`lab-flag lab-flag-${o.flag}`}> · {labFlagLabels[o.flag]}</span>} · {new Date(o.observedAt).toLocaleDateString("es-CL")}</span>
-    {o.sourceSentence && <span className="empty-inline">{o.sourceSentence}</span>}
-    {!disabled && <div className="lab-observation-actions">
-      {review && <button className="text-button" type="button" onClick={() => confirm(o.id)}>Confirmar</button>}
-      <button className="text-button danger" type="button" onClick={() => remove(o.id)}>{review ? "Descartar" : "Quitar"}</button>
-    </div>}
-  </div>;
-
-  return <details className="report-clinical-panel collapsible" open>
-    <summary><span className="collapsible-icon">🧪</span>Resultados de laboratorio{items.length > 0 && <span className="collapsible-count">{items.length}</span>}</summary>
-    {gateMessage ? <p className="empty-inline">{gateMessage}</p> : <>
+  return <section className="report-clinical-panel lab-results-workspace" aria-label="Resultados de laboratorio">
+    <div className="card-heading"><div><p className="eyebrow">Resultados discretos</p><h3>Analitos del laboratorio</h3></div><span className="collapsible-count">{items.length}</span></div>
+    {!appointmentCompleted ? <p className="empty-inline">Marca la cita como «Atendida» para cargar resultados.</p> : <>
       {error && <p className="notice" role="alert">{error}</p>}
       {notice && <p className="form-notice" role="status">{notice}</p>}
       {!disabled && <label className="key-image-dropzone">
         <input type="file" accept="application/pdf" hidden disabled={busy} onChange={(event) => { upload(event.target.files?.[0]); event.target.value = ""; }} />
-        <strong>{busy ? "Procesando PDF…" : "Sube el PDF de resultados para extraerlos con IA"}</strong>
-        <span className="empty-inline">Se extrae el texto del PDF y se estructura como resultados sugeridos para tu revisión. No reemplaza tu criterio: confirma cada valor.</span>
+        <strong>{busy ? "Procesando PDF…" : "Subir PDF de resultados"}</strong>
+        <span className="empty-inline">Primero se leen tablas localmente. Nano se usa sólo si el texto es ambiguo y la lectura visual queda como respaldo para PDFs escaneados.</span>
       </label>}
+
       {suggested.length > 0 && <section className="lab-review-group">
-        <h4>Sugeridos por IA — revisa y confirma <span className="collapsible-count">{suggested.length}</span></h4>
-        {suggested.map((o) => row(o, true))}
+        <h4>Pendientes de validación <span className="collapsible-count">{suggested.length}</span></h4>
+        {suggested.map((item) => {
+          const draft = drafts[item.id] ?? draftOf(item);
+          return <form className="workflow-entry report-inline-form lab-observation" key={item.id} onSubmit={(event) => { event.preventDefault(); confirm(item.id); }}>
+            <label className="span-2">Analito<input value={draft.analyte} onChange={(event) => change(item.id, { analyte: event.target.value })} /></label>
+            <label>Resultado<input value={draft.value} onChange={(event) => change(item.id, { value: event.target.value })} /></label>
+            <label>Unidad<input value={draft.unit} onChange={(event) => change(item.id, { unit: event.target.value })} /></label>
+            <label className="span-2">Referencia<input value={draft.reference} onChange={(event) => change(item.id, { reference: event.target.value })} /></label>
+            <label>Fecha de muestra<input type="date" value={draft.observedAt} onChange={(event) => change(item.id, { observedAt: event.target.value })} /></label>
+            {item.sourceSentence && <span className="empty-inline span-2">Origen: {item.sourceSentence}</span>}
+            <div className="lab-observation-actions span-2">
+              <button className="text-button" type="button" onClick={() => save(item.id)}>Guardar cambios</button>
+              <button className="button secondary" type="submit">Confirmar resultado</button>
+              <button className="text-button danger" type="button" onClick={() => remove(item.id)}>Descartar</button>
+            </div>
+          </form>;
+        })}
       </section>}
+
       {confirmed.length > 0 && <section className="lab-review-group">
         <h4>Confirmados <span className="collapsible-count">{confirmed.length}</span></h4>
-        {confirmed.map((o) => row(o, false))}
+        {confirmed.map((item) => <div className="workflow-entry lab-observation" key={item.id}>
+          <strong>{item.analyte}{item.loincCode && <span className="lab-loinc"> · LOINC {item.loincCode}</span>}</strong>
+          <span>{showValue(item)}{showReference(item) && ` · Ref ${showReference(item)}`}{item.flag && <span className={`lab-flag lab-flag-${item.flag}`}> · {labFlagLabels[item.flag]}</span>} · {new Date(item.observedAt).toLocaleDateString("es-CL")}</span>
+        </div>)}
       </section>}
-      {!items.length && <p className="empty-inline">Aún no hay resultados. Sube un PDF para extraerlos.</p>}
+      {!items.length && <p className="empty-inline">Aún no hay resultados para esta atención.</p>}
     </>}
-  </details>;
+  </section>;
 }

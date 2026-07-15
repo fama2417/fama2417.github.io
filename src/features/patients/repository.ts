@@ -149,25 +149,24 @@ export async function fetchPatientStructuredFindings(patientId: string): Promise
 
 export type PatientLabObservation = LabObservation & { exam: PatientExamRef };
 
-/** Resultados de laboratorio discretos del paciente para tendencia. patient_id está denormalizado;
- *  se une al informe/cita solo para el estado del informe (visibilidad por rol via isReportAvailable). */
+/** Resultados confirmados del paciente. Se unen directamente a la atención; no requieren informe. */
 export async function fetchPatientLabObservations(patientId: string): Promise<PatientLabObservation[]> {
   const { data, error } = await supabase.from("lab_observations")
-    .select(`id, report_id, patient_id, loinc_code, analyte, value_num, value_text, unit, ref_low, ref_high, ref_text, flag, observed_at, source, source_sentence, review_status,
-      report:radiology_reports!inner(appointment:appointments!inner(patient_id, ${examRefColumns}))`)
+    .select(`id, report_id, import_id, appointment_id, patient_id, loinc_code, analyte, value_num, value_text, unit, ref_low, ref_high, ref_text, flag, observed_at, source, source_sentence, review_status,
+      appointment:appointments!inner(patient_id, ${examRefColumns})`)
     .eq("patient_id", patientId).eq("review_status", "confirmed").order("observed_at", { ascending: false });
   if (error) throw error;
   type LabRow = {
-    id: string; report_id: string; patient_id: string; loinc_code: string; analyte: string; value_num: number | null;
+    id: string; report_id: string | null; import_id: string | null; appointment_id: string; patient_id: string; loinc_code: string; analyte: string; value_num: number | null;
     value_text: string; unit: string; ref_low: number | null; ref_high: number | null; ref_text: string;
     flag: LabObservation["flag"]; observed_at: string; source: LabObservation["source"]; source_sentence: string;
-    review_status: LabObservation["reviewStatus"]; report: { appointment: ExamRefRow };
+    review_status: LabObservation["reviewStatus"]; appointment: ExamRefRow;
   };
   return ((data ?? []) as unknown as LabRow[]).map((row) => ({
-    id: row.id, reportId: row.report_id, patientId: row.patient_id, loincCode: row.loinc_code, analyte: row.analyte,
+    id: row.id, reportId: row.report_id, importId: row.import_id, appointmentId: row.appointment_id, patientId: row.patient_id, loincCode: row.loinc_code, analyte: row.analyte,
     valueNum: row.value_num, valueText: row.value_text, unit: row.unit, refLow: row.ref_low, refHigh: row.ref_high,
     refText: row.ref_text, flag: row.flag, observedAt: row.observed_at, source: row.source, sourceSentence: row.source_sentence,
-    reviewStatus: row.review_status, exam: mapExamRef(row.report.appointment),
+    reviewStatus: row.review_status, exam: mapExamRef(row.appointment),
   }));
 }
 

@@ -83,8 +83,8 @@ export function PatientHistory({ patientId }: { patientId: string }) {
   const visibleKeyImages = keyImages.filter((image) => isReportAvailable(image.exam, canEditReports));
   // Hallazgos: filtro por rol + dedupe una sola vez; alimenta sección y conteo del Resumen.
   const displayFindings = dedupeFindings(visibleFindings(findings, canEditReports));
-  // Mismo filtro por rol que hallazgos/imágenes: resultados de informes no accesibles no se exponen.
-  const visibleLabs = labs.filter((observation) => isReportAvailable(observation.exam, canEditReports));
+  // Laboratorio no depende de un informe: el repositorio ya entrega solo resultados confirmados.
+  const visibleLabs = labs;
   const tabs: [TabId, string][] = [
     ["resumen", "Resumen"],
     ["timeline", "Timeline"],
