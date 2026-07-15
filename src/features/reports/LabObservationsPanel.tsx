@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { labFlag, labFlagLabels, parseLabNumber, parseLabReference, type LabObservation } from "./lab-observations";
-import { confirmLabObservation, confirmLabObservations, deleteLabObservation, fetchLabObservations, ingestLabPdf, updateLabObservation } from "./lab-repository";
+import { confirmLabObservation, confirmLabObservations, deleteLabObservation, fetchLabObservations, ingestLabPdf, suggestMissingLabLoinc, updateLabObservation, type LabLoincOption } from "./lab-repository";
 
 type Draft = { loincCode: string; analyte: string; value: string; unit: string; reference: string; observedAt: string };
 const showValue = (o: LabObservation) => `${o.valueNum ?? o.valueText}${o.unit ? ` ${o.unit}` : ""}`;
@@ -17,11 +17,13 @@ export function LabObservationsPanel({ appointmentId, appointmentCompleted, disa
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [loincSuggestions, setLoincSuggestions] = useState<Record<string, LabLoincOption[]>>({});
 
   async function reload() {
     const next = await fetchLabObservations(appointmentId);
     setItems(next);
     setDrafts(Object.fromEntries(next.filter((item) => item.reviewStatus === "suggested").map((item) => [item.id, draftOf(item)])));
+    setLoincSuggestions({});
   }
 
   useEffect(() => { reload().catch(() => setError("No fue posible cargar los resultados.")); }, [appointmentId]);
@@ -86,6 +88,17 @@ export function LabObservationsPanel({ appointmentId, appointmentCompleted, disa
     finally { setBusy(false); }
   }
 
+  async function suggestLoinc() {
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const result = await suggestMissingLabLoinc(appointmentId);
+      setLoincSuggestions(Object.fromEntries(result.suggestions.map((row) => [row.observationId, row.options])));
+      const options = result.suggestions.reduce((sum, row) => sum + row.options.length, 0);
+      setNotice(options ? `${options} alternativa(s) LOINC encontradas. Selecciona una antes de confirmar.` : "No se encontraron alternativas LOINC verificables para estos analitos.");
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "No fue posible obtener sugerencias LOINC."); }
+    finally { setBusy(false); }
+  }
+
   async function remove(id: string) {
     setError("");
     try { await deleteLabObservation(id); setItems((current) => current.filter((item) => item.id !== id)); }
@@ -93,6 +106,7 @@ export function LabObservationsPanel({ appointmentId, appointmentCompleted, disa
   }
 
   const suggested = disabled ? [] : items.filter((item) => item.reviewStatus === "suggested");
+  const missingLoinc = suggested.filter((item) => !(drafts[item.id]?.loincCode ?? item.loincCode).trim());
   const confirmed = items.filter((item) => item.reviewStatus === "confirmed");
 
   return <section className="report-clinical-panel lab-results-workspace" aria-label="Resultados de laboratorio">
@@ -107,7 +121,7 @@ export function LabObservationsPanel({ appointmentId, appointmentCompleted, disa
       </label>}
 
       {suggested.length > 0 && <section className="lab-review-group">
-        <div className="card-heading"><h4>Pendientes de validación <span className="collapsible-count">{suggested.length}</span></h4><button className="button primary" type="button" disabled={busy} onClick={confirmAll}>Confirmar los {suggested.length} resultados</button></div>
+        <div className="card-heading"><h4>Pendientes de validación <span className="collapsible-count">{suggested.length}</span></h4><div className="lab-review-actions">{missingLoinc.length > 0 && <button className="button secondary" type="button" disabled={busy} onClick={suggestLoinc}>Sugerir LOINC faltantes ({missingLoinc.length})</button>}<button className="button primary" type="button" disabled={busy} onClick={confirmAll}>Confirmar los {suggested.length} resultados</button></div></div>
         {suggested.map((item) => {
           const draft = drafts[item.id] ?? draftOf(item);
           return <form className="workflow-entry report-inline-form lab-observation" key={item.id} onSubmit={(event) => { event.preventDefault(); confirm(item.id); }}>
@@ -116,7 +130,9 @@ export function LabObservationsPanel({ appointmentId, appointmentCompleted, disa
             <label>Unidad<input value={draft.unit} onChange={(event) => change(item.id, { unit: event.target.value })} /></label>
             <label className="span-2">Referencia<input value={draft.reference} onChange={(event) => change(item.id, { reference: event.target.value })} /></label>
             <label>Fecha de muestra<input type="date" value={draft.observedAt} onChange={(event) => change(item.id, { observedAt: event.target.value })} /></label>
-            <label>LOINC sugerido<input value={draft.loincCode} placeholder="Sin homologar" onChange={(event) => change(item.id, { loincCode: event.target.value })} /></label>
+            <label className="span-2">LOINC sugerido<input value={draft.loincCode} placeholder="Sin homologar" onChange={(event) => change(item.id, { loincCode: event.target.value })} />
+              {!!loincSuggestions[item.id]?.length && <span className="lab-loinc-options">{loincSuggestions[item.id].map((option) => <button type="button" key={option.code} aria-pressed={draft.loincCode === option.code} onClick={() => change(item.id, { loincCode: option.code })}><strong>{option.code}</strong><small>{option.display}</small></button>)}</span>}
+            </label>
             {item.sourceSentence && <span className="empty-inline span-2">Origen: {item.sourceSentence}</span>}
             <div className="lab-observation-actions span-2">
               <button className="text-button" type="button" disabled={busy} onClick={() => save(item.id)}>Guardar cambios</button>
