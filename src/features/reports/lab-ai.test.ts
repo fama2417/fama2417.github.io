@@ -38,3 +38,31 @@ test("labPatientMatches prioriza identificador y no acepta documentos sin identi
   assert.equal(labPatientMatches({ patientName: "María Pérez", patientIdentifier: "99.999.999-9" }, expected), false);
   assert.equal(labPatientMatches({ patientName: "", patientIdentifier: "" }, expected), false);
 });
+
+test("parseLabLayoutPages reconoce el formato monoespaciado de INDISA", () => {
+  const page = [
+    item("Paciente : MANQUELIPE ALDAY FABIAN Id. Atención 5173440 : R.u.t. : 18332410-1", 30, 700),
+    item("Fono : 123456789 Fec. Solicitud 07/05/2026 09:57 :", 30, 686),
+    item("EXAMEN RESULTADO UNIDAD VALOR DE REFERENCIA", 30, 640),
+    item("ERITROCITOS 4.29 * M/uL 4.5 - 5.9", 30, 620),
+    item("HEMOGLOBINA 13.7 gr/dL 13.0 - 17.0", 30, 604),
+    item("INR 0.99", 30, 588),
+    item("GLOBULOS ROJOS Normales.", 30, 572),
+    item("Deseable <200 Factor de Riesgo < 40", 30, 556),
+    item("cambio de metodología 01 junio 2020", 30, 548),
+    item("EXAMEN VALIDADO POR PROFESIONAL", 30, 540),
+  ];
+
+  const parsed = parseLabLayoutPages([page]);
+  assert.equal(parsed.patientName, "MANQUELIPE ALDAY FABIAN");
+  assert.equal(parsed.patientIdentifier, "18332410-1");
+  assert.equal(parsed.observedAt, "2026-05-07");
+  assert.equal(parsed.needsAi, false);
+  assert.equal(parsed.observations.length, 4);
+  assert.deepEqual(parsed.observations.map(({ analyte, valueNum, valueText, unit, flag }) => ({ analyte, valueNum, valueText, unit, flag })), [
+    { analyte: "ERITROCITOS", valueNum: 4.29, valueText: "", unit: "M/uL", flag: "abnormal" },
+    { analyte: "HEMOGLOBINA", valueNum: 13.7, valueText: "", unit: "gr/dL", flag: "normal" },
+    { analyte: "INR", valueNum: 0.99, valueText: "", unit: "", flag: "" },
+    { analyte: "GLOBULOS ROJOS", valueNum: null, valueText: "Normales.", unit: "", flag: "" },
+  ]);
+});

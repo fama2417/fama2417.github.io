@@ -119,16 +119,24 @@ const dateOnly = (value: string) => {
 
 function metadata(rows: LayoutRow[][]) {
   const first = rows[0] ?? [];
+  const firstPageText = first.map(rowText);
   const labelledValue = (label: string, fromX: number, toX: number) => {
     const row = first.find((candidate) => plain(rowText(candidate)).startsWith(label));
     return row?.items.filter((item) => item.x >= fromX && item.x < toX && item.str.trim() !== ":").map((item) => item.str.trim()).join(" ").trim() ?? "";
   };
   const sampleRow = first.find((row) => plain(rowText(row)).includes("toma de muestra"));
   const sampleText = sampleRow?.items.filter((item) => item.x >= 470).map((item) => item.str).join(" ") ?? "";
+  const patientLine = firstPageText.find((text) => /\bpaciente\s*:/i.test(text)) ?? "";
+  const identifierLine = firstPageText.find((text) => /r\.?\s*u\.?\s*t\.?\s*:/i.test(text)) ?? "";
+  const requestLine = firstPageText.find((text) => /fec\.?\s*solicitud/i.test(text)) ?? "";
   return {
-    patientName: labelledValue("nombre", 85, 400),
-    patientIdentifier: labelledValue("rut", 85, 400),
-    observedAt: dateOnly(sampleText),
+    patientName: labelledValue("nombre", 85, 400)
+      || patientLine.match(/\bpaciente\s*:\s*(.+?)(?=\s+id\.?\s*atenci[oó]n\b|\s+r\.?\s*u\.?\s*t\.?\s*:|$)/i)?.[1]?.trim()
+      || "",
+    patientIdentifier: labelledValue("rut", 85, 400)
+      || identifierLine.match(/r\.?\s*u\.?\s*t\.?\s*:\s*([0-9.\-k]+)/i)?.[1]
+      || "",
+    observedAt: dateOnly(sampleText) || dateOnly(requestLine),
   };
 }
 
@@ -153,6 +161,73 @@ function normalizedCandidate(row: z.infer<typeof CompactLabRowSchema>, observedA
   };
 }
 
+function parseMonospacedLabRows(rows: LayoutRow[], observedAt: string) {
+  const observations: LabCandidate[] = [];
+  const aiLines: string[] = [];
+  let foundHeader = false;
+  let insideTable = false;
+
+  for (const row of rows) {
+    const text = rowText(row);
+    const normalized = plain(text);
+    if (/examen\s+resultado\s+unidad\s+valor de referencia/.test(normalized)) {
+      foundHeader = true;
+      insideTable = true;
+      continue;
+    }
+    if (/^(?:examen validado|la interpretacion)/.test(normalized)) {
+      insideTable = false;
+      continue;
+    }
+    if (!insideTable || !text || /^(?:[-_=]{4,}|metodo|nota|observacion|muestra|fecha|rango|valor de referencia|adultos|ninos|hombres|mujeres|mayor|menor|hasta|guia|segun|fuente|este resultado)/.test(normalized)) continue;
+
+    let match = text.match(/^(.+?)\s+(-?\d+(?:[.,]\d+)?)(?:\s*(\*))?\s+(\S+)\s+(-?\d+(?:[.,]\d+)?)\s*-\s*(-?\d+(?:[.,]\d+)?)$/);
+    let compact: z.infer<typeof CompactLabRowSchema> | null = match ? {
+      sourceId: row.id,
+      analyte: match[1],
+      value: match[2],
+      unit: match[4],
+      reference: `${match[5]} - ${match[6]}`,
+      reportedFlag: match[3] ? "abnormal" : "",
+    } : null;
+
+    if (!compact) {
+      match = text.match(/^(.+?)\s+(-?\d+(?:[.,]\d+)?)(?:\s*(\*))?\s+(\S+)$/);
+      if (match) compact = {
+        sourceId: row.id,
+        analyte: match[1],
+        value: match[2],
+        unit: match[4],
+        reference: "",
+        reportedFlag: match[3] ? "abnormal" : "",
+      };
+    }
+    if (!compact) {
+      match = text.match(/^(.+?)\s+(-?\d+(?:[.,]\d+)?)(?:\s*(\*))?$/);
+      if (match && !/\d/.test(match[1])) compact = {
+        sourceId: row.id,
+        analyte: match[1],
+        value: match[2],
+        unit: "",
+        reference: "",
+        reportedFlag: match[3] ? "abnormal" : "",
+      };
+    }
+    if (!compact) {
+      match = text.match(/^(.+?)\s+(no reactivo|no detectado|indeterminado|positivo|negativo|reactivo|detectado|normales?\.?|ausente|presente)$/i);
+      if (match) compact = { sourceId: row.id, analyte: match[1], value: match[2], unit: "", reference: "", reportedFlag: "" };
+    }
+
+    if (!compact) continue;
+    const parsed = normalizedCandidate(compact, observedAt, "ocr");
+    if (!parsed) continue;
+    observations.push(parsed);
+    aiLines.push([row.id, compact.analyte, compact.value, compact.unit, compact.reference].join("\t"));
+  }
+
+  return { foundHeader, observations, aiLines };
+}
+
 export function parseLabLayoutPages(pages: StructuredTextItem[][]): Omit<PreparedLabPdf, "scanned" | "pageCount"> {
   const layout = groupLabLayoutPages(pages);
   const documentMetadata = metadata(layout);
@@ -163,6 +238,13 @@ export function parseLabLayoutPages(pages: StructuredTextItem[][]): Omit<Prepare
   for (const rows of layout) {
     const header = findHeader(rows);
     if (!header) {
+      const monospaced = parseMonospacedLabRows(rows, documentMetadata.observedAt);
+      if (monospaced.foundHeader) {
+        observations.push(...monospaced.observations);
+        candidateRows += monospaced.observations.length;
+        aiLines.push(...monospaced.aiLines);
+        continue;
+      }
       for (const row of rows.filter((candidate) => !ignored(rowText(candidate)))) aiLines.push(`${row.id}\t${rowText(row)}`);
       continue;
     }
