@@ -157,7 +157,7 @@ export function PatientHistory({ patientId }: { patientId: string }) {
       </section>
     </>}
     {tab === "hallazgos" && <PatientStructuredFindingsSection findings={displayFindings} totalCount={findings.length} canEditReports={canEditReports} />}
-    {tab === "laboratorio" && <section className="card" aria-label="Tendencia de laboratorio"><h3>Tendencia de laboratorio</h3><PatientLabTrendsSection observations={visibleLabs} /></section>}
+    {tab === "laboratorio" && <section className="card" aria-label="Resultados de laboratorio"><h3>Resultados de laboratorio</h3><PatientLabTrendsSection observations={visibleLabs} /></section>}
     {tab === "auditoria" && role === "admin" && (
       <section className="card audit-list" aria-label="Trazabilidad del paciente">
         <h3>Trazabilidad</h3>

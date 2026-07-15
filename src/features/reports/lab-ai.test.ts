@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { StructuredTextItem } from "unpdf";
-import { labPatientMatches, parseLabLayoutPages, verifiedLabLoinc, verifiedLabLoincCandidates } from "./lab-ai.ts";
+import { labPatientMatches, loincSearchQueries, parseLabLayoutPages, verifiedLabLoinc } from "./lab-ai.ts";
 
 const item = (str: string, x: number, y: number): StructuredTextItem => ({
   str, x, y, width: str.length * 5, height: 10, fontSize: 10, fontFamily: "sans", dir: "ltr", hasEOL: false,
@@ -77,15 +77,6 @@ test("verifiedLabLoinc acepta sólo sugerencias confiables presentes en el catá
   assert.deepEqual([...mapped], [["0", "718-7"]]);
 });
 
-test("verifiedLabLoincCandidates conserva alternativas del catálogo para revisión humana", () => {
-  const candidates = verifiedLabLoincCandidates([
-    { sourceId: "0", loincCode: "4544-3", confidence: 0.55 },
-    { sourceId: "0", loincCode: "718-7", confidence: 0.8 },
-    { sourceId: "0", loincCode: "718-7", confidence: 0.7 },
-    { sourceId: "0", loincCode: "inventado", confidence: 0.99 },
-  ], ["718-7", "4544-3"]);
-  assert.deepEqual(candidates.get("0"), [
-    { sourceId: "0", loincCode: "718-7", confidence: 0.8 },
-    { sourceId: "0", loincCode: "4544-3", confidence: 0.55 },
-  ]);
+test("loincSearchQueries relaja calificadores sin cambiar el analito", () => {
+  assert.deepEqual(loincSearchQueries("Chloride serum plasma"), ["Chloride serum plasma", "Chloride serum", "Chloride"]);
 });

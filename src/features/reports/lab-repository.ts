@@ -1,7 +1,7 @@
 import { supabase } from "@/lib/supabase-client";
 import type { LabFlag, LabObservation, LabReviewStatus } from "./lab-observations";
 
-export type LabLoincOption = { code: string; display: string; confidence: number };
+export type LabLoincOption = { code: string; display: string };
 export type LabLoincSuggestions = { observationId: string; options: LabLoincOption[] };
 
 type LabRow = {
@@ -78,10 +78,11 @@ export async function ingestLabPdf(appointmentId: string, file: File): Promise<{
 }
 
 /** Sugiere candidatos sólo para resultados pendientes que todavía no tienen LOINC. */
-export async function suggestMissingLabLoinc(appointmentId: string): Promise<{ suggestions: LabLoincSuggestions[]; warning: string }> {
+export async function suggestMissingLabLoinc(appointmentId: string, observationIds: string[]): Promise<{ suggestions: LabLoincSuggestions[]; warning: string }> {
   const { data } = await supabase.auth.getSession();
   const response = await fetch(`/api/appointments/${encodeURIComponent(appointmentId)}/lab/loinc-suggestions`, {
-    method: "POST", headers: { Authorization: `Bearer ${data.session?.access_token ?? ""}` },
+    method: "POST", headers: { Authorization: `Bearer ${data.session?.access_token ?? ""}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ observationIds }),
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error || "No fue posible obtener sugerencias LOINC.");

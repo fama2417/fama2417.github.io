@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { aiConfig, canRunAiExtraction, estimateAiCost } from "@/features/reports/ai-budget.ts";
-import { suggestLabLoinc, verifiedLabLoincCandidates } from "@/features/reports/lab-ai.ts";
+import { loincSearchQueries, suggestLabLoincSearchTerms } from "@/features/reports/lab-ai.ts";
 import { insertAiUsageLog } from "@/features/reports/ai-repository.ts";
 import { requireAiRouteUser } from "@/features/reports/ai-route-auth.ts";
 
@@ -8,6 +8,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const auth = await requireAiRouteUser(request, ["admin", "clinician", "radiologist"]);
   if ("error" in auth) return auth.error;
   const { appointmentId } = await params;
+  const body = await request.json().catch(() => ({}));
+  const requestedIds = Array.isArray(body.observationIds)
+    ? [...new Set(body.observationIds)].filter((id): id is string => typeof id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)).slice(0, 80)
+    : null;
+  if (requestedIds && !requestedIds.length) return NextResponse.json({ suggestions: [] });
 
   const appointment = await auth.supabase.from("appointments").select("id, status, service_category").eq("id", appointmentId).maybeSingle();
   if (appointment.error) return NextResponse.json({ error: "No fue posible cargar la atención." }, { status: 502 });
@@ -20,8 +25,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (permission.error || permission.data !== true) return NextResponse.json({ error: "No autorizado para esta atención." }, { status: 403 });
   }
 
-  const pending = await auth.supabase.from("lab_observations").select("id, analyte, unit, value_num, value_text")
-    .eq("appointment_id", appointmentId).eq("review_status", "suggested").eq("loinc_code", "").order("analyte").limit(80);
+  let pendingQuery = auth.supabase.from("lab_observations").select("id, analyte, unit, value_num, value_text")
+    .eq("appointment_id", appointmentId).eq("review_status", "suggested").eq("loinc_code", "");
+  if (requestedIds) pendingQuery = pendingQuery.in("id", requestedIds);
+  const pending = await pendingQuery.order("analyte").limit(80);
   if (pending.error) return NextResponse.json({ error: "No fue posible cargar los analitos sin homologar." }, { status: 502 });
   if (!pending.data?.length) return NextResponse.json({ suggestions: [], warning: "No hay analitos pendientes sin LOINC." });
 
@@ -30,23 +37,18 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   const model = aiConfig().model;
   try {
-    const result = await suggestLabLoinc(pending.data.map((row) => ({
+    const result = await suggestLabLoincSearchTerms(pending.data.map((row) => ({
       analyte: row.analyte, unit: row.unit, valueNum: row.value_num, valueText: row.value_text,
-    })), 3);
-    const proposedCodes = [...new Set(result.suggestions.map((row) => row.loincCode.trim()).filter(Boolean))];
-    const known = proposedCodes.length
-      ? await auth.supabase.from("terminology_codes").select("code, display").eq("system", "LOINC").in("code", proposedCodes)
-      : { data: [], error: null };
-    if (known.error) throw known.error;
-
-    const displays = new Map((known.data ?? []).map((row) => [row.code, row.display]));
-    const candidates = verifiedLabLoincCandidates(result.suggestions, displays.keys());
-    const suggestions = pending.data.flatMap((row, index) => {
-      const options = (candidates.get(String(index)) ?? []).map((candidate) => ({
-        code: candidate.loincCode, display: displays.get(candidate.loincCode) ?? "", confidence: candidate.confidence,
-      }));
-      return options.length ? [{ observationId: row.id, options }] : [];
-    });
+    })));
+    const terms = new Map(result.terms.map((row) => [row.sourceId, row.searchTerm]));
+    const suggestions = (await Promise.all(pending.data.map(async (row, index) => {
+      for (const term of loincSearchQueries(terms.get(String(index)) ?? "")) {
+        const found = await auth.supabase.rpc("search_terminology", { p_system: "LOINC", p_term: term });
+        if (found.error) throw found.error;
+        if (found.data?.length) return { observationId: row.id, options: found.data.slice(0, 3).map(({ code, display }: { code: string; display: string }) => ({ code, display })) };
+      }
+      return null;
+    }))).filter((row): row is NonNullable<typeof row> => !!row);
 
     const estimatedCost = await estimateAiCost({ model, inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens, supabase: auth.supabase });
     await insertAiUsageLog(auth.supabase, {
