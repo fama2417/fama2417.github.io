@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildPhrLabTrend, phrLabDraftOf, validatePhrLabDraft, type PhrLabResult } from "./labs.ts";
+import { buildPhrLabTrend, phrLabDraftOf, reusedPhrLoinc, validatePhrLabDraft, type PhrLabResult } from "./labs.ts";
+
+const row = (id: string, date: string, value: number, unit = "mg/dL", status: PhrLabResult["reviewStatus"] = "confirmed"): PhrLabResult => ({
+  id, documentId: id, analyte: "Glucosa", loincCode: "", valueNum: value, valueText: "", unit,
+  refLow: 70, refHigh: 99, refText: "", flag: "normal", observedAt: date, source: "ocr", reviewStatus: status,
+});
 
 test("valida una corrección de laboratorio y deriva su bandera", () => {
   const parsed = validatePhrLabDraft({ analyte: " Glucosa ", value: "110", unit: "mg/dL", reference: "70 - 99", observedAt: "2026-07-01" });
@@ -9,10 +14,6 @@ test("valida una corrección de laboratorio y deriva su bandera", () => {
 });
 
 test("la tendencia personal exige confirmación y unidades compatibles", () => {
-  const row = (id: string, date: string, value: number, unit = "mg/dL", status: PhrLabResult["reviewStatus"] = "confirmed"): PhrLabResult => ({
-    id, documentId: id, analyte: "Glucosa", loincCode: "", valueNum: value, valueText: "", unit,
-    refLow: 70, refHigh: 99, refText: "", flag: "normal", observedAt: date, source: "ocr", reviewStatus: status,
-  });
   const trend = buildPhrLabTrend([row("a", "2026-05-01", 90), row("b", "2026-06-01", 1, "g/L"), row("c", "2026-07-01", 999, "mmol/L", "suggested")]);
   assert.deepEqual(trend?.points.map(({ date, value }) => ({ date, value })), [{ date: "2026-05-01", value: 0.9 }, { date: "2026-06-01", value: 1 }]);
 });
@@ -25,4 +26,10 @@ test("conserva referencias de un solo límite al editar", () => {
   if ("error" in parsed) assert.fail(parsed.error);
   assert.equal(parsed.value.refHigh, 200);
   assert.equal(parsed.value.flag, "normal");
+});
+
+test("reutiliza LOINC confirmado sólo cuando analito y unidad son inequívocos", () => {
+  const rows = [row("nuevo", "2026-07-01", 90), { ...row("otro", "2026-07-01", 5), analyte: "TSH", unit: "mUI/L" }];
+  const prior = [{ ...row("previo", "2026-01-01", 92), analyte: "GLÚCOSA", unit: "MG/DL", loincCode: "2345-7" }];
+  assert.deepEqual([...reusedPhrLoinc(rows, prior)], [[0, "2345-7"]]);
 });

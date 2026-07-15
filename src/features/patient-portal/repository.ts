@@ -215,19 +215,29 @@ export async function fetchPhrLabResults(ownerUserId?: string): Promise<PhrLabRe
   if (ownerUserId) query = query.eq("owner_user_id", ownerUserId);
   const { data, error } = await query;
   if (error) throw error;
-  return ((data ?? []) as PhrLabRow[]).map((row) => ({
+  const rows = (data ?? []) as PhrLabRow[];
+  const codes = [...new Set(rows.map((row) => row.loinc_code).filter(Boolean))];
+  const metadata = codes.length ? await supabase.from("loinc_metadata")
+    .select("code, component, property, time_aspect, specimen, scale_type, method_type, class_name, status, example_ucum_units").in("code", codes) : { data: [], error: null };
+  if (metadata.error) throw metadata.error;
+  const metadataByCode = new Map((metadata.data ?? []).map((item) => [item.code as string, {
+    component: item.component as string, property: item.property as string, timeAspect: item.time_aspect as string,
+    specimen: item.specimen as string, scaleType: item.scale_type as string, methodType: item.method_type as string,
+    className: item.class_name as string, status: item.status as string, exampleUcumUnits: item.example_ucum_units as string,
+  }]));
+  return rows.map((row) => ({
     id: row.id, documentId: row.document_id, loincCode: row.loinc_code, analyte: row.analyte,
     valueNum: row.value_num, valueText: row.value_text, unit: row.unit, refLow: row.ref_low,
     refHigh: row.ref_high, refText: row.ref_text, flag: row.flag, observedAt: row.observed_at,
-    source: row.source, reviewStatus: row.review_status,
+    source: row.source, reviewStatus: row.review_status, loincMetadata: metadataByCode.get(row.loinc_code),
   }));
 }
 
-export async function analyzePhrLabDocument(documentId: string) {
+export async function analyzePhrLabDocument(documentId: string, rematch = false) {
   const response = await authenticatedFetch("/api/portal/labs", {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ documentId }),
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ documentId, rematch }),
   });
-  return await response.json() as { created: number; duplicate: boolean; warnings: string[] };
+  return await response.json() as { created: number; loincMapped: number; duplicate: boolean; warnings: string[] };
 }
 
 export async function savePhrLabResult(resultId: string, draft: PhrLabDraft, confirm = false) {

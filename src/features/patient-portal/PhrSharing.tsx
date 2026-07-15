@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { phrLabTrendKey, type PhrLabResult } from "./labs";
 import { createPhrShare, downloadPhrFile, fetchPhrLabResults, fetchPhrShares, revokePhrShare, type PortalDocument, type PhrShare } from "./repository";
+import { friendlyDocumentName } from "./presentation";
 
 export function PhrSharing({ ownerUserId, documents }: { ownerUserId: string; documents: PortalDocument[] }) {
   const [results, setResults] = useState<PhrLabResult[]>([]), [shares, setShares] = useState<PhrShare[]>([]);
@@ -34,7 +35,7 @@ export function PhrSharing({ ownerUserId, documents }: { ownerUserId: string; do
     <section className="card portal-card"><div className="card-heading"><div><p className="eyebrow">Consulta médica</p><h2>Resumen personal</h2><p>Genera un PDF descriptivo con perfil de emergencia, documentos recientes y resultados fuera del rango informado.</p></div><button className="button secondary" type="button" onClick={() => void downloadPhrFile("/api/portal/summary", "resumen-para-consulta.pdf")}>Descargar resumen PDF</button></div></section>
     <section className="card portal-card"><p className="eyebrow">Enlace temporal · Solo lectura</p><h2>Crear enlace para compartir</h2><p>Selecciona exactamente qué verá la otra persona. El acceso expira, puede revocarse y cada apertura queda registrada.</p>
       <form className="phr-share-form" onSubmit={create}><label>Título<input name="title" defaultValue="Resumen para consulta" maxLength={120} required /></label><label>Expiración<select name="days" defaultValue="7"><option value="1">1 día</option><option value="7">7 días</option><option value="30">30 días</option></select></label>
-        <fieldset><legend>Documentos</legend>{documents.length ? documents.map((document) => <label className="phr-check-row" key={document.id}><input type="checkbox" checked={documentIds.includes(document.id)} onChange={() => toggle(document.id, documentIds, setDocumentIds)} /><span><strong>{document.filename}</strong><small>{document.sourceInstitution}</small></span></label>) : <p>No hay documentos.</p>}</fieldset>
+        <fieldset><legend>Documentos</legend>{documents.length ? documents.map((document) => <label className="phr-check-row" key={document.id} title={document.filename}><input type="checkbox" checked={documentIds.includes(document.id)} onChange={() => toggle(document.id, documentIds, setDocumentIds)} /><span><strong>{friendlyDocumentName(document.documentType)}</strong><small>{document.sourceInstitution} · {document.filename}</small></span></label>) : <p>No hay documentos.</p>}</fieldset>
         <fieldset><legend>Biomarcadores</legend>{biomarkers.length ? biomarkers.map((result) => { const key = phrLabTrendKey(result); return <label className="phr-check-row" key={key}><input type="checkbox" checked={trendKeys.includes(key)} onChange={() => toggle(key, trendKeys, setTrendKeys)} /><span><strong>{result.analyte}</strong><small>Incluye sus mediciones confirmadas</small></span></label>; }) : <p>No hay biomarcadores confirmados.</p>}</fieldset>
         <label className="phr-consent"><input name="emergency" type="checkbox" /> <span>Incluir perfil de emergencia declarado</span></label><button className="button primary" disabled={busy} type="submit">{busy ? "Creando…" : "Crear enlace"}</button>
       </form>

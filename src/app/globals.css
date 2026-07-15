@@ -1104,7 +1104,7 @@ body:has(.report-workstation) .app-shell-main { min-height: 0; overflow: hidden;
 .phr-app input, .phr-app select, .phr-app textarea { background: rgba(255, 253, 249, .9); border-color: var(--phr-border); color: var(--phr-text); }
 .phr-app a, .phr-app button { -webkit-tap-highlight-color: transparent; }
 .phr-app button:focus-visible, .phr-app a:focus-visible, .phr-app input:focus-visible, .phr-app select:focus-visible, .phr-app textarea:focus-visible, .phr-app summary:focus-visible { outline: 3px solid rgba(49, 117, 104, .35); outline-offset: 3px; }
-.phr-shell { display: grid; gap: 22px; margin: 0 auto; max-width: 1240px; min-height: 100dvh; padding: 18px clamp(16px, 4vw, 48px) 52px; position: relative; width: 100%; }
+.phr-shell { align-content: start; display: grid; gap: 22px; grid-auto-rows: max-content; margin: 0 auto; max-width: 1240px; min-height: 100dvh; padding: 18px clamp(16px, 4vw, 48px) 52px; position: relative; width: 100%; }
 .phr-app-header { align-items: center; background: rgba(255, 250, 245, .93); border: 1px solid var(--phr-border); border-radius: 18px; box-shadow: var(--phr-shadow); display: grid; gap: 20px; grid-template-columns: auto 1fr auto; min-height: 72px; padding: 10px 18px; position: relative; z-index: 20; }
 .phr-app-brand { align-items: center; color: var(--phr-sage-dark); display: inline-flex; font-size: 1.25rem; gap: 9px; white-space: nowrap; }
 .phr-app-brand svg { height: 34px; width: 34px; }
@@ -1168,7 +1168,7 @@ body:has(.report-workstation) .app-shell-main { min-height: 0; overflow: hidden;
 .phr-app-panel-action svg { height: 18px; width: 18px; }
 .phr-app-empty { color: var(--phr-muted); margin: 0; padding: 16px 2px; }
 .phr-app .portal-shell { max-width: 760px; padding-top: clamp(30px, 8vh, 90px); }
-.phr-app .phr-shell .portal-card { padding: clamp(16px, 2.5vw, 24px); }
+.phr-app .phr-shell .portal-card { align-content: start; padding: clamp(16px, 2.5vw, 24px); }
 .phr-app .phr-labs-stack, .phr-app .phr-shell > .portal-card, .phr-app .phr-shell > .phr-labs-stack { min-width: 0; }
 .phr-app .portal-list strong { overflow-wrap: anywhere; }
 .phr-app .portal-document-detail > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1177,6 +1177,18 @@ body:has(.report-workstation) .app-shell-main { min-height: 0; overflow: hidden;
 .phr-app .phr-period-comparison[open] { padding: 0 24px 24px; }
 .phr-app .phr-period-comparison[open] summary { margin: 0 -24px 12px; }
 .phr-app-bottom-nav, .phr-app-more-menu { display: none; }
+.phr-app .phr-lab-review-groups { display: grid; gap: 10px; }
+.phr-app .phr-lab-review-group { background: var(--phr-surface-soft); border: 1px solid var(--phr-border); border-radius: 13px; overflow: hidden; }
+.phr-app .phr-lab-review-group summary { align-items: center; color: var(--phr-text); cursor: pointer; display: flex; font-weight: 750; justify-content: space-between; min-height: 48px; padding: 12px 14px; }
+.phr-app .phr-lab-review-group summary span { color: var(--phr-muted); font-size: .78rem; font-weight: 600; }
+.phr-app .phr-lab-review-group .phr-lab-review-list { border-top: 1px solid var(--phr-border); padding: 10px; }
+.phr-app .phr-lab-review-card { background: var(--phr-surface); border-radius: 11px; box-shadow: none; }
+.phr-app .phr-loinc-badge { background: var(--phr-mint); border-radius: 999px; color: var(--phr-sage-dark); font-weight: 700; padding: 3px 8px; }
+.phr-app .phr-lab-document-status { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
+.phr-app .portal-document-form input[type="file"] { cursor: pointer; padding: 8px; }
+.phr-app .portal-document-form input[type="file"]::file-selector-button { background: var(--phr-mint); border: 0; border-radius: 8px; color: var(--phr-sage-dark); cursor: pointer; font-weight: 700; margin-right: 10px; min-height: 36px; padding: 8px 12px; }
+.phr-app .phr-check-row span { min-width: 0; }
+.phr-app .phr-check-row small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 @media (max-width: 1024px) {
   .phr-app-header { gap: 10px; }

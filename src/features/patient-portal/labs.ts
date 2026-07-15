@@ -1,9 +1,9 @@
-import { convertLabValue, labFlag, parseLabNumber, parseLabReference, type LabFlag } from "../reports/lab-observations.ts";
+import { convertLabValue, labFlag, parseLabNumber, parseLabReference, type LabFlag, type LoincMetadata } from "../reports/lab-observations.ts";
 
 export type PhrLabResult = {
   id: string; documentId: string; analyte: string; loincCode: string; valueNum: number | null; valueText: string;
   unit: string; refLow: number | null; refHigh: number | null; refText: string; flag: LabFlag; observedAt: string;
-  source: "ocr" | "ai"; reviewStatus: "suggested" | "confirmed";
+  source: "ocr" | "ai"; reviewStatus: "suggested" | "confirmed"; loincMetadata?: LoincMetadata;
 };
 
 export type PhrLabDraft = { analyte: string; value: string; unit: string; reference: string; observedAt: string };
@@ -29,6 +29,17 @@ export const phrLabDraftOf = (result: PhrLabResult): PhrLabDraft => ({
 });
 
 export const phrLabTrendKey = (result: Pick<PhrLabResult, "loincCode" | "analyte">) => result.loincCode.trim() || plain(result.analyte);
+
+export function reusedPhrLoinc(rows: Pick<PhrLabResult, "analyte" | "unit">[], prior: Pick<PhrLabResult, "analyte" | "unit" | "loincCode">[]) {
+  const priorByKey = new Map<string, Set<string>>();
+  for (const row of prior) {
+    const key = `${plain(row.analyte)}|${plain(row.unit)}`;
+    priorByKey.set(key, (priorByKey.get(key) ?? new Set()).add(row.loincCode));
+  }
+  const reused = new Map<number, string>();
+  rows.forEach((row, index) => { const codes = priorByKey.get(`${plain(row.analyte)}|${plain(row.unit)}`); if (codes?.size === 1) reused.set(index, [...codes][0]); });
+  return reused;
+}
 
 export function buildPhrLabTrend(results: PhrLabResult[]) {
   const numeric = results.filter((result) => result.reviewStatus === "confirmed" && result.valueNum !== null)
