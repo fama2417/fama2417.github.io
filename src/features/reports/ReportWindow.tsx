@@ -326,6 +326,17 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
   const profile = clinicalProfileForCategory(appointment.serviceCategory);
   const sections = profile.sections;
   const examLabel = `${appointment.serviceCategory === "imaging" && appointment.modality !== "OT" ? `${appointment.modality} · ` : ""}${appointment.reason}`;
+  if (appointment.serviceCategory === "laboratory") return <div className="report-workstation lab-workstation">
+    <header className="report-workstation-header">
+      <div className="report-header-context">
+        <div className="report-patient-line"><div><p className="eyebrow">Atención de laboratorio</p><h2>{appointment.patientName}</h2></div>{appointment.patientIdentifier && <span className="report-patient-id">{appointment.patientIdentifier}</span>}</div>
+        <strong className="report-study-name">{appointment.reason}</strong>
+        <dl className="report-meta"><div><dt>Fecha</dt><dd>{appointment.date} · {appointment.startTime}</dd></div><div><dt>Estado cita</dt><dd>{appointmentStatusLabels[appointment.status]}</dd></div></dl>
+      </div>
+    </header>
+    {error && <p className="notice" role="alert">{error}</p>}
+    <LabObservationsPanel appointmentId={appointmentId} disabled={role === "operator" || (role !== "admin" && !canSign)} appointmentCompleted={appointment.status === "completed"} />
+  </div>;
   if (role === "operator" || (role !== "admin" && !canSign)) return <div className="report-workstation read-only-report">
     <header className="report-workstation-header"><div><p className="eyebrow">{profile.title}</p><h2>{appointment.patientName}</h2><p className="report-meta"><span>{appointment.date}</span><span>{examLabel}</span></p></div>{report.status === "final" && <button className="text-button" type="button" onClick={() => window.print()}>Imprimir</button>}</header>
     {report.status !== "final" ? <p className="notice">El informe definitivo aún no está disponible.</p> : <article className="card legal-content">
@@ -468,8 +479,6 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
               <span className="empty-inline">CT/MR/PET-CT: captura el corte con la cámara 📷 de OHIF (conserva las anotaciones) y suéltalo aquí — sin pasar por el escritorio si copias al portapapeles.</span>
             </label>}
           </details>}
-
-          {appointment.serviceCategory === "laboratory" && <LabObservationsPanel reportId={report.id} appointmentId={appointmentId} patientId={appointment.patientId} defaultObservedAt={appointment.date} disabled={report.status === "final" || saving || (role !== "admin" && !canSign)} appointmentCompleted={appointment.status === "completed"} />}
 
           {supportsClinicalAi(appointment.serviceCategory) && <AiFindingsPanel reportId={report.id} reportStatus={report.status} reportCategory={appointment.serviceCategory} disabled={!["admin", "radiologist", "clinician"].includes(role) || (role === "clinician" && !canSign) || saving} ensureDraftSaved={ensureDraftSavedForAi} onOperationActiveChange={setAiOperationActive} />}
 
