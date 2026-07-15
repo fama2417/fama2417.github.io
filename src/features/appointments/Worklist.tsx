@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase-client";
+import { ensurePacsSession } from "@/lib/pacs-session";
 import { csvCell } from "@/lib/safe-text";
 import type { UnmatchedStudy } from "@/lib/orthanc";
 import { fetchPatients } from "@/features/patients/repository";
@@ -76,6 +77,8 @@ export function Worklist() {
   const set = (key: keyof Filters, value: string) => setFilters((current) => ({ ...current, [key]: value }));
 
   useEffect(() => { fetchAppointments().then(setAppointments).catch(() => setError("No fue posible cargar la worklist.")).finally(() => setLoading(false)); }, []);
+  // Deja lista la cookie PACS para que el enlace 🖼️ (handoff → visor) no caiga en el login de Orthanc.
+  useEffect(() => { ensurePacsSession().catch(() => undefined); }, []);
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data }) => {
       setUid(data.user?.id ?? "");

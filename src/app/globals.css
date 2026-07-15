@@ -882,3 +882,12 @@ body:has(.report-workstation) .app-shell-main { min-height: 0; overflow: hidden;
   .portal-report-open .text-button { display: none; }
   .portal-report-body h4 { color: #000 !important; }
 }
+
+/* Resultados de laboratorio discretos y tendencia en la ficha. */
+.lab-loinc { color: var(--muted); font-weight: 400; }
+.lab-flag { font-weight: 700; }
+.lab-flag-normal { color: var(--success); }
+.lab-flag-low, .lab-flag-high, .lab-flag-abnormal { color: var(--warning); }
+.lab-flag-critical_low, .lab-flag-critical_high { color: var(--danger); }
+.lab-trends { display: grid; gap: 10px; }
+.lab-history { color: var(--muted); display: flex; flex-wrap: wrap; font-size: 0.8rem; gap: 4px 12px; margin-top: 4px; }

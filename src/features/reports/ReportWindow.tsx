@@ -10,6 +10,7 @@ import { fetchAppointments, orderFileUrl } from "@/features/appointments/reposit
 import { appointmentStatusLabels } from "@/features/appointments/status";
 import { fetchMyTenant, renderHeader, type Tenant } from "@/features/tenant/repository";
 import { supabase } from "@/lib/supabase-client";
+import { ensurePacsSession } from "@/lib/pacs-session";
 import {
   addAddendum, addCommunication, addFollowUp, addKeyImage, canSignReport, captureUrl, deleteReport, fetchAddenda, fetchCommunications,
   fetchFollowUps, fetchKeyImages, fetchMyProfile, fetchReport, fetchSignatureUrl, isCaptureKeyImage, removeKeyImage,
@@ -17,11 +18,15 @@ import {
   type RadiologyReport, type ReportAddendum, type ReportCommunication, type ReportFollowUp, type ReportKeyImage,
 } from "./repository";
 import { AiFindingsPanel } from "./AiFindingsPanel";
+import { LabObservationsPanel } from "./LabObservationsPanel";
 import { ReportReleasePanel } from "./ReportReleasePanel";
 import { fetchTemplates, type ReportTemplate } from "./templates";
 import { criticalFindingState, criticalFindingTypeError, validateFinalReport } from "./validation";
 
 const fallbackOhifUrl = (process.env.NEXT_PUBLIC_OHIF_URL ?? "http://localhost:8042/ohif").replace(/\/$/, "");
+// El Orthanc directo solo es un fallback de dev local (sin proxy). En prod NUNCA se expone la VM cruda:
+// pega en el catch-all de Caddy sin cookie `pacs` y Orthanc muestra su login. El proxy /ohif borra www-authenticate.
+const directOhifIsLocal = /^https?:\/\/(localhost|127\.0\.0\.1)/i.test(fallbackOhifUrl);
 const localNow = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 const emptyReport = (appointmentId: string, appointment?: Appointment): RadiologyReport => ({
   reportCategory: appointment?.serviceCategory ?? "imaging",
@@ -93,10 +98,9 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
   }, [keyImages]);
 
   useEffect(() => {
-    supabase.auth.getSession()
-      .then(({ data }) => fetch("/api/pacs/session", { method: "POST", headers: { Authorization: `Bearer ${data.session?.access_token ?? ""}` } }))
-      .then((response) => setViewerBase(response.ok ? "/ohif" : fallbackOhifUrl))
-      .catch(() => setViewerBase(fallbackOhifUrl));
+    ensurePacsSession()
+      .then((ok) => setViewerBase(ok || !directOhifIsLocal ? "/ohif" : fallbackOhifUrl))
+      .catch(() => setViewerBase(directOhifIsLocal ? fallbackOhifUrl : "/ohif"));
   }, []);
 
   useEffect(() => {
@@ -464,6 +468,8 @@ export function ReportWindow({ appointmentId }: { appointmentId: string }) {
               <span className="empty-inline">CT/MR/PET-CT: captura el corte con la cámara 📷 de OHIF (conserva las anotaciones) y suéltalo aquí — sin pasar por el escritorio si copias al portapapeles.</span>
             </label>}
           </details>}
+
+          {appointment.serviceCategory === "laboratory" && <LabObservationsPanel reportId={report.id} appointmentId={appointmentId} patientId={appointment.patientId} defaultObservedAt={appointment.date} disabled={report.status === "final" || saving || (role !== "admin" && !canSign)} appointmentCompleted={appointment.status === "completed"} />}
 
           {supportsClinicalAi(appointment.serviceCategory) && <AiFindingsPanel reportId={report.id} reportStatus={report.status} reportCategory={appointment.serviceCategory} disabled={!["admin", "radiologist", "clinician"].includes(role) || (role === "clinician" && !canSign) || saving} ensureDraftSaved={ensureDraftSavedForAi} onOperationActiveChange={setAiOperationActive} />}
 

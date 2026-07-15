@@ -14,14 +14,15 @@ import { PatientCriticalCommunicationsSection } from "./PatientCriticalCommunica
 import { PatientKeyImagesSection } from "./PatientKeyImagesSection";
 import { PatientReportAddendaSection } from "./PatientReportAddendaSection";
 import { PatientStructuredFindingsSection } from "./PatientStructuredFindingsSection";
+import { PatientLabTrendsSection } from "./PatientLabTrendsSection";
 import { countOpenCommunications, countPendingFollowUps } from "./exam-summary";
 import { isReportAvailable } from "./exam-status";
 import { dedupeFindings, visibleFindings } from "./finding-display";
 import {
   fetchPatient, fetchPatientAudit, fetchPatientCriticalCommunications, fetchPatientExams, fetchPatientFollowUps,
-  fetchPatientKeyImages, fetchPatientReportAddenda, fetchPatientStructuredFindings,
+  fetchPatientKeyImages, fetchPatientLabObservations, fetchPatientReportAddenda, fetchPatientStructuredFindings,
   type PatientAuditEntry, type PatientCriticalCommunication, type PatientExam, type PatientFollowUp,
-  type PatientKeyImage, type PatientReportAddendum, type PatientStructuredFinding,
+  type PatientKeyImage, type PatientLabObservation, type PatientReportAddendum, type PatientStructuredFinding,
 } from "./repository";
 
 const actionLabels: Record<string, string> = { INSERT: "Creación", UPDATE: "Modificación", DELETE: "Eliminación" };
@@ -40,7 +41,7 @@ function describeChange(entry: PatientAuditEntry) {
   return changes.map(([key, value]) => `${fieldLabels[key]}: ${value === null || value === "" ? "—" : String(value)}`).join(" · ");
 }
 
-type TabId = "resumen" | "timeline" | "imagenologia" | "seguimientos" | "comunicaciones" | "informes" | "hallazgos" | "auditoria";
+type TabId = "resumen" | "timeline" | "imagenologia" | "seguimientos" | "comunicaciones" | "informes" | "hallazgos" | "laboratorio" | "auditoria";
 
 export function PatientHistory({ patientId }: { patientId: string }) {
   const [patient, setPatient] = useState<Patient | null>(null);
@@ -50,6 +51,7 @@ export function PatientHistory({ patientId }: { patientId: string }) {
   const [keyImages, setKeyImages] = useState<PatientKeyImage[]>([]);
   const [addenda, setAddenda] = useState<PatientReportAddendum[]>([]);
   const [findings, setFindings] = useState<PatientStructuredFinding[]>([]);
+  const [labs, setLabs] = useState<PatientLabObservation[]>([]);
   const [role, setRole] = useState("");
   const [audit, setAudit] = useState<PatientAuditEntry[]>([]);
   const [tab, setTab] = useState<TabId>("resumen");
@@ -59,11 +61,11 @@ export function PatientHistory({ patientId }: { patientId: string }) {
   useEffect(() => {
     Promise.all([
       fetchPatient(patientId), fetchPatientExams(patientId), fetchPatientFollowUps(patientId), fetchPatientCriticalCommunications(patientId),
-      fetchPatientKeyImages(patientId), fetchPatientReportAddenda(patientId), fetchPatientStructuredFindings(patientId), supabase.auth.getUser(),
+      fetchPatientKeyImages(patientId), fetchPatientReportAddenda(patientId), fetchPatientStructuredFindings(patientId), fetchPatientLabObservations(patientId), supabase.auth.getUser(),
     ])
-      .then(async ([nextPatient, nextExams, nextFollowUps, nextCommunications, nextKeyImages, nextAddenda, nextFindings, auth]) => {
+      .then(async ([nextPatient, nextExams, nextFollowUps, nextCommunications, nextKeyImages, nextAddenda, nextFindings, nextLabs, auth]) => {
         setPatient(nextPatient); setExams(nextExams); setFollowUps(nextFollowUps); setCommunications(nextCommunications);
-        setKeyImages(nextKeyImages); setAddenda(nextAddenda); setFindings(nextFindings);
+        setKeyImages(nextKeyImages); setAddenda(nextAddenda); setFindings(nextFindings); setLabs(nextLabs);
         const profile = await supabase.from("profiles").select("role").eq("id", auth.data.user?.id ?? "").single();
         const nextRole = profile.data?.role ?? "";
         setRole(nextRole);
@@ -81,6 +83,8 @@ export function PatientHistory({ patientId }: { patientId: string }) {
   const visibleKeyImages = keyImages.filter((image) => isReportAvailable(image.exam, canEditReports));
   // Hallazgos: filtro por rol + dedupe una sola vez; alimenta sección y conteo del Resumen.
   const displayFindings = dedupeFindings(visibleFindings(findings, canEditReports));
+  // Mismo filtro por rol que hallazgos/imágenes: resultados de informes no accesibles no se exponen.
+  const visibleLabs = labs.filter((observation) => isReportAvailable(observation.exam, canEditReports));
   const tabs: [TabId, string][] = [
     ["resumen", "Resumen"],
     ["timeline", "Timeline"],
@@ -89,6 +93,7 @@ export function PatientHistory({ patientId }: { patientId: string }) {
     ["comunicaciones", openCommunications ? `Comunicaciones críticas (${openCommunications})` : "Comunicaciones críticas"],
     ["informes", "Informes"],
     ["hallazgos", "Hallazgos"],
+    ...(visibleLabs.length ? [["laboratorio", "Laboratorio"] as [TabId, string]] : []),
     ...(role === "admin" ? [["auditoria", "Auditoría"] as [TabId, string]] : []),
   ];
 
@@ -152,6 +157,7 @@ export function PatientHistory({ patientId }: { patientId: string }) {
       </section>
     </>}
     {tab === "hallazgos" && <PatientStructuredFindingsSection findings={displayFindings} totalCount={findings.length} canEditReports={canEditReports} />}
+    {tab === "laboratorio" && <section className="card" aria-label="Tendencia de laboratorio"><h3>Tendencia de laboratorio</h3><PatientLabTrendsSection observations={visibleLabs} /></section>}
     {tab === "auditoria" && role === "admin" && (
       <section className="card audit-list" aria-label="Trazabilidad del paciente">
         <h3>Trazabilidad</h3>
