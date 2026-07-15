@@ -2,15 +2,44 @@ import { authenticatedFetch, supabase } from "@/lib/supabase-client";
 import { validatePatientDocument } from "./documents";
 import type { PhrLabDraft, PhrLabResult } from "./labs";
 
-export type PhrProfile = { userId: string; fullName: string; birthDate: string; identifier: string; createdAt: string };
+export type PhrProfile = {
+  userId: string; fullName: string; birthDate: string; identifier: string; createdAt: string;
+  bloodType: string; allergies: string; conditions: string; medications: string;
+  emergencyContactName: string; emergencyContactPhone: string; emergencyNotes: string;
+};
+
+type PhrProfileRow = {
+  user_id: string; full_name: string; birth_date: string; identifier: string; created_at: string;
+  blood_type: string; allergies: string; conditions: string; medications: string;
+  emergency_contact_name: string; emergency_contact_phone: string; emergency_notes: string;
+};
+
+const profileColumns = "user_id, full_name, birth_date, identifier, created_at, blood_type, allergies, conditions, medications, emergency_contact_name, emergency_contact_phone, emergency_notes";
+const mapPhrProfile = (data: PhrProfileRow): PhrProfile => ({
+  userId: data.user_id, fullName: data.full_name, birthDate: data.birth_date, identifier: data.identifier, createdAt: data.created_at,
+  bloodType: data.blood_type, allergies: data.allergies, conditions: data.conditions, medications: data.medications,
+  emergencyContactName: data.emergency_contact_name, emergencyContactPhone: data.emergency_contact_phone, emergencyNotes: data.emergency_notes,
+});
 
 export async function fetchPhrProfile(): Promise<PhrProfile | null> {
-  const { data, error } = await supabase.from("phr_profiles").select("user_id, full_name, birth_date, identifier, created_at").maybeSingle();
+  const userId = (await supabase.auth.getUser()).data.user?.id;
+  if (!userId) return null;
+  const { data, error } = await supabase.from("phr_profiles").select(profileColumns).eq("user_id", userId).maybeSingle();
   if (error) throw error;
-  return data ? { userId: data.user_id, fullName: data.full_name, birthDate: data.birth_date, identifier: data.identifier, createdAt: data.created_at } : null;
+  return data ? mapPhrProfile(data as PhrProfileRow) : null;
 }
 
-export async function savePhrProfile(input: { fullName: string; birthDate: string; identifier: string; acceptedPrivacy?: boolean }, exists = false) {
+export async function fetchAccessiblePhrProfiles(): Promise<PhrProfile[]> {
+  const { data, error } = await supabase.from("phr_profiles").select(profileColumns).order("full_name");
+  if (error) throw error;
+  return ((data ?? []) as PhrProfileRow[]).map(mapPhrProfile);
+}
+
+export async function savePhrProfile(input: {
+  fullName: string; birthDate: string; identifier: string; acceptedPrivacy?: boolean;
+  bloodType?: string; allergies?: string; conditions?: string; medications?: string;
+  emergencyContactName?: string; emergencyContactPhone?: string; emergencyNotes?: string;
+}, exists = false) {
   await authenticatedFetch("/api/portal/account", {
     method: exists ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input),
   });
@@ -123,11 +152,13 @@ export type PortalDocument = {
   sharedPatientIds: string[]; reviewByPatientId: Record<string, "accepted" | "rejected">;
 };
 
-export async function fetchPatientDocuments(): Promise<PortalDocument[]> {
+export async function fetchPatientDocuments(ownerUserId?: string): Promise<PortalDocument[]> {
+  let documentQuery = supabase.from("patient_documents")
+    .select("id, original_filename, storage_path, mime_type, size_bytes, document_date, document_type, source_institution, created_at")
+    .order("document_date", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false });
+  if (ownerUserId) documentQuery = documentQuery.eq("owner_user_id", ownerUserId);
   const [documents, shares, reviews] = await Promise.all([
-    supabase.from("patient_documents")
-      .select("id, original_filename, storage_path, mime_type, size_bytes, document_date, document_type, source_institution, created_at")
-      .order("document_date", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false }),
+    documentQuery,
     supabase.from("patient_document_shares").select("document_id, patient_id").is("revoked_at", null),
     supabase.from("patient_document_reviews").select("document_id, patient_id, status, created_at").order("created_at", { ascending: false }),
   ]);
@@ -177,10 +208,12 @@ type PhrLabRow = {
   observed_at: string; source: PhrLabResult["source"]; review_status: PhrLabResult["reviewStatus"];
 };
 
-export async function fetchPhrLabResults(): Promise<PhrLabResult[]> {
-  const { data, error } = await supabase.from("phr_lab_results")
+export async function fetchPhrLabResults(ownerUserId?: string): Promise<PhrLabResult[]> {
+  let query = supabase.from("phr_lab_results")
     .select("id, document_id, loinc_code, analyte, value_num, value_text, unit, ref_low, ref_high, ref_text, flag, observed_at, source, review_status")
     .order("observed_at", { ascending: false }).order("analyte");
+  if (ownerUserId) query = query.eq("owner_user_id", ownerUserId);
+  const { data, error } = await query;
   if (error) throw error;
   return ((data ?? []) as PhrLabRow[]).map((row) => ({
     id: row.id, documentId: row.document_id, loincCode: row.loinc_code, analyte: row.analyte,
@@ -226,4 +259,54 @@ export async function downloadFhirBundle() {
   const response = await authenticatedFetch("/api/portal/fhir");
   const url = URL.createObjectURL(await response.blob());
   const link = document.createElement("a"); link.href = url; link.download = "mi-registro-fhir.json"; link.click(); URL.revokeObjectURL(url);
+}
+
+export type PhrFavorite = { trendKey: string; label: string };
+
+export async function fetchPhrFavorites(ownerUserId: string): Promise<PhrFavorite[]> {
+  const { data, error } = await supabase.from("phr_biomarker_favorites").select("trend_key, label").eq("owner_user_id", ownerUserId).order("label");
+  if (error) throw error;
+  return (data ?? []).map((row) => ({ trendKey: row.trend_key, label: row.label }));
+}
+
+export async function setPhrFavorite(trendKey: string, label: string, favorite: boolean) {
+  await authenticatedFetch("/api/portal/favorites", { method: favorite ? "POST" : "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ trendKey, label }) });
+}
+
+export async function downloadPhrFile(path: "/api/portal/trends" | "/api/portal/summary", filename: string, format?: "csv" | "pdf") {
+  const response = await authenticatedFetch(`${path}${format ? `?format=${format}` : ""}`);
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a"); link.href = url; link.download = filename; link.click(); URL.revokeObjectURL(url);
+}
+
+export type PhrShare = { id: string; title: string; expiresAt: string; revokedAt: string | null; createdAt: string; accessCount: number; lastAccessedAt: string | null };
+
+export async function fetchPhrShares(): Promise<PhrShare[]> {
+  const response = await authenticatedFetch("/api/portal/shares");
+  return (await response.json() as { shares: PhrShare[] }).shares;
+}
+
+export async function createPhrShare(input: { title: string; expiresInDays: number; documentIds: string[]; trendKeys: string[]; includeEmergency: boolean }) {
+  const response = await authenticatedFetch("/api/portal/shares", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) });
+  return await response.json() as { url: string };
+}
+
+export async function revokePhrShare(shareId: string) {
+  await authenticatedFetch(`/api/portal/shares?shareId=${encodeURIComponent(shareId)}`, { method: "DELETE" });
+}
+
+export type PhrCaregiver = { id: string; email: string; relationship: "family" | "caregiver"; createdAt: string; revokedAt: string | null };
+
+export async function fetchPhrCaregivers(): Promise<PhrCaregiver[]> {
+  const response = await authenticatedFetch("/api/portal/caregivers");
+  return (await response.json() as { caregivers: PhrCaregiver[] }).caregivers;
+}
+
+export async function addPhrCaregiver(email: string, relationship: PhrCaregiver["relationship"]) {
+  const response = await authenticatedFetch("/api/portal/caregivers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, relationship }) });
+  return await response.json() as { invited: boolean };
+}
+
+export async function revokePhrCaregiver(grantId: string) {
+  await authenticatedFetch(`/api/portal/caregivers?grantId=${encodeURIComponent(grantId)}`, { method: "DELETE" });
 }

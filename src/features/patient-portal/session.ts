@@ -5,8 +5,8 @@
  */
 export type SessionKind = "staff" | "patient" | "onboarding" | "unknown";
 
-export function resolveSessionKind({ hasProfile, hasPatient, hasPhrProfile = false }: { hasProfile: boolean; hasPatient: boolean; hasPhrProfile?: boolean }): SessionKind {
+export function resolveSessionKind({ hasProfile, hasPatient, hasPhrProfile = false, hasCaregiverAccess = false }: { hasProfile: boolean; hasPatient: boolean; hasPhrProfile?: boolean; hasCaregiverAccess?: boolean }): SessionKind {
   if (hasProfile) return "staff";
-  if (hasPhrProfile || hasPatient) return "patient";
+  if (hasPhrProfile || hasPatient || hasCaregiverAccess) return "patient";
   return "onboarding";
 }

@@ -48,6 +48,11 @@ insert into public.phr_lab_results
 values
   ('e1000000-0000-0000-0000-000000000001', 'a1000000-0000-0000-0000-000000000002', 'c1000000-0000-0000-0000-000000000001', 'd1000000-0000-0000-0000-000000000001', 'Glucosa', 95, 'mg/dL', 70, 99, 'normal', '2026-07-01', 'ocr');
 
+insert into public.phr_biomarker_favorites (owner_user_id, trend_key, label)
+values ('a1000000-0000-0000-0000-000000000002', 'glucosa', 'Glucosa');
+insert into public.phr_share_links (id, owner_user_id, token_hash, expires_at)
+values ('f2000000-0000-0000-0000-000000000001', 'a1000000-0000-0000-0000-000000000002', repeat('a', 64), now() + interval '1 day');
+
 insert into public.patient_document_shares (document_id, patient_id, granted_by) values
   ('c1000000-0000-0000-0000-000000000001', 'b1000000-0000-0000-0000-000000000001', 'a1000000-0000-0000-0000-000000000002');
 insert into public.patient_document_requests (patient_id, requested_by, message) values
@@ -66,6 +71,10 @@ do $$ declare n int; begin
   if n <> 1 then raise exception 'FALLA: el propietario no ve su documento'; end if;
   select count(*) into n from public.phr_lab_results;
   if n <> 1 then raise exception 'FALLA: el propietario no ve su resultado PHR'; end if;
+  select count(*) into n from public.phr_biomarker_favorites;
+  if n <> 1 then raise exception 'FALLA: el propietario no ve su favorito'; end if;
+  select count(*) into n from public.phr_share_links;
+  if n <> 1 then raise exception 'FALLA: el propietario no ve su enlace'; end if;
   select count(*) into n from public.patient_document_shares;
   if n <> 1 then raise exception 'FALLA: el propietario no ve la autorización'; end if;
   select count(*) into n from public.patient_document_requests;
@@ -80,6 +89,36 @@ do $$ declare n int; begin
   if n <> 0 then raise exception 'FALLA: otra cuenta ve documentos personales'; end if;
   select count(*) into n from public.phr_lab_results;
   if n <> 0 then raise exception 'FALLA: otra cuenta ve resultados PHR'; end if;
+end $$;
+
+reset role;
+insert into public.phr_caregiver_grants (owner_user_id, grantee_user_id, relationship)
+values ('a1000000-0000-0000-0000-000000000002', 'a1000000-0000-0000-0000-000000000003', 'caregiver');
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"a1000000-0000-0000-0000-000000000003","role":"authenticated"}', true);
+do $$ declare n int; begin
+  select count(*) into n from public.phr_profiles;
+  if n <> 2 then raise exception 'FALLA: cuidador no ve ambos perfiles autorizados'; end if;
+  select count(*) into n from public.patient_documents;
+  if n <> 1 then raise exception 'FALLA: cuidador no ve el documento autorizado'; end if;
+  select count(*) into n from public.phr_lab_results;
+  if n <> 1 then raise exception 'FALLA: cuidador no ve resultados autorizados'; end if;
+  select count(*) into n from public.phr_biomarker_favorites;
+  if n <> 1 then raise exception 'FALLA: cuidador no ve favoritos autorizados'; end if;
+  select count(*) into n from public.phr_share_links;
+  if n <> 0 then raise exception 'FALLA: cuidador ve configuración de enlaces privados'; end if;
+end $$;
+
+reset role;
+update public.phr_caregiver_grants set revoked_at = now()
+where owner_user_id = 'a1000000-0000-0000-0000-000000000002' and grantee_user_id = 'a1000000-0000-0000-0000-000000000003';
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"a1000000-0000-0000-0000-000000000003","role":"authenticated"}', true);
+do $$ declare n int; begin
+  select count(*) into n from public.patient_documents;
+  if n <> 0 then raise exception 'FALLA: cuidador conserva documentos tras revocación'; end if;
+  select count(*) into n from public.phr_lab_results;
+  if n <> 0 then raise exception 'FALLA: cuidador conserva resultados tras revocación'; end if;
 end $$;
 
 select set_config('request.jwt.claims', '{"sub":"a1000000-0000-0000-0000-000000000001","role":"authenticated"}', true);

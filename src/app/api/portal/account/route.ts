@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { validatePhrProfile } from "@/features/patient-portal/profile";
+import { validatePhrEmergency, validatePhrProfile } from "@/features/patient-portal/profile";
 import { requireNonStaffApi, requirePhrApi } from "@/lib/server-auth";
 
-type Body = { fullName?: string; birthDate?: string; identifier?: string; acceptedPrivacy?: boolean; confirmation?: string };
+type Body = {
+  fullName?: string; birthDate?: string; identifier?: string; acceptedPrivacy?: boolean; confirmation?: string;
+  bloodType?: string; allergies?: string; conditions?: string; medications?: string;
+  emergencyContactName?: string; emergencyContactPhone?: string; emergencyNotes?: string;
+};
 
 export async function POST(request: NextRequest) {
   const auth = await requireNonStaffApi(request);
@@ -27,8 +31,19 @@ export async function PATCH(request: NextRequest) {
   const body = await request.json().catch(() => ({})) as Body;
   const validated = validatePhrProfile({ fullName: body.fullName ?? "", birthDate: body.birthDate ?? "", identifier: body.identifier ?? "" });
   if ("error" in validated) return NextResponse.json({ error: validated.error }, { status: 400 });
+  const emergency = validatePhrEmergency({
+    bloodType: body.bloodType ?? auth.profile.blood_type, allergies: body.allergies ?? auth.profile.allergies,
+    conditions: body.conditions ?? auth.profile.conditions, medications: body.medications ?? auth.profile.medications,
+    emergencyContactName: body.emergencyContactName ?? auth.profile.emergency_contact_name,
+    emergencyContactPhone: body.emergencyContactPhone ?? auth.profile.emergency_contact_phone,
+    emergencyNotes: body.emergencyNotes ?? auth.profile.emergency_notes,
+  });
+  if ("error" in emergency) return NextResponse.json({ error: emergency.error }, { status: 400 });
   const updated = await auth.db.from("phr_profiles").update({
     full_name: validated.value.fullName, birth_date: validated.value.birthDate, identifier: validated.value.identifier,
+    blood_type: emergency.value.bloodType, allergies: emergency.value.allergies, conditions: emergency.value.conditions,
+    medications: emergency.value.medications, emergency_contact_name: emergency.value.emergencyContactName,
+    emergency_contact_phone: emergency.value.emergencyContactPhone, emergency_notes: emergency.value.emergencyNotes,
   }).eq("user_id", auth.user.id);
   return updated.error ? NextResponse.json({ error: "No fue posible actualizar tu perfil." }, { status: 500 }) : NextResponse.json({ ok: true });
 }

@@ -30,7 +30,7 @@ export async function requireNonStaffApi(request: NextRequest) {
 export async function requirePhrApi(request: NextRequest) {
   const auth = await requireNonStaffApi(request);
   if (auth instanceof NextResponse) return auth;
-  const profile = await auth.db.from("phr_profiles").select("user_id, full_name, birth_date, identifier").eq("user_id", auth.user.id).maybeSingle();
+  const profile = await auth.db.from("phr_profiles").select("user_id, full_name, birth_date, identifier, blood_type, allergies, conditions, medications, emergency_contact_name, emergency_contact_phone, emergency_notes").eq("user_id", auth.user.id).maybeSingle();
   return profile.data ? { ...auth, profile: profile.data } : NextResponse.json({ error: "Completa primero tu registro personal." }, { status: 403 });
 }
 

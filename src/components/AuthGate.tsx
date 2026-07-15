@@ -37,11 +37,12 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     if (!session?.user.id) { setProfile(null); setKind("loading"); return; }
     supabase.from("profiles").select("full_name, role, platform, tenant_id, active_tenant_id, tenant:tenants!profiles_tenant_id_fkey(name), activeTenant:tenants!profiles_active_tenant_id_fkey(name)").eq("id", session.user.id).maybeSingle().then(async ({ data }) => {
       if (!data) {
-        const [patient, phrProfile] = await Promise.all([
+        const [patient, phrProfile, caregiver] = await Promise.all([
           supabase.from("patients").select("id").limit(1).maybeSingle(),
-          supabase.from("phr_profiles").select("user_id").maybeSingle(),
+          supabase.from("phr_profiles").select("user_id").eq("user_id", session.user.id).maybeSingle(),
+          supabase.from("phr_caregiver_grants").select("id").eq("grantee_user_id", session.user.id).is("revoked_at", null).limit(1).maybeSingle(),
         ]);
-        setKind(resolveSessionKind({ hasProfile: false, hasPatient: !!patient.data, hasPhrProfile: !!phrProfile.data }));
+        setKind(resolveSessionKind({ hasProfile: false, hasPatient: !!patient.data, hasPhrProfile: !!phrProfile.data, hasCaregiverAccess: !!caregiver.data }));
         return;
       }
       setKind("staff");
@@ -64,7 +65,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
   // El paciente solo navega el portal; cualquier otra ruta lo devuelve a /portal.
   useEffect(() => {
-    if ((kind === "patient" || kind === "onboarding") && !pathname.startsWith("/portal")) router.replace("/portal");
+    if ((kind === "patient" || kind === "onboarding") && !pathname.startsWith("/portal") && !pathname.startsWith("/compartir/")) router.replace("/portal");
     if (kind === "staff" && pathname === "/portal") router.replace("/");
   }, [kind, pathname, router]);
 
@@ -134,6 +135,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   }
 
   if (!isSupabaseConfigured) return <main className="login-page"><section className="login-card"><h1>Falta configurar Supabase</h1><p>Agrega la URL y la clave publicable al entorno.</p></section></main>;
+  if (pathname.startsWith("/compartir/")) return <>{children}</>;
   if (session === undefined) return <main className="login-page"><p>Cargando sesión…</p></main>;
   if (recovering) return (
     <main className="login-page"><form className="login-card" onSubmit={updatePassword}>
@@ -144,7 +146,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       {error && <p className="form-error" role="alert">{error}</p>}
     </form></main>
   );
-  if (!session && pathname === "/portal/privacidad") return <>{children}</>;
+  if (!session && (pathname === "/portal/privacidad" || pathname.startsWith("/compartir/"))) return <>{children}</>;
   if (!session && pathname === "/portal") return (
     <main className="login-page phr-login-page">
       <section className="phr-login-copy">

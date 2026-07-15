@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { labCategory, labCategoryLabels, labCategoryOrder, labFlagLabels } from "@/features/reports/lab-observations.ts";
+import { labCategory, labCategoryLabels, labCategoryOrder, labFlagLabels, type LabCategory } from "@/features/reports/lab-observations.ts";
 import { buildPhrLabTrend, phrLabDraftOf, phrLabTrendKey, type PhrLabDraft, type PhrLabResult } from "./labs";
-import { analyzePhrLabDocument, discardPhrLabResult, fetchPhrLabResults, savePhrLabResult, type PortalDocument } from "./repository";
+import { measurementExplanation, reportedRangeLabel } from "./longitudinal";
+import { analyzePhrLabDocument, discardPhrLabResult, downloadPhrFile, fetchPhrFavorites, fetchPhrLabResults, savePhrLabResult, setPhrFavorite, type PortalDocument, type PhrFavorite } from "./repository";
 
 const resultValue = (result: PhrLabResult) => `${result.valueNum ?? result.valueText}${result.unit ? ` ${result.unit}` : ""}`;
 const reference = (result: PhrLabResult) => result.refLow !== null || result.refHigh !== null ? `${result.refLow ?? "…"}–${result.refHigh ?? "…"}` : result.refText;
@@ -47,12 +48,13 @@ function TrendChart({ result, all }: { result: PhrLabResult; all: PhrLabResult[]
   </article>;
 }
 
-export function PhrLaboratories({ documents, onUpload }: { documents: PortalDocument[]; onUpload: () => void }) {
+export function PhrLaboratories({ documents, ownerUserId, readOnly, onUpload }: { documents: PortalDocument[]; ownerUserId: string; readOnly: boolean; onUpload: () => void }) {
   const [results, setResults] = useState<PhrLabResult[]>([]), [loading, setLoading] = useState(true), [busyId, setBusyId] = useState("");
+  const [favorites, setFavorites] = useState<PhrFavorite[]>([]), [filter, setFilter] = useState<LabCategory | "all">("all");
   const [error, setError] = useState(""), [notice, setNotice] = useState("");
   const labs = documents.filter((document) => document.documentType === "laboratory");
-  async function reload() { setResults(await fetchPhrLabResults()); setLoading(false); }
-  useEffect(() => { reload().catch(() => { setError("No fue posible cargar los resultados."); setLoading(false); }); }, [documents.map((document) => document.id).join("|")]);
+  async function reload() { const [nextResults, nextFavorites] = await Promise.all([fetchPhrLabResults(ownerUserId), fetchPhrFavorites(ownerUserId)]); setResults(nextResults); setFavorites(nextFavorites); setLoading(false); }
+  useEffect(() => { reload().catch(() => { setError("No fue posible cargar los resultados."); setLoading(false); }); }, [ownerUserId, documents.map((document) => document.id).join("|")]);
 
   async function analyze(document: PortalDocument) {
     setBusyId(document.id); setError(""); setNotice("");
@@ -63,11 +65,16 @@ export function PhrLaboratories({ documents, onUpload }: { documents: PortalDocu
     finally { setBusyId(""); }
   }
   async function changed(message: string) { setBusyId("refresh"); await reload(); setBusyId(""); setNotice(message); setError(""); }
+  async function toggleFavorite(result: PhrLabResult) {
+    const trendKey = phrLabTrendKey(result), favorite = !favorites.some((item) => item.trendKey === trendKey);
+    try { await setPhrFavorite(trendKey, result.analyte, favorite); await reload(); setNotice(favorite ? "Biomarcador agregado a favoritos." : "Biomarcador quitado de favoritos."); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "No fue posible actualizar el favorito."); }
+  }
 
   const suggested = results.filter((result) => result.reviewStatus === "suggested");
   const confirmed = results.filter((result) => result.reviewStatus === "confirmed");
   const analyzedDocuments = new Set(results.map((result) => result.documentId));
-  const categories = labCategoryOrder.map((key) => ({ key, items: confirmed.filter((result) => labCategory({ analyte: result.analyte }) === key) })).filter((group) => group.items.length);
+  const categories = labCategoryOrder.map((key) => ({ key, items: confirmed.filter((result) => labCategory({ analyte: result.analyte }) === key && (filter === "all" || filter === key)) })).filter((group) => group.items.length);
   const trends = useMemo(() => {
     const seen = new Set<string>();
     return confirmed.filter((result) => { const key = phrLabTrendKey(result); if (seen.has(key)) return false; seen.add(key); return !!buildPhrLabTrend(confirmed.filter((item) => phrLabTrendKey(item) === key)); });
@@ -75,13 +82,16 @@ export function PhrLaboratories({ documents, onUpload }: { documents: PortalDocu
 
   return <div className="phr-labs-stack">
     {error && <p className="notice danger-text" role="alert">{error}</p>}{notice && <p className="form-notice" role="status">{notice}</p>}
-    <section className="card portal-card"><div className="card-heading"><div><p className="eyebrow">Extracción segura</p><h2>Mis laboratorios</h2><p>Analiza una copia de trabajo. El PDF original no cambia y ningún resultado cuenta hasta que lo confirmes.</p></div><button className="button primary" type="button" onClick={onUpload}>Subir laboratorio</button></div>
-      {!labs.length ? <p className="empty-state">Todavía no tienes laboratorios.</p> : <ul className="portal-list">{labs.map((document) => <li key={document.id}><div className="portal-document-detail"><strong>{document.filename}</strong><span>{document.sourceInstitution} · {shownDate(document.documentDate ?? document.createdAt)}</span></div><div className="portal-document-actions"><a className="button secondary" href={document.url} target="_blank" rel="noreferrer">Abrir PDF</a>{document.mimeType !== "application/pdf" ? <span>OCR disponible para PDF</span> : analyzedDocuments.has(document.id) ? <span className="status-badge">Analizado</span> : <button className="button primary" disabled={!!busyId} type="button" onClick={() => void analyze(document)}>{busyId === document.id ? "Analizando…" : "Analizar resultados"}</button>}</div></li>)}</ul>}
+    <section className="card portal-card"><div className="card-heading"><div><p className="eyebrow">Extracción segura</p><h2>Mis laboratorios</h2><p>El PDF original no cambia y ningún resultado cuenta hasta que la persona lo confirma.</p></div>{!readOnly && <button className="button primary" type="button" onClick={onUpload}>Subir laboratorio</button>}</div>
+      {!labs.length ? <p className="empty-state">Todavía no tienes laboratorios.</p> : <ul className="portal-list">{labs.map((document) => <li key={document.id}><div className="portal-document-detail"><strong>{document.filename}</strong><span>{document.sourceInstitution} · {shownDate(document.documentDate ?? document.createdAt)}</span></div><div className="portal-document-actions"><a className="button secondary" href={document.url} target="_blank" rel="noreferrer">Abrir PDF</a>{document.mimeType !== "application/pdf" ? <span>OCR disponible para PDF</span> : analyzedDocuments.has(document.id) ? <span className="status-badge">Analizado</span> : !readOnly && <button className="button primary" disabled={!!busyId} type="button" onClick={() => void analyze(document)}>{busyId === document.id ? "Analizando…" : "Analizar resultados"}</button>}</div></li>)}</ul>}
     </section>
 
-    {suggested.length > 0 && <section className="card portal-card"><p className="eyebrow">Revisión obligatoria</p><h2>{suggested.length} resultado(s) sugerido(s)</h2><p>Corrige, confirma o descarta cada fila. Esto no reemplaza la interpretación de un profesional.</p><div className="phr-lab-review-list">{suggested.map((result) => <SuggestedResult key={result.id} result={result} busy={!!busyId} onDone={changed} onError={setError} />)}</div></section>}
+    {!readOnly && suggested.length > 0 && <section className="card portal-card"><p className="eyebrow">Revisión obligatoria</p><h2>{suggested.length} resultado(s) sugerido(s)</h2><p>Corrige, confirma o descarta cada fila. Esto no reemplaza la interpretación de un profesional.</p><div className="phr-lab-review-list">{suggested.map((result) => <SuggestedResult key={result.id} result={result} busy={!!busyId} onDone={changed} onError={setError} />)}</div></section>}
 
-    {confirmed.length > 0 && <section className="card portal-card"><p className="eyebrow">Resultados confirmados</p><h2>Historial de laboratorio</h2>{categories.map((group) => <div className="phr-lab-category" key={group.key}><h3>{labCategoryLabels[group.key]}</h3><ul>{group.items.map((result) => <li key={result.id}><div><strong>{result.analyte}</strong><span>{shownDate(result.observedAt)}</span></div><div><strong>{resultValue(result)}</strong><span>{reference(result)} · {labFlagLabels[result.flag]}</span></div></li>)}</ul></div>)}</section>}
+    {confirmed.length > 0 && <section className="card portal-card"><div className="card-heading"><div><p className="eyebrow">Resultados confirmados</p><h2>Historial de laboratorio</h2></div>{!readOnly && <div className="phr-actions"><button className="button secondary" type="button" onClick={() => void downloadPhrFile("/api/portal/trends", "tendencias-laboratorio.csv", "csv")}>Descargar CSV</button><button className="button secondary" type="button" onClick={() => void downloadPhrFile("/api/portal/trends", "tendencias-laboratorio.pdf", "pdf")}>Descargar PDF</button></div>}</div>
+      <div className="phr-filter-row"><button className={`filter-chip${filter === "all" ? " active" : ""}`} type="button" onClick={() => setFilter("all")}>Todos</button>{(["hematology", "lipids", "metabolic", "renal", "hepatic", "hormones"] as LabCategory[]).map((key) => <button className={`filter-chip${filter === key ? " active" : ""}`} key={key} type="button" onClick={() => setFilter(key)}>{labCategoryLabels[key]}</button>)}</div>
+      {categories.length ? categories.map((group) => <div className="phr-lab-category" key={group.key}><h3>{labCategoryLabels[group.key]}</h3><p className="phr-measurement-help">{group.items[0] && measurementExplanation(group.items[0])} No interpreta lo que el resultado significa para una persona.</p><ul>{group.items.map((result) => { const favorite = favorites.some((item) => item.trendKey === phrLabTrendKey(result)); return <li key={result.id}><div><span className="phr-result-title"><strong>{result.analyte}</strong>{!readOnly && <button className="favorite-button" type="button" aria-label={favorite ? `Quitar ${result.analyte} de favoritos` : `Agregar ${result.analyte} a favoritos`} aria-pressed={favorite} onClick={() => void toggleFavorite(result)}>{favorite ? "★" : "☆"}</button>}</span><span>{shownDate(result.observedAt)}</span></div><div><strong>{resultValue(result)}</strong><span>{reference(result)} · {reportedRangeLabel(result)}</span></div></li>; })}</ul></div>) : <p className="empty-state">No hay resultados en este perfil.</p>}
+    </section>}
 
     {confirmed.length > 0 && <section className="card portal-card"><p className="eyebrow">Evolución</p><h2>Tendencias</h2>{trends.length ? <div className="phr-trends-grid">{trends.map((result) => <TrendChart key={phrLabTrendKey(result)} result={result} all={confirmed} />)}</div> : <p className="empty-state">Las tendencias aparecerán al confirmar dos mediciones comparables del mismo analito.</p>}</section>}
     {loading && <p className="empty-state">Cargando resultados…</p>}

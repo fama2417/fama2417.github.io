@@ -13,7 +13,8 @@ begin
                       'report_addenda', 'report_key_images', 'report_communications',
                       'audit_log', 'profiles', 'extracted_findings', 'finding_dictionary', 'report_follow_ups',
                       'phr_profiles', 'patient_documents', 'patient_document_shares', 'patient_document_requests', 'patient_document_reviews',
-                      'phr_lab_imports', 'phr_lab_results'] loop
+                      'phr_lab_imports', 'phr_lab_results', 'phr_biomarker_favorites', 'phr_caregiver_grants',
+                      'phr_share_links', 'phr_share_documents', 'phr_share_results', 'phr_share_access_log'] loop
     if not has_table_privilege('authenticated', 'public.' || t, 'select') then
       problems := problems || format('- authenticated sin SELECT en public.%s%s', t, chr(10));
     end if;
@@ -31,7 +32,8 @@ begin
   foreach t in array array['patients', 'appointments', 'imaging_studies', 'radiology_reports',
                       'report_addenda', 'report_key_images', 'report_communications',
                       'audit_log', 'profiles', 'extracted_findings', 'tenants', 'patient_documents', 'patient_document_shares',
-                      'phr_profiles', 'patient_document_requests', 'patient_document_reviews', 'phr_lab_imports', 'phr_lab_results'] loop
+                      'phr_profiles', 'patient_document_requests', 'patient_document_reviews', 'phr_lab_imports', 'phr_lab_results',
+                      'phr_biomarker_favorites', 'phr_caregiver_grants', 'phr_share_links', 'phr_share_documents', 'phr_share_results', 'phr_share_access_log'] loop
     if not (select c.relrowsecurity from pg_class c where c.oid = ('public.' || t)::regclass) then
       problems := problems || format('- RLS deshabilitado en public.%s%s', t, chr(10));
     end if;
@@ -40,7 +42,8 @@ begin
   -- 3. Execute sobre helpers/RPCs nuevos: authenticated sí, anon no.
   foreach t in array array['public.release_report_to_patient(uuid)', 'public.revoke_report_release(uuid)',
                       'private.current_patient_owns(uuid)', 'private.appointment_released_to_current_patient(uuid)',
-                      'private.current_tenant_can_read_patient_document(text)', 'private.current_tenant_can_read_clinical_document(text)'] loop
+                      'private.current_tenant_can_read_patient_document(text)', 'private.current_tenant_can_read_clinical_document(text)',
+                      'private.can_read_phr_owner(uuid)'] loop
     if not has_function_privilege('authenticated', t, 'execute') then
       problems := problems || format('- authenticated sin EXECUTE en %s%s', t, chr(10));
     end if;
@@ -48,6 +51,11 @@ begin
       problems := problems || format('- anon con EXECUTE en %s (debe revocarse)%s', t, chr(10));
     end if;
   end loop;
+  if has_function_privilege('authenticated', 'public.log_phr_share_access(uuid,text,text)', 'execute')
+     or has_function_privilege('anon', 'public.log_phr_share_access(uuid,text,text)', 'execute')
+     or not has_function_privilege('service_role', 'public.log_phr_share_access(uuid,text,text)', 'execute') then
+    problems := problems || '- log_phr_share_access debe ser ejecutable solo por service_role' || chr(10);
+  end if;
 
   -- 4. Políticas esperadas activas.
   for pol in
@@ -61,10 +69,16 @@ begin
       ('report_addenda', 'patients read released addenda'),
       ('report_key_images', 'patients read released key images'),
       ('tenants', 'patients read own tenant'),
-      ('phr_profiles', 'owners read own PHR profile'),
-      ('phr_lab_imports', 'owners read own PHR lab imports'),
-      ('phr_lab_results', 'owners read own PHR lab results'),
-      ('patient_documents', 'owners read personal documents'),
+      ('phr_profiles', 'owners and caregivers read PHR profile'),
+      ('phr_lab_imports', 'owners and caregivers read PHR lab imports'),
+      ('phr_lab_results', 'owners and caregivers read PHR lab results'),
+      ('patient_documents', 'owners and caregivers read personal documents'),
+      ('phr_biomarker_favorites', 'owners and caregivers read favorites'),
+      ('phr_caregiver_grants', 'participants read caregiver grants'),
+      ('phr_share_links', 'owners read share links'),
+      ('phr_share_documents', 'owners read shared document selections'),
+      ('phr_share_results', 'owners read shared result selections'),
+      ('phr_share_access_log', 'owners read share access log'),
       ('patient_documents', 'staff read shared patient documents'),
       ('patient_document_shares', 'owners read document shares'),
       ('patient_document_shares', 'staff read active shared documents'),
@@ -86,7 +100,8 @@ begin
      or has_table_privilege('authenticated', 'public.phr_profiles', 'delete') then
     problems := problems || '- authenticated puede escribir phr_profiles sin pasar por la API validada' || chr(10);
   end if;
-  foreach t in array array['phr_lab_imports', 'phr_lab_results'] loop
+  foreach t in array array['phr_lab_imports', 'phr_lab_results', 'phr_biomarker_favorites', 'phr_caregiver_grants',
+                      'phr_share_links', 'phr_share_documents', 'phr_share_results', 'phr_share_access_log'] loop
     if has_table_privilege('authenticated', 'public.' || t, 'insert')
        or has_table_privilege('authenticated', 'public.' || t, 'update')
        or has_table_privilege('authenticated', 'public.' || t, 'delete') then
@@ -112,7 +127,7 @@ begin
     problems := problems || '- Falta la política de copias clínicas en storage.objects' || chr(10);
   end if;
   if not exists (select 1 from pg_policies p
-                 where p.schemaname = 'storage' and p.tablename = 'objects' and p.policyname = 'owners read personal document files') then
+                 where p.schemaname = 'storage' and p.tablename = 'objects' and p.policyname = 'owners and caregivers read personal document files') then
     problems := problems || '- Falta la política de lectura del PHR en storage.objects' || chr(10);
   end if;
   if not exists (select 1 from pg_policies p

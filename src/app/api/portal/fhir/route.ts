@@ -15,6 +15,7 @@ export async function GET(request: NextRequest) {
   if (documents.error || labResults.error) return NextResponse.json({ error: "No fue posible generar la exportación." }, { status: 500 });
   const ownerId = auth.user.id;
   const entries: { fullUrl: string; resource: Record<string, unknown> }[] = [];
+  const signedByDocument = new Map<string, string>();
   entries.push({ fullUrl: `urn:uuid:${ownerId}`, resource: {
     resourceType: "Patient", id: ownerId, active: true,
     identifier: auth.profile.identifier ? [{ system: "urn:phr:identifier:local", value: auth.profile.identifier }] : undefined,
@@ -22,6 +23,7 @@ export async function GET(request: NextRequest) {
   }});
   for (const document of documents.data ?? []) {
     const signed = await auth.db.storage.from("patient-documents").createSignedUrl(document.storage_path, 300);
+    if (signed.data?.signedUrl) signedByDocument.set(document.id, signed.data.signedUrl);
     entries.push({ fullUrl: `urn:uuid:${document.id}`, resource: {
       resourceType: "DocumentReference", id: document.id, status: "current", subject: { reference: `Patient/${ownerId}` },
       date: document.created_at, description: `${document.source_institution} · ${document.document_type}`,
@@ -40,6 +42,21 @@ export async function GET(request: NextRequest) {
       ...(result.value_num !== null ? { valueQuantity: { value: result.value_num, unit: result.unit } } : { valueString: result.value_text }),
       referenceRange, interpretation: result.flag ? [{ text: result.flag }] : undefined,
       derivedFrom: [{ reference: `DocumentReference/${result.document_id}` }],
+    }});
+  }
+  type LabResultRow = NonNullable<typeof labResults.data>[number];
+  const resultsByDocument = new Map<string, LabResultRow[]>();
+  for (const result of labResults.data ?? []) resultsByDocument.set(result.document_id, [...(resultsByDocument.get(result.document_id) ?? []), result]);
+  for (const document of documents.data ?? []) {
+    const results = resultsByDocument.get(document.id) ?? [];
+    if (!results.length) continue;
+    entries.push({ fullUrl: `urn:uuid:${crypto.randomUUID()}`, resource: {
+      resourceType: "DiagnosticReport", id: `lab-${document.id}`, status: "final",
+      code: { text: "Informe de laboratorio" }, subject: { reference: `Patient/${ownerId}` },
+      effectiveDateTime: `${document.document_date ?? results[0].observed_at}T00:00:00Z`, issued: document.created_at,
+      performer: [{ display: document.source_institution }],
+      result: results.map((result) => ({ reference: `Observation/${result.id}` })),
+      presentedForm: [{ contentType: document.mime_type, url: signedByDocument.get(document.id), title: document.original_filename }],
     }});
   }
   const bundle = { resourceType: "Bundle", type: "collection", timestamp: new Date().toISOString(), total: entries.length, entry: entries };
