@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/supabase-client";
+import { authenticatedFetch, supabase } from "@/lib/supabase-client";
 import type { Patient } from "./types";
 import type { PatientEditPatch } from "./patient-edit";
 import { patientSearchFilter } from "./search";
@@ -26,6 +26,74 @@ export type PatientExam = {
   reportStatus?: "draft" | "final"; hasImages: boolean;
   anamnesis: string; diagnosticHypothesis: string; practitioner: string;
 };
+
+export type PatientSharedDocument = {
+  id: string; filename: string; mimeType: string; sizeBytes: number; documentDate: string | null;
+  documentType: "imaging" | "laboratory" | "prescription" | "other"; sourceInstitution: string;
+  sharedAt: string; url: string; reviewStatus: "accepted" | "rejected" | null; reviewNote: string;
+};
+
+/** Documentos personales que el paciente autorizó expresamente para esta ficha institucional. */
+export async function fetchPatientSharedDocuments(patientId: string): Promise<PatientSharedDocument[]> {
+  const [shares, reviews] = await Promise.all([supabase.from("patient_document_shares")
+    .select("id, granted_at, document:patient_documents!inner(id, original_filename, storage_path, mime_type, size_bytes, document_date, document_type, source_institution)")
+    .eq("patient_id", patientId).is("revoked_at", null).order("granted_at", { ascending: false }),
+    supabase.from("patient_document_reviews").select("document_id, status, note, created_at").eq("patient_id", patientId).order("created_at", { ascending: false }),
+  ]);
+  if (shares.error || reviews.error) throw shares.error ?? reviews.error;
+  type SharedRow = {
+    id: string; granted_at: string; document: {
+      id: string; original_filename: string; storage_path: string; mime_type: string; size_bytes: number;
+      document_date: string | null; document_type: PatientSharedDocument["documentType"]; source_institution: string;
+    };
+  };
+  const latest = new Map<string, { status: "accepted" | "rejected"; note: string }>();
+  for (const review of reviews.data ?? []) if (review.document_id && !latest.has(review.document_id)) latest.set(review.document_id, { status: review.status as "accepted" | "rejected", note: review.note ?? "" });
+  return Promise.all(((shares.data ?? []) as unknown as SharedRow[]).map(async (row) => {
+    const signed = await supabase.storage.from("patient-documents").createSignedUrl(row.document.storage_path, 3600);
+    if (signed.error) throw signed.error;
+    return {
+      id: row.document.id, filename: row.document.original_filename, mimeType: row.document.mime_type, sizeBytes: row.document.size_bytes,
+      documentDate: row.document.document_date, documentType: row.document.document_type, sourceInstitution: row.document.source_institution,
+      sharedAt: row.granted_at, url: signed.data.signedUrl, reviewStatus: latest.get(row.document.id)?.status ?? null, reviewNote: latest.get(row.document.id)?.note ?? "",
+    };
+  }));
+}
+
+export type PatientDocumentRequest = { id: string; message: string; status: "pending" | "approved" | "rejected"; createdAt: string; respondedAt: string | null };
+
+export async function fetchPatientDocumentRequests(patientId: string): Promise<PatientDocumentRequest[]> {
+  const { data, error } = await supabase.from("patient_document_requests").select("id, message, status, created_at, responded_at").eq("patient_id", patientId).order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((row) => ({ id: row.id, message: row.message, status: row.status as PatientDocumentRequest["status"], createdAt: row.created_at, respondedAt: row.responded_at }));
+}
+
+export type PatientAcceptedDocument = { id: string; filename: string; sourceInstitution: string; mimeType: string; documentDate: string | null; note: string; acceptedAt: string; reviewerName: string; url: string };
+
+export async function fetchPatientAcceptedDocuments(patientId: string): Promise<PatientAcceptedDocument[]> {
+  const { data, error } = await supabase.from("patient_document_reviews")
+    .select("id, original_filename, source_institution, mime_type, document_date, note, created_at, clinical_storage_path, reviewer_id")
+    .eq("patient_id", patientId).eq("status", "accepted").order("created_at", { ascending: false });
+  if (error) throw error;
+  type Row = { id: string; original_filename: string; source_institution: string; mime_type: string; document_date: string | null; note: string; created_at: string; clinical_storage_path: string; reviewer_id: string };
+  const rows = (data ?? []) as unknown as Row[];
+  const profiles = rows.length ? await supabase.from("profiles").select("id, full_name").in("id", [...new Set(rows.map((row) => row.reviewer_id))]) : { data: [], error: null };
+  if (profiles.error) throw profiles.error;
+  const names = new Map((profiles.data ?? []).map((profile) => [profile.id, profile.full_name]));
+  return Promise.all(rows.map(async (row) => {
+    const signed = await supabase.storage.from("clinical-documents").createSignedUrl(row.clinical_storage_path, 3600);
+    if (signed.error) throw signed.error;
+    return { id: row.id, filename: row.original_filename, sourceInstitution: row.source_institution, mimeType: row.mime_type, documentDate: row.document_date, note: row.note, acceptedAt: row.created_at, reviewerName: names.get(row.reviewer_id) ?? "Equipo clínico", url: signed.data.signedUrl };
+  }));
+}
+
+export async function requestPatientDocuments(patientId: string, message: string) {
+  await authenticatedFetch("/api/portal/document-requests", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ patientId, message }) });
+}
+
+export async function reviewPatientDocument(patientId: string, documentId: string, status: "accepted" | "rejected", note: string) {
+  await authenticatedFetch("/api/patient-documents/review", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ patientId, documentId, status, note }) });
+}
 
 /** Exámenes (citas) del paciente para la ficha, del más reciente al más antiguo. */
 export async function fetchPatientExams(patientId: string): Promise<PatientExam[]> {

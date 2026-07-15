@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
     if (!account) return NextResponse.json({ error: "No existe una cuenta con ese correo." }, { status: 404 });
     const [staff, linked] = await Promise.all([
       admin.from("profiles").select("id").eq("id", account.id).maybeSingle(),
-      admin.from("patients").select("id, full_name").eq("user_id", account.id).maybeSingle(),
+      admin.from("patients").select("id, full_name").eq("user_id", account.id).eq("tenant_id", tenantId).maybeSingle(),
     ]);
     return NextResponse.json({ userId: account.id, isStaff: !!staff.data, linkedPatientId: linked.data?.id ?? null, linkedPatientName: linked.data?.full_name ?? null });
   }

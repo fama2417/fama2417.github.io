@@ -1,12 +1,12 @@
 /**
  * Clasificación de la sesión sin rol nuevo: staff = tiene fila en profiles;
- * paciente = sin profile pero vinculado en patients.user_id (visible solo por RLS);
- * unknown = autenticado sin habilitación (se le niega acceso).
+ * paciente = tiene perfil PHR o un vínculo institucional previo;
+ * onboarding = cuenta autenticada que aún debe crear su registro personal.
  */
-export type SessionKind = "staff" | "patient" | "unknown";
+export type SessionKind = "staff" | "patient" | "onboarding" | "unknown";
 
-export function resolveSessionKind({ hasProfile, hasPatient }: { hasProfile: boolean; hasPatient: boolean }): SessionKind {
+export function resolveSessionKind({ hasProfile, hasPatient, hasPhrProfile = false }: { hasProfile: boolean; hasPatient: boolean; hasPhrProfile?: boolean }): SessionKind {
   if (hasProfile) return "staff";
-  if (hasPatient) return "patient";
-  return "unknown";
+  if (hasPhrProfile || hasPatient) return "patient";
+  return "onboarding";
 }

@@ -19,10 +19,10 @@ import { countOpenCommunications, countPendingFollowUps } from "./exam-summary";
 import { isReportAvailable } from "./exam-status";
 import { dedupeFindings, visibleFindings } from "./finding-display";
 import {
-  fetchPatient, fetchPatientAudit, fetchPatientCriticalCommunications, fetchPatientExams, fetchPatientFollowUps,
-  fetchPatientKeyImages, fetchPatientLabObservations, fetchPatientReportAddenda, fetchPatientStructuredFindings,
+  fetchPatient, fetchPatientAcceptedDocuments, fetchPatientAudit, fetchPatientCriticalCommunications, fetchPatientDocumentRequests, fetchPatientExams, fetchPatientFollowUps,
+  fetchPatientKeyImages, fetchPatientLabObservations, fetchPatientReportAddenda, fetchPatientSharedDocuments, fetchPatientStructuredFindings, requestPatientDocuments, reviewPatientDocument,
   type PatientAuditEntry, type PatientCriticalCommunication, type PatientExam, type PatientFollowUp,
-  type PatientKeyImage, type PatientLabObservation, type PatientReportAddendum, type PatientStructuredFinding,
+  type PatientAcceptedDocument, type PatientDocumentRequest, type PatientKeyImage, type PatientLabObservation, type PatientReportAddendum, type PatientSharedDocument, type PatientStructuredFinding,
 } from "./repository";
 
 const actionLabels: Record<string, string> = { INSERT: "Creación", UPDATE: "Modificación", DELETE: "Eliminación" };
@@ -41,7 +41,11 @@ function describeChange(entry: PatientAuditEntry) {
   return changes.map(([key, value]) => `${fieldLabels[key]}: ${value === null || value === "" ? "—" : String(value)}`).join(" · ");
 }
 
-type TabId = "resumen" | "timeline" | "imagenologia" | "seguimientos" | "comunicaciones" | "informes" | "hallazgos" | "laboratorio" | "auditoria";
+type TabId = "resumen" | "timeline" | "imagenologia" | "seguimientos" | "comunicaciones" | "informes" | "documentos" | "hallazgos" | "laboratorio" | "auditoria";
+
+const sharedDocumentTypeLabels: Record<PatientSharedDocument["documentType"], string> = {
+  imaging: "Imagenología", laboratory: "Laboratorio", prescription: "Receta u orden", other: "Otro",
+};
 
 export function PatientHistory({ patientId }: { patientId: string }) {
   const [patient, setPatient] = useState<Patient | null>(null);
@@ -52,6 +56,13 @@ export function PatientHistory({ patientId }: { patientId: string }) {
   const [addenda, setAddenda] = useState<PatientReportAddendum[]>([]);
   const [findings, setFindings] = useState<PatientStructuredFinding[]>([]);
   const [labs, setLabs] = useState<PatientLabObservation[]>([]);
+  const [sharedDocuments, setSharedDocuments] = useState<PatientSharedDocument[]>([]);
+  const [acceptedDocuments, setAcceptedDocuments] = useState<PatientAcceptedDocument[]>([]);
+  const [documentRequests, setDocumentRequests] = useState<PatientDocumentRequest[]>([]);
+  const [requestMessage, setRequestMessage] = useState("Solicitamos antecedentes externos relevantes para complementar tu atención.");
+  const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
+  const [documentBusy, setDocumentBusy] = useState("");
+  const [documentNotice, setDocumentNotice] = useState("");
   const [role, setRole] = useState("");
   const [audit, setAudit] = useState<PatientAuditEntry[]>([]);
   const [tab, setTab] = useState<TabId>("resumen");
@@ -61,11 +72,12 @@ export function PatientHistory({ patientId }: { patientId: string }) {
   useEffect(() => {
     Promise.all([
       fetchPatient(patientId), fetchPatientExams(patientId), fetchPatientFollowUps(patientId), fetchPatientCriticalCommunications(patientId),
-      fetchPatientKeyImages(patientId), fetchPatientReportAddenda(patientId), fetchPatientStructuredFindings(patientId), fetchPatientLabObservations(patientId), supabase.auth.getUser(),
+      fetchPatientKeyImages(patientId), fetchPatientReportAddenda(patientId), fetchPatientStructuredFindings(patientId), fetchPatientLabObservations(patientId),
+      fetchPatientSharedDocuments(patientId), fetchPatientAcceptedDocuments(patientId), fetchPatientDocumentRequests(patientId), supabase.auth.getUser(),
     ])
-      .then(async ([nextPatient, nextExams, nextFollowUps, nextCommunications, nextKeyImages, nextAddenda, nextFindings, nextLabs, auth]) => {
+      .then(async ([nextPatient, nextExams, nextFollowUps, nextCommunications, nextKeyImages, nextAddenda, nextFindings, nextLabs, nextSharedDocuments, nextAcceptedDocuments, nextDocumentRequests, auth]) => {
         setPatient(nextPatient); setExams(nextExams); setFollowUps(nextFollowUps); setCommunications(nextCommunications);
-        setKeyImages(nextKeyImages); setAddenda(nextAddenda); setFindings(nextFindings); setLabs(nextLabs);
+        setKeyImages(nextKeyImages); setAddenda(nextAddenda); setFindings(nextFindings); setLabs(nextLabs); setSharedDocuments(nextSharedDocuments); setAcceptedDocuments(nextAcceptedDocuments); setDocumentRequests(nextDocumentRequests);
         const profile = await supabase.from("profiles").select("role").eq("id", auth.data.user?.id ?? "").single();
         const nextRole = profile.data?.role ?? "";
         setRole(nextRole);
@@ -85,6 +97,29 @@ export function PatientHistory({ patientId }: { patientId: string }) {
   const displayFindings = dedupeFindings(visibleFindings(findings, canEditReports));
   // Laboratorio no depende de un informe: el repositorio ya entrega solo resultados confirmados.
   const visibleLabs = labs;
+  const canReviewDocuments = ["admin", "radiologist", "clinician"].includes(role);
+  const pendingDocumentRequest = documentRequests.find((request) => request.status === "pending");
+
+  async function refreshDocumentWorkspace() {
+    const [shared, accepted, requests] = await Promise.all([fetchPatientSharedDocuments(patientId), fetchPatientAcceptedDocuments(patientId), fetchPatientDocumentRequests(patientId)]);
+    setSharedDocuments(shared); setAcceptedDocuments(accepted); setDocumentRequests(requests);
+  }
+
+  async function sendDocumentRequest() {
+    if (documentBusy) return;
+    setDocumentBusy("request"); setDocumentNotice("");
+    try { await requestPatientDocuments(patientId, requestMessage); await refreshDocumentWorkspace(); setDocumentNotice("Solicitud enviada al portal del paciente."); }
+    catch (cause) { setDocumentNotice(cause instanceof Error ? cause.message : "No fue posible enviar la solicitud."); }
+    finally { setDocumentBusy(""); }
+  }
+
+  async function reviewDocument(documentId: string, status: "accepted" | "rejected") {
+    if (documentBusy) return;
+    setDocumentBusy(documentId); setDocumentNotice("");
+    try { await reviewPatientDocument(patientId, documentId, status, reviewNotes[documentId] ?? ""); await refreshDocumentWorkspace(); setDocumentNotice(status === "accepted" ? "Documento incorporado como copia clínica trazable." : "Documento marcado como no incorporado."); }
+    catch (cause) { setDocumentNotice(cause instanceof Error ? cause.message : "No fue posible registrar la revisión."); }
+    finally { setDocumentBusy(""); }
+  }
   const tabs: [TabId, string][] = [
     ["resumen", "Resumen"],
     ["timeline", "Timeline"],
@@ -92,6 +127,7 @@ export function PatientHistory({ patientId }: { patientId: string }) {
     ["seguimientos", pendingFollowUps ? `Seguimientos (${pendingFollowUps})` : "Seguimientos"],
     ["comunicaciones", openCommunications ? `Comunicaciones críticas (${openCommunications})` : "Comunicaciones críticas"],
     ["informes", "Informes"],
+    ["documentos", sharedDocuments.length ? `Documentos externos (${sharedDocuments.length})` : "Documentos externos"],
     ["hallazgos", "Hallazgos"],
     ...(visibleLabs.length ? [["laboratorio", "Laboratorio"] as [TabId, string]] : []),
     ...(role === "admin" ? [["auditoria", "Auditoría"] as [TabId, string]] : []),
@@ -156,6 +192,28 @@ export function PatientHistory({ patientId }: { patientId: string }) {
         <PatientReportAddendaSection addenda={addenda} canEditReports={canEditReports} />
       </section>
     </>}
+    {tab === "documentos" && (
+      <section className="card external-documents" aria-label="Documentos externos compartidos por el paciente">
+        <div className="card-heading"><div><h3>Documentos externos compartidos</h3><p className="empty-inline">Archivos aportados por el paciente. No son parte de la ficha hasta que un profesional los incorpore.</p></div></div>
+        {canReviewDocuments && !pendingDocumentRequest && <div className="document-request-box"><label>Mensaje al paciente<textarea value={requestMessage} maxLength={500} onChange={(event) => setRequestMessage(event.target.value)} /></label><button className="button secondary" type="button" disabled={!!documentBusy} onClick={sendDocumentRequest}>{documentBusy === "request" ? "Enviando…" : "Solicitar antecedentes"}</button></div>}
+        {pendingDocumentRequest && <p className="form-notice">Solicitud pendiente desde el {new Date(pendingDocumentRequest.createdAt).toLocaleDateString("es-CL")}: {pendingDocumentRequest.message}</p>}
+        {documentNotice && <p className="form-notice" role="status">{documentNotice}</p>}
+        {!sharedDocuments.length && <p className="empty-state">El paciente no ha compartido documentos con esta institución.</p>}
+        <div className="external-document-list">
+          {sharedDocuments.map((document) => <article className="external-document" key={document.id}>
+            <div>
+              <strong>{document.filename}</strong>
+              <span>{document.sourceInstitution || "Origen no indicado"} · {sharedDocumentTypeLabels[document.documentType]}{document.documentDate && ` · ${new Date(`${document.documentDate}T00:00:00`).toLocaleDateString("es-CL")}`}</span>
+              <span>Subido por el paciente · no verificado · compartido el {new Date(document.sharedAt).toLocaleDateString("es-CL")}</span>
+              {document.reviewStatus && <span className={`status ${document.reviewStatus === "accepted" ? "status-completed" : "status-cancelled"}`}>{document.reviewStatus === "accepted" ? "Incorporado a la ficha" : "No incorporado"}</span>}
+              {canReviewDocuments && document.reviewStatus !== "accepted" && <label className="review-note">Nota de revisión<textarea value={reviewNotes[document.id] ?? ""} maxLength={1000} onChange={(event) => setReviewNotes((current) => ({ ...current, [document.id]: event.target.value }))} /></label>}
+            </div>
+            <div className="document-review-actions"><a className="button secondary" href={document.url} target="_blank" rel="noreferrer">Abrir original</a>{canReviewDocuments && document.reviewStatus !== "accepted" && <><button className="button primary" type="button" disabled={!!documentBusy} onClick={() => reviewDocument(document.id, "accepted")}>{documentBusy === document.id ? "Guardando…" : "Incorporar a ficha"}</button><button className="text-button danger-text" type="button" disabled={!!documentBusy} onClick={() => reviewDocument(document.id, "rejected")}>No incorporar</button></>}</div>
+          </article>)}
+        </div>
+        <div className="accepted-documents"><h3>Copias clínicas incorporadas</h3>{!acceptedDocuments.length && <p className="empty-inline">Aún no se han incorporado documentos externos.</p>}{acceptedDocuments.map((document) => <article className="external-document accepted" key={document.id}><div><strong>{document.filename}</strong><span>{document.sourceInstitution} · incorporado el {new Date(document.acceptedAt).toLocaleDateString("es-CL")} por {document.reviewerName}</span>{document.note && <span>Nota: {document.note}</span>}</div><a className="button secondary" href={document.url} target="_blank" rel="noreferrer">Abrir copia clínica</a></article>)}</div>
+      </section>
+    )}
     {tab === "hallazgos" && <PatientStructuredFindingsSection findings={displayFindings} totalCount={findings.length} canEditReports={canEditReports} />}
     {tab === "laboratorio" && <section className="card" aria-label="Resultados de laboratorio"><h3>Resultados de laboratorio</h3><PatientLabTrendsSection observations={visibleLabs} /></section>}
     {tab === "auditoria" && role === "admin" && (
