@@ -31,6 +31,8 @@ const LabLoincSuggestionSchema = z.object({
 const LabLoincExtractionSchema = z.object({ rows: z.array(LabLoincSuggestionSchema) });
 export type LabLoincSuggestion = z.infer<typeof LabLoincSuggestionSchema>;
 
+const LabLoincSearchSchema = z.object({ rows: z.array(z.object({ sourceId: z.string(), searchTerm: z.string() })) });
+
 export type LabCandidate = {
   analyte: string;
   valueNum: number | null;
@@ -315,23 +317,18 @@ export function dedupeLabCandidates(rows: LabCandidate[]) {
   });
 }
 
-export function verifiedLabLoincCandidates(suggestions: LabLoincSuggestion[], knownCodes: Iterable<string>) {
+export function verifiedLabLoinc(suggestions: LabLoincSuggestion[], knownCodes: Iterable<string>, minConfidence: number) {
   const known = new Set(knownCodes);
-  const grouped = new Map<string, LabLoincSuggestion[]>();
-  for (const row of suggestions) {
-    const suggestion = { ...row, loincCode: row.loincCode.trim() };
-    if (!known.has(suggestion.loincCode)) continue;
-    const current = grouped.get(suggestion.sourceId) ?? [];
-    if (!current.some((item) => item.loincCode === suggestion.loincCode)) current.push(suggestion);
-    grouped.set(suggestion.sourceId, current.sort((a, b) => b.confidence - a.confidence).slice(0, 3));
-  }
-  return grouped;
+  return new Map(suggestions
+    .map((row) => ({ ...row, loincCode: row.loincCode.trim() }))
+    .filter((row) => row.confidence >= minConfidence && known.has(row.loincCode))
+    .map((row) => [row.sourceId, row.loincCode] as const));
 }
 
-export function verifiedLabLoinc(suggestions: LabLoincSuggestion[], knownCodes: Iterable<string>, minConfidence: number) {
-  return new Map([...verifiedLabLoincCandidates(suggestions, knownCodes)]
-    .flatMap(([sourceId, rows]) => rows[0]?.confidence >= minConfidence ? [[sourceId, rows[0].loincCode] as const] : []));
-}
+export const loincSearchQueries = (term: string) => {
+  const words = term.trim().split(/\s+/).filter(Boolean);
+  return words.map((_, index) => words.slice(0, words.length - index).join(" "));
+};
 
 const structuredPayload = (response: unknown) => {
   const parsed = (response as any)?.output_parsed
@@ -372,26 +369,48 @@ export async function structureLabDocument(input: { text?: string; pdfBytes?: Ui
   };
 }
 
-export async function suggestLabLoinc(rows: Pick<LabCandidate, "analyte" | "unit" | "valueNum" | "valueText">[], maxCandidates = 1) {
+export async function suggestLabLoinc(rows: Pick<LabCandidate, "analyte" | "unit" | "valueNum" | "valueText">[]) {
   const config = aiConfig();
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  const alternatives = maxCandidates > 1
-    ? `Para cada sourceId devuelve hasta ${Math.min(maxCandidates, 3)} códigos candidatos plausibles, ordenados por confidence descendente. Si hay ambigüedad, conserva alternativas con confidence baja para revisión humana; si no hay ninguna plausible, omite ese sourceId.`
-    : "Devuelve un código sólo cuando el analito y la unidad permitan una equivalencia suficientemente específica; si muestra, método o significado son ambiguos, usa loincCode vacío y confidence baja.";
   const response = await client.responses.parse({
     model: config.model,
     input: [
-      { role: "system", content: `Homologa analitos de laboratorio a LOINC. ${alternatives} No inventes códigos. sourceId debe copiarse exactamente.` },
+      { role: "system", content: `Homologa analitos de laboratorio a LOINC. Devuelve un código sólo cuando el analito y la unidad permitan una equivalencia suficientemente específica; si muestra, método o significado son ambiguos, usa loincCode vacío y confidence baja. No inventes códigos. sourceId debe copiarse exactamente.` },
       { role: "user", content: JSON.stringify(rows.map((row, index) => ({ sourceId: String(index), analyte: row.analyte, unit: row.unit, valueType: row.valueNum === null ? "text" : "number" }))) },
     ],
     text: { format: zodTextFormat(LabLoincExtractionSchema, "lab_loinc") },
-    max_output_tokens: Math.min(config.maxOutputTokens, maxCandidates > 1 ? 4000 : 2000),
+    max_output_tokens: Math.min(config.maxOutputTokens, 2000),
     store: false,
   } as any, { timeout: config.timeoutMs });
   const extraction = LabLoincExtractionSchema.parse(structuredPayload(response));
   const usage = (response as any)?.usage ?? {};
   return {
     suggestions: extraction.rows,
+    usage: {
+      inputTokens: usage.input_tokens ?? usage.prompt_tokens ?? null,
+      outputTokens: usage.output_tokens ?? usage.completion_tokens ?? null,
+      totalTokens: usage.total_tokens ?? null,
+    },
+  };
+}
+
+export async function suggestLabLoincSearchTerms(rows: Pick<LabCandidate, "analyte" | "unit" | "valueNum" | "valueText">[]) {
+  const config = aiConfig();
+  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const response = await client.responses.parse({
+    model: config.model,
+    input: [
+      { role: "system", content: `Convierte cada analito a un término breve de búsqueda en inglés para el catálogo LOINC. Devuelve exactamente una fila por sourceId y no devuelvas códigos. searchTerm debe comenzar con el componente medido y usar de 1 a 5 palabras que aparecerían en LONG_COMMON_NAME; agrega total/libre, tiempo, muestra o método sólo cuando estén explícitos. Ordena primero las palabras más distintivas.` },
+      { role: "user", content: JSON.stringify(rows.map((row, index) => ({ sourceId: String(index), analyte: row.analyte, unit: row.unit, valueType: row.valueNum === null ? "text" : "number" }))) },
+    ],
+    text: { format: zodTextFormat(LabLoincSearchSchema, "lab_loinc_search") },
+    max_output_tokens: Math.min(config.maxOutputTokens, 2000),
+    store: false,
+  } as any, { timeout: config.timeoutMs });
+  const extraction = LabLoincSearchSchema.parse(structuredPayload(response));
+  const usage = (response as any)?.usage ?? {};
+  return {
+    terms: extraction.rows,
     usage: {
       inputTokens: usage.input_tokens ?? usage.prompt_tokens ?? null,
       outputTokens: usage.output_tokens ?? usage.completion_tokens ?? null,

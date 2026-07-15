@@ -18,12 +18,14 @@ export function LabObservationsPanel({ appointmentId, appointmentCompleted, disa
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [loincSuggestions, setLoincSuggestions] = useState<Record<string, LabLoincOption[]>>({});
+  const [loincAttempted, setLoincAttempted] = useState<Set<string>>(new Set());
 
   async function reload() {
     const next = await fetchLabObservations(appointmentId);
     setItems(next);
     setDrafts(Object.fromEntries(next.filter((item) => item.reviewStatus === "suggested").map((item) => [item.id, draftOf(item)])));
     setLoincSuggestions({});
+    setLoincAttempted(new Set());
   }
 
   useEffect(() => { reload().catch(() => setError("No fue posible cargar los resultados.")); }, [appointmentId]);
@@ -91,10 +93,13 @@ export function LabObservationsPanel({ appointmentId, appointmentCompleted, disa
   async function suggestLoinc() {
     setBusy(true); setError(""); setNotice("");
     try {
-      const result = await suggestMissingLabLoinc(appointmentId);
-      setLoincSuggestions(Object.fromEntries(result.suggestions.map((row) => [row.observationId, row.options])));
+      const requestedIds = loincToSuggest.map((item) => item.id);
+      const result = await suggestMissingLabLoinc(appointmentId, requestedIds);
+      setLoincSuggestions((current) => ({ ...current, ...Object.fromEntries(result.suggestions.map((row) => [row.observationId, row.options])) }));
+      setLoincAttempted((current) => new Set([...current, ...requestedIds]));
       const options = result.suggestions.reduce((sum, row) => sum + row.options.length, 0);
-      setNotice(options ? `${options} alternativa(s) LOINC encontradas. Selecciona una antes de confirmar.` : "No se encontraron alternativas LOINC verificables para estos analitos.");
+      const unmatched = requestedIds.length - result.suggestions.length;
+      setNotice(options ? `${options} alternativa(s) LOINC encontradas.${unmatched ? ` ${unmatched} analito(s) quedaron sin coincidencia segura.` : ""} Selecciona una antes de confirmar.` : `${unmatched} analito(s) quedaron sin coincidencia segura en el catálogo.`);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "No fue posible obtener sugerencias LOINC."); }
     finally { setBusy(false); }
   }
@@ -107,6 +112,7 @@ export function LabObservationsPanel({ appointmentId, appointmentCompleted, disa
 
   const suggested = disabled ? [] : items.filter((item) => item.reviewStatus === "suggested");
   const missingLoinc = suggested.filter((item) => !(drafts[item.id]?.loincCode ?? item.loincCode).trim());
+  const loincToSuggest = missingLoinc.filter((item) => !loincSuggestions[item.id]?.length && !loincAttempted.has(item.id));
   const confirmed = items.filter((item) => item.reviewStatus === "confirmed");
 
   return <section className="report-clinical-panel lab-results-workspace" aria-label="Resultados de laboratorio">
@@ -121,17 +127,18 @@ export function LabObservationsPanel({ appointmentId, appointmentCompleted, disa
       </label>}
 
       {suggested.length > 0 && <section className="lab-review-group">
-        <div className="card-heading"><h4>Pendientes de validación <span className="collapsible-count">{suggested.length}</span></h4><div className="lab-review-actions">{missingLoinc.length > 0 && <button className="button secondary" type="button" disabled={busy} onClick={suggestLoinc}>Sugerir LOINC faltantes ({missingLoinc.length})</button>}<button className="button primary" type="button" disabled={busy} onClick={confirmAll}>Confirmar los {suggested.length} resultados</button></div></div>
-        {suggested.map((item) => {
+        <div className="card-heading"><h4>Pendientes de validación <span className="collapsible-count">{suggested.length}</span></h4><div className="lab-review-actions">{loincToSuggest.length > 0 && <button className="button secondary" type="button" disabled={busy} onClick={suggestLoinc}>Sugerir LOINC faltantes ({loincToSuggest.length})</button>}<button className="button primary" type="button" disabled={busy} onClick={confirmAll}>Confirmar los {suggested.length} resultados</button></div></div>
+        <div className="lab-review-grid">{suggested.map((item) => {
           const draft = drafts[item.id] ?? draftOf(item);
           return <form className="workflow-entry report-inline-form lab-observation" key={item.id} onSubmit={(event) => { event.preventDefault(); confirm(item.id); }}>
             <label className="span-2">Analito<input value={draft.analyte} onChange={(event) => change(item.id, { analyte: event.target.value })} /></label>
             <label>Resultado<input value={draft.value} onChange={(event) => change(item.id, { value: event.target.value })} /></label>
             <label>Unidad<input value={draft.unit} onChange={(event) => change(item.id, { unit: event.target.value })} /></label>
-            <label className="span-2">Referencia<input value={draft.reference} onChange={(event) => change(item.id, { reference: event.target.value })} /></label>
+            <label>Referencia<input value={draft.reference} onChange={(event) => change(item.id, { reference: event.target.value })} /></label>
             <label>Fecha de muestra<input type="date" value={draft.observedAt} onChange={(event) => change(item.id, { observedAt: event.target.value })} /></label>
             <label className="span-2">LOINC sugerido<input value={draft.loincCode} placeholder="Sin homologar" onChange={(event) => change(item.id, { loincCode: event.target.value })} />
               {!!loincSuggestions[item.id]?.length && <span className="lab-loinc-options">{loincSuggestions[item.id].map((option) => <button type="button" key={option.code} aria-pressed={draft.loincCode === option.code} onClick={() => change(item.id, { loincCode: option.code })}><strong>{option.code}</strong><small>{option.display}</small></button>)}</span>}
+              {loincAttempted.has(item.id) && !loincSuggestions[item.id]?.length && <small className="lab-loinc-empty">Sin coincidencia segura en el catálogo.</small>}
             </label>
             {item.sourceSentence && <span className="empty-inline span-2">Origen: {item.sourceSentence}</span>}
             <div className="lab-observation-actions span-2">
@@ -140,7 +147,7 @@ export function LabObservationsPanel({ appointmentId, appointmentCompleted, disa
               <button className="text-button danger" type="button" disabled={busy} onClick={() => remove(item.id)}>Descartar</button>
             </div>
           </form>;
-        })}
+        })}</div>
       </section>}
 
       {confirmed.length > 0 && <section className="lab-review-group">
