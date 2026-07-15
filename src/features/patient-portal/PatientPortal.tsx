@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { supabase } from "@/lib/supabase-client";
 import { identifierTypeLabels, sexLabels, type Patient } from "@/features/patients/types";
 import {
-  fetchCurrentPatient, fetchPatientAppointments, fetchReleasedAddenda, fetchReleasedKeyImages, fetchReleasedReports,
-  type PortalAddendum, type PortalAppointment, type PortalKeyImage, type PortalPatient, type PortalReport,
+  deletePatientDocument, downloadFhirBundle, fetchCurrentPatients, fetchPatientAppointments, fetchPatientDocumentRequests, fetchPatientDocuments, fetchReleasedAddenda, fetchReleasedKeyImages, fetchReleasedReports,
+  respondToDocumentRequest, setPatientDocumentShare, uploadPatientDocument,
+  type PortalAddendum, type PortalAppointment, type PortalDocument, type PortalDocumentRequest, type PortalKeyImage, type PortalPatient, type PortalReport,
 } from "./repository";
 
 const statusLabels: Record<string, string> = {
@@ -18,13 +19,16 @@ const statusClass: Record<string, string> = {
 };
 
 const tabs = [
-  ["inicio", "Inicio"], ["citas", "Mis citas"], ["examenes", "Mis exámenes"], ["informes", "Mis informes"], ["informacion", "Mi información"],
+  ["inicio", "Inicio"], ["citas", "Mis citas"], ["examenes", "Mis exámenes"], ["informes", "Mis informes"], ["documentos", "Mis documentos"], ["informacion", "Mi información"],
 ] as const;
 type TabId = (typeof tabs)[number][0];
 
 const reportSections: [keyof PortalReport, string][] = [
   ["clinicalIndication", "Indicación"], ["technique", "Técnica"], ["comparison", "Comparación"], ["findings", "Hallazgos"], ["impression", "Impresión"],
 ];
+const documentTypeLabels: Record<PortalDocument["documentType"], string> = {
+  imaging: "Imagenología", laboratory: "Laboratorio", prescription: "Receta u orden", other: "Otro",
+};
 
 function formatDate(date: string) {
   return new Date(`${date}T00:00:00`).toLocaleDateString("es-CL", { day: "2-digit", month: "short", year: "numeric" });
@@ -37,14 +41,20 @@ function isUpcoming(appointment: PortalAppointment) {
 export function PatientPortal() {
   const [ready, setReady] = useState(false);
   const [isStaff, setIsStaff] = useState(false);
-  const [patient, setPatient] = useState<PortalPatient | null>(null);
+  const [patients, setPatients] = useState<PortalPatient[]>([]);
   const [appointments, setAppointments] = useState<PortalAppointment[]>([]);
   const [reports, setReports] = useState<PortalReport[]>([]);
   const [addenda, setAddenda] = useState<PortalAddendum[]>([]);
   const [keyImages, setKeyImages] = useState<PortalKeyImage[]>([]);
+  const [documents, setDocuments] = useState<PortalDocument[]>([]);
+  const [documentRequests, setDocumentRequests] = useState<PortalDocumentRequest[]>([]);
+  const [requestSelections, setRequestSelections] = useState<Record<string, string[]>>({});
   const [tab, setTab] = useState<TabId>("inicio");
   const [openReport, setOpenReport] = useState("");
   const [error, setError] = useState("");
+  const [documentBusy, setDocumentBusy] = useState(false);
+  const [documentActionBusy, setDocumentActionBusy] = useState("");
+  const [documentNotice, setDocumentNotice] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -54,10 +64,10 @@ export function PatientPortal() {
         // El portal es exclusivo de pacientes: una cuenta staff no debe consultar datos aquí.
         const profile = await supabase.from("profiles").select("id").eq("id", auth.data.user.id).maybeSingle();
         if (profile.data) { setIsStaff(true); return; }
-        const [nextPatient, nextAppointments, nextReports, nextAddenda, nextKeyImages] = await Promise.all([
-          fetchCurrentPatient(), fetchPatientAppointments(), fetchReleasedReports(), fetchReleasedAddenda(), fetchReleasedKeyImages(),
+        const [nextPatients, nextAppointments, nextReports, nextAddenda, nextKeyImages, nextDocuments, nextRequests] = await Promise.all([
+          fetchCurrentPatients(), fetchPatientAppointments(), fetchReleasedReports(), fetchReleasedAddenda(), fetchReleasedKeyImages(), fetchPatientDocuments(), fetchPatientDocumentRequests(),
         ]);
-        setPatient(nextPatient); setAppointments(nextAppointments); setReports(nextReports); setAddenda(nextAddenda); setKeyImages(nextKeyImages);
+        setPatients(nextPatients); setAppointments(nextAppointments); setReports(nextReports); setAddenda(nextAddenda); setKeyImages(nextKeyImages); setDocuments(nextDocuments); setDocumentRequests(nextRequests);
       } catch {
         setError("No fue posible cargar tu información. Intenta nuevamente.");
       } finally {
@@ -69,6 +79,77 @@ export function PatientPortal() {
   const upcoming = useMemo(() => appointments.filter(isUpcoming).sort((a, b) => `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`)), [appointments]);
   const performed = useMemo(() => appointments.filter((item) => item.status === "completed"), [appointments]);
   const lastVisit = performed[0];
+  const patient = patients[0] ?? null;
+
+  async function uploadDocument(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (documentBusy) return;
+    const form = event.currentTarget;
+    const fields = new FormData(form);
+    const file = fields.get("file");
+    if (!(file instanceof File) || !file.name) return;
+    setDocumentBusy(true); setError(""); setDocumentNotice("");
+    try {
+      await uploadPatientDocument({
+        file, documentDate: String(fields.get("documentDate") ?? ""),
+        documentType: String(fields.get("documentType") ?? "other") as PortalDocument["documentType"],
+        sourceInstitution: String(fields.get("sourceInstitution") ?? ""),
+      });
+      setDocuments(await fetchPatientDocuments());
+      form.reset();
+      setDocumentNotice("Documento guardado en tu registro personal. No fue incorporado a la ficha oficial de ninguna institución.");
+    } catch (cause) {
+      setError(cause instanceof Error && cause.message ? cause.message : "No fue posible subir el documento.");
+    } finally {
+      setDocumentBusy(false);
+    }
+  }
+
+  async function changeDocumentShare(documentId: string, patientId: string, shared: boolean) {
+    const action = `${documentId}:${patientId}`;
+    if (documentActionBusy) return;
+    setDocumentActionBusy(action); setError(""); setDocumentNotice("");
+    try {
+      await setPatientDocumentShare(documentId, patientId, shared);
+      setDocuments(await fetchPatientDocuments());
+      setDocumentNotice(shared ? "Acceso concedido a la institución seleccionada." : "Acceso revocado. La institución ya no puede abrir el documento.");
+    } catch (cause) {
+      setError(cause instanceof Error && cause.message ? cause.message : "No fue posible cambiar el acceso.");
+    } finally {
+      setDocumentActionBusy("");
+    }
+  }
+
+  async function removeDocument(documentId: string, filename: string) {
+    if (documentActionBusy || !window.confirm(`¿Eliminar ${filename}? Esta acción también revoca todos sus accesos.`)) return;
+    setDocumentActionBusy(documentId); setError(""); setDocumentNotice("");
+    try {
+      await deletePatientDocument(documentId);
+      setDocuments(await fetchPatientDocuments());
+      setDocumentNotice("Documento eliminado de tu registro personal.");
+    } catch (cause) {
+      setError(cause instanceof Error && cause.message ? cause.message : "No fue posible eliminar el documento.");
+    } finally {
+      setDocumentActionBusy("");
+    }
+  }
+
+  function toggleRequestDocument(requestId: string, documentId: string) {
+    setRequestSelections((current) => ({ ...current, [requestId]: (current[requestId] ?? []).includes(documentId) ? (current[requestId] ?? []).filter((id) => id !== documentId) : [...(current[requestId] ?? []), documentId] }));
+  }
+
+  async function answerDocumentRequest(requestId: string, status: "approved" | "rejected") {
+    if (documentActionBusy) return;
+    setDocumentActionBusy(requestId); setError(""); setDocumentNotice("");
+    try {
+      await respondToDocumentRequest(requestId, status, requestSelections[requestId] ?? []);
+      const [nextDocuments, nextRequests] = await Promise.all([fetchPatientDocuments(), fetchPatientDocumentRequests()]);
+      setDocuments(nextDocuments); setDocumentRequests(nextRequests);
+      setDocumentNotice(status === "approved" ? "Documentos compartidos con tu ficha vinculada." : "Solicitud rechazada.");
+    } catch (cause) {
+      setError(cause instanceof Error && cause.message ? cause.message : "No fue posible responder la solicitud.");
+    } finally { setDocumentActionBusy(""); }
+  }
 
   if (!ready) return <main className="portal-shell"><p className="empty-state">Cargando tu portal…</p></main>;
   if (isStaff) return (
@@ -92,7 +173,7 @@ export function PatientPortal() {
     <div className="portal-shell">
       <header className="portal-header">
         <div>
-          <p className="eyebrow">{patient.institution || "Portal de pacientes"}</p>
+          <p className="eyebrow">Mi salud</p>
           <strong>{patient.name}</strong>
         </div>
         <button className="text-button" type="button" onClick={() => supabase.auth.signOut()}>Cerrar sesión</button>
@@ -109,7 +190,7 @@ export function PatientPortal() {
       {tab === "inicio" && <>
         <section className="card portal-card">
           <h3>Hola, {firstName}</h3>
-          <p>Aquí puedes revisar tus citas, exámenes e informes entregados por la institución.</p>
+            <p>Aquí puedes reunir tus atenciones institucionales y los documentos que subas personalmente.</p>
         </section>
         <div className="summary-tiles portal-tiles">
           <div className="card summary-card"><div><strong>{upcoming.length}</strong><span>Próximas citas</span></div></div>
@@ -132,7 +213,7 @@ export function PatientPortal() {
           <ul className="portal-list">
             {upcoming.map((item) => (
               <li key={item.id}>
-                <div><strong>{formatDate(item.date)}{item.time && ` · ${item.time} h`}</strong><span>{item.modality} · {item.reason}{item.location && ` · ${item.location}`}</span></div>
+                <div><strong>{formatDate(item.date)}{item.time && ` · ${item.time} h`}</strong><span>{item.institution}{item.institution && " · "}{item.modality} · {item.reason}{item.location && ` · ${item.location}`}</span></div>
                 <span className={`status ${statusClass[item.status] ?? "status-muted"}`}>{statusLabels[item.status] ?? item.status}</span>
               </li>
             ))}
@@ -147,7 +228,7 @@ export function PatientPortal() {
           <ul className="portal-list">
             {appointments.map((item) => (
               <li key={item.id}>
-                <div><strong>{formatDate(item.date)}{item.time && ` · ${item.time} h`}</strong><span>{item.modality} · {item.reason}</span></div>
+                <div><strong>{formatDate(item.date)}{item.time && ` · ${item.time} h`}</strong><span>{item.institution}{item.institution && " · "}{item.modality} · {item.reason}</span></div>
                 <span className="portal-list-badges">
                   <span className={`status ${statusClass[item.status] ?? "status-muted"}`}>{statusLabels[item.status] ?? item.status}</span>
                   {item.reportAvailable && <button className="text-button" type="button" onClick={() => { setTab("informes"); setOpenReport(item.id); }}>Ver informe</button>}
@@ -167,7 +248,7 @@ export function PatientPortal() {
           return (
             <section className={open ? "card portal-card portal-report portal-report-open" : "card portal-card portal-report"} key={report.id}>
               <button className="portal-report-head" type="button" aria-expanded={open} onClick={() => setOpenReport(open ? "" : report.appointmentId)}>
-                <div><strong>{report.modality} · {report.reason}</strong><span>{formatDate(report.date)}{report.time && ` · ${report.time} h`} · Publicado el {new Date(report.releasedAt).toLocaleDateString("es-CL")}</span></div>
+                <div><strong>{report.modality} · {report.reason}</strong><span>{report.institution}{report.institution && " · "}{formatDate(report.date)}{report.time && ` · ${report.time} h`} · Publicado el {new Date(report.releasedAt).toLocaleDateString("es-CL")}</span></div>
                 <span className="text-button">{open ? "Ocultar" : "Leer informe"}</span>
               </button>
               {open && <div className="portal-report-body">
@@ -190,21 +271,82 @@ export function PatientPortal() {
         })}
       </>}
 
+      {tab === "documentos" && <>
+        {documentRequests.map((request) => <section className="card portal-card portal-access-request" key={request.id}>
+          <p className="eyebrow">Solicitud de ficha vinculada</p>
+          <h3>{request.institution} solicita antecedentes</h3>
+          <p>{request.message}</p>
+          <p className="empty-inline">Elige exactamente qué documentos podrá consultar esta ficha. Ninguna otra institución recibirá acceso.</p>
+          <div className="portal-request-documents">
+            {documents.map((document) => <label key={document.id}><input type="checkbox" checked={(requestSelections[request.id] ?? []).includes(document.id)} onChange={() => toggleRequestDocument(request.id, document.id)} /> {document.filename} <span>{document.sourceInstitution}</span></label>)}
+          </div>
+          {!documents.length && <p className="empty-state">Primero debes subir un documento para responder.</p>}
+          <div className="form-actions"><button className="button primary" type="button" disabled={!!documentActionBusy || !documents.length} onClick={() => answerDocumentRequest(request.id, "approved")}>Autorizar seleccionados</button><button className="button secondary" type="button" disabled={!!documentActionBusy} onClick={() => answerDocumentRequest(request.id, "rejected")}>Rechazar</button></div>
+        </section>)}
+        <section className="card portal-card">
+          <h3>Subir documento personal</h3>
+          <p>Guarda un resultado externo sin incorporarlo a la ficha oficial de una institución.</p>
+          <form className="portal-document-form" onSubmit={uploadDocument}>
+            <label>Institución de origen<input name="sourceInstitution" required maxLength={160} placeholder="Ej. RedSalud" /></label>
+            <label>Fecha del documento<input name="documentDate" type="date" /></label>
+            <label>Tipo<select name="documentType" defaultValue="imaging"><option value="imaging">Imagenología</option><option value="laboratory">Laboratorio</option><option value="prescription">Receta u orden</option><option value="other">Otro</option></select></label>
+            <label className="wide-field">Archivo<input name="file" type="file" required accept="application/pdf,image/jpeg,image/png,application/dicom,.dcm" /></label>
+            <button className="button primary" type="submit" disabled={documentBusy}>{documentBusy ? "Subiendo…" : "Guardar documento"}</button>
+          </form>
+          <p className="empty-inline">PDF, JPG, PNG o una instancia DICOM, hasta 20 MB. El archivo quedará marcado como subido por el paciente.</p>
+          {documentNotice && <p className="form-notice" role="status">{documentNotice}</p>}
+        </section>
+        <section className="card portal-card">
+          <div className="card-heading"><div><h3>Mis documentos personales</h3><p>Solo tú puedes verlos hasta que autorices una ficha vinculada.</p></div><button className="button secondary" type="button" onClick={() => downloadFhirBundle().catch(() => setError("No fue posible exportar el registro FHIR."))}>Exportar FHIR</button></div>
+          <div className="linked-records"><strong>Fichas vinculadas:</strong> {patients.map((record) => <span className="status status-muted" key={record.id}>{record.institution}</span>)}</div>
+          {!documents.length && <p className="empty-inline">Todavía no has subido documentos.</p>}
+          <ul className="portal-list">
+            {documents.map((document) => <li key={document.id}>
+              <div className="portal-document-detail">
+                <strong>{document.filename}</strong>
+                <span>{document.sourceInstitution || "Origen no indicado"} · {documentTypeLabels[document.documentType]}{document.documentDate && ` · ${formatDate(document.documentDate)}`} · {(document.sizeBytes / 1024 / 1024).toFixed(1)} MB</span>
+                <span>Subido por ti · documento externo no verificado</span>
+                <div className="portal-document-actions">
+                  <a className="text-button" href={document.url} target="_blank" rel="noreferrer">Abrir</a>
+                  {patients.map((record) => {
+                    const shared = document.sharedPatientIds.includes(record.id);
+                    const review = document.reviewByPatientId[record.id];
+                    const action = `${document.id}:${record.id}`;
+                    return <span className="portal-record-access" key={record.id}>
+                      {review && <span className={`status ${review === "accepted" ? "status-completed" : "status-cancelled"}`}>{record.institution}: {review === "accepted" ? "incorporado" : "no incorporado"}</span>}
+                      <button className="text-button" type="button" disabled={!!documentActionBusy} onClick={() => changeDocumentShare(document.id, record.id, !shared)}>
+                        {documentActionBusy === action ? "Guardando…" : `${shared ? "Quitar acceso a mi ficha en" : "Dar acceso a mi ficha en"} ${record.institution || "institución"}`}
+                      </button>
+                    </span>;
+                  })}
+                  <button className="text-button danger-text" type="button" disabled={!!documentActionBusy} onClick={() => removeDocument(document.id, document.filename)}>
+                    {documentActionBusy === document.id ? "Eliminando…" : "Eliminar"}
+                  </button>
+                </div>
+              </div>
+            </li>)}
+          </ul>
+        </section>
+      </>}
+
       {tab === "informacion" && (
         <section className="card portal-card">
-          <h3>Mi información</h3>
-          <dl className="portal-info">
-            <div><dt>Identificación</dt><dd>{identifierTypeLabels[patient.identifierType as Patient["identifierType"]] ?? patient.identifierType} {patient.identifier}</dd></div>
-            <div><dt>Fecha de nacimiento</dt><dd>{formatDate(patient.birthDate)}</dd></div>
-            <div><dt>Sexo registral</dt><dd>{sexLabels[patient.sex as Patient["sex"]] ?? patient.sex}</dd></div>
-            <div><dt>Teléfono</dt><dd>{patient.phone || "—"}</dd></div>
-            <div><dt>Correo</dt><dd>{patient.email || "—"}</dd></div>
-            <div><dt>Dirección</dt><dd>{[patient.address, patient.comuna].filter(Boolean).join(", ") || "—"}</dd></div>
-            <div><dt>Previsión</dt><dd>{patient.prevision || "—"}</dd></div>
-            <div><dt>Alergias</dt><dd>{patient.allergies || "Sin registros"}</dd></div>
-            <div><dt>Antecedentes</dt><dd>{patient.morbidHistory || "Sin registros"}</dd></div>
-            <div><dt>Consentimiento</dt><dd>{patient.consentAt ? new Date(patient.consentAt).toLocaleDateString("es-CL") : "Pendiente"}</dd></div>
-          </dl>
+          <h3>Mis fichas institucionales</h3>
+          {patients.map((record) => <div className="portal-patient-record" key={record.id}>
+            <h4>{record.institution || "Institución"}</h4>
+            <dl className="portal-info">
+              <div><dt>Identificación</dt><dd>{identifierTypeLabels[record.identifierType as Patient["identifierType"]] ?? record.identifierType} {record.identifier}</dd></div>
+              <div><dt>Fecha de nacimiento</dt><dd>{formatDate(record.birthDate)}</dd></div>
+              <div><dt>Sexo registral</dt><dd>{sexLabels[record.sex as Patient["sex"]] ?? record.sex}</dd></div>
+              <div><dt>Teléfono</dt><dd>{record.phone || "—"}</dd></div>
+              <div><dt>Correo</dt><dd>{record.email || "—"}</dd></div>
+              <div><dt>Dirección</dt><dd>{[record.address, record.comuna].filter(Boolean).join(", ") || "—"}</dd></div>
+              <div><dt>Previsión</dt><dd>{record.prevision || "—"}</dd></div>
+              <div><dt>Alergias</dt><dd>{record.allergies || "Sin registros"}</dd></div>
+              <div><dt>Antecedentes</dt><dd>{record.morbidHistory || "Sin registros"}</dd></div>
+              <div><dt>Consentimiento</dt><dd>{record.consentAt ? new Date(record.consentAt).toLocaleDateString("es-CL") : "Pendiente"}</dd></div>
+            </dl>
+          </div>)}
           <p className="empty-inline">Si necesitas corregir estos datos, contacta a la institución.</p>
         </section>
       )}

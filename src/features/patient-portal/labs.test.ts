@@ -1,0 +1,28 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { buildPhrLabTrend, phrLabDraftOf, validatePhrLabDraft, type PhrLabResult } from "./labs.ts";
+
+test("valida una corrección de laboratorio y deriva su bandera", () => {
+  const parsed = validatePhrLabDraft({ analyte: " Glucosa ", value: "110", unit: "mg/dL", reference: "70 - 99", observedAt: "2026-07-01" });
+  assert.ok("value" in parsed);
+  assert.deepEqual(parsed.value, { analyte: "Glucosa", valueNum: 110, valueText: "", unit: "mg/dL", refLow: 70, refHigh: 99, refText: "", flag: "high", observedAt: "2026-07-01" });
+});
+
+test("la tendencia personal exige confirmación y unidades compatibles", () => {
+  const row = (id: string, date: string, value: number, unit = "mg/dL", status: PhrLabResult["reviewStatus"] = "confirmed"): PhrLabResult => ({
+    id, documentId: id, analyte: "Glucosa", loincCode: "", valueNum: value, valueText: "", unit,
+    refLow: 70, refHigh: 99, refText: "", flag: "normal", observedAt: date, source: "ocr", reviewStatus: status,
+  });
+  const trend = buildPhrLabTrend([row("a", "2026-05-01", 90), row("b", "2026-06-01", 1, "g/L"), row("c", "2026-07-01", 999, "mmol/L", "suggested")]);
+  assert.deepEqual(trend?.points.map(({ date, value }) => ({ date, value })), [{ date: "2026-05-01", value: 0.9 }, { date: "2026-06-01", value: 1 }]);
+});
+
+test("conserva referencias de un solo límite al editar", () => {
+  const result: PhrLabResult = { id: "a", documentId: "d", analyte: "Colesterol", loincCode: "", valueNum: 180, valueText: "", unit: "mg/dL", refLow: null, refHigh: 200, refText: "", flag: "normal", observedAt: "2026-07-01", source: "ocr", reviewStatus: "suggested" };
+  const draft = phrLabDraftOf(result);
+  assert.equal(draft.reference, "< 200");
+  const parsed = validatePhrLabDraft(draft);
+  if ("error" in parsed) assert.fail(parsed.error);
+  assert.equal(parsed.value.refHigh, 200);
+  assert.equal(parsed.value.flag, "normal");
+});

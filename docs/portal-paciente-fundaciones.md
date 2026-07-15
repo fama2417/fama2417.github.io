@@ -1,17 +1,17 @@
 # Portal de Paciente — Fundaciones (Fase 3A / 3A.1)
 
-Fundaciones de identidad, liberación de informes y RLS para el futuro portal externo.
-**No existe `/portal` ni UI todavía**; solo BD y helpers administrativos.
+Fundaciones de identidad, liberación de informes, PHR y RLS del portal externo en `/portal`.
 
 ## Estrategia de identidad (sin rol `patient`)
 
-- La identidad de paciente es el vínculo `patients.user_id uuid unique → auth.users(id)` (nullable).
+- La identidad de paciente es el vínculo `patients.user_id → auth.users(id)` (nullable),
+  único por tenant desde la fase PHR MVP: una cuenta puede enlazar una ficha por institución.
 - Un usuario paciente **no tiene fila en `profiles`**: `private.current_role()` y
   `private.current_tenant()` devuelven null, así que todas las políticas de staff lo niegan
   por defecto. Solo obtiene las políticas `patients read …` de la migración 0001.
 - Solo admin vincula/desvincula (`private.protect_patient_link`); el paciente no tiene UPDATE
   sobre `patients`, por lo que no puede tocar su propio `user_id`.
-- Helpers: `private.current_patient_id()` y `private.appointment_released_to_current_patient(uuid)`
+- Helpers: `private.current_patient_owns(uuid)` y `private.appointment_released_to_current_patient(uuid)`
   (security definer, `search_path=''`, EXECUTE solo para `authenticated`).
 
 ## Exclusión mutua staff/paciente (0002)
@@ -37,7 +37,7 @@ Fundaciones de identidad, liberación de informes y RLS para el futuro portal ex
 
 | Visible | Condición |
 |---|---|
-| `patients` | solo su propia fila |
+| `patients` | sus fichas vinculadas, una por institución |
 | `appointments` | solo las suyas |
 | `imaging_studies` | solo de sus citas (metadata: ids/uids) |
 | `radiology_reports` | solo `final` **y** liberado, de una cita propia |
@@ -148,3 +148,68 @@ Las columnas `user_id` y `released_to_patient_*` pueden quedarse (inertes sin po
 - Previews de instancias PACS en el portal (proxy con auth de paciente).
 - PDF servidor (hoy es impresión del navegador).
 - Paginación en la resolución por email (hoy hasta 1000 cuentas).
+
+## PHR autónomo — Fase 1
+
+La experiencia activa de `/portal` es ahora un registro personal de salud independiente de los
+tenants. La integración con fichas institucionales queda en espera: sus tablas y flujos se
+conservan, pero no aparecen en la navegación del usuario.
+
+- `phr_profiles` representa al propietario del PHR y se vincula directamente con `auth.users`.
+  No requiere una fila en `patients` ni en `profiles`.
+- El alta usa un enlace seguro enviado por Supabase Auth. Al primer ingreso solicita nombre,
+  fecha de nacimiento, identificador opcional y aceptación de privacidad; exige mayoría de edad.
+- La navegación se limita a Inicio, Documentos, Laboratorios, Línea de tiempo y Perfil y
+  seguridad. Agenda, informes institucionales, solicitudes y compartir con clínicas están ocultos.
+- `patient_documents` y el bucket privado `patient-documents` guardan los originales sin
+  `tenant_id`. La institución de origen es metadata declarada por el usuario, no un vínculo.
+- `POST /api/portal/documents` valida sesión PHR, tamaño, tipo y firma binaria de PDF/JPEG/PNG o
+  DICOM antes de almacenar. Los originales no se modifican.
+- `/api/portal/fhir` exporta un Bundle FHIR R4 personal con `Patient` y `DocumentReference`.
+  No mezcla fichas clínicas ni organizaciones mientras la integración esté en espera.
+- Perfil, exportación, cierre global de sesiones y eliminación de cuenta quedan disponibles en
+  autoservicio. Al eliminar la cuenta se borran perfil y archivos personales; una eventual copia
+  clínica incorporada legalmente por una institución se conserva de forma independiente.
+- `/portal/privacidad` es público y explica alcance, controles y uso futuro de automatización.
+- `/manifest.webmanifest` permite instalar el portal como PWA. No se cachean datos de salud
+  offline.
+
+### Configuración de autenticación
+
+En Supabase alojado se debe habilitar el registro por correo, agregar la URL de producción de
+`/portal` a las redirect URLs y configurar SMTP propio antes de abrir el producto a usuarios.
+El proveedor de correo local sirve solo para desarrollo. La service role continúa exclusivamente
+en rutas de servidor.
+
+### Verificación
+
+- `npm test` incluye validación de perfil, mayoría de edad, documentos y resolución de sesión.
+- `supabase/tests/portal_grants_check.sql` comprueba grants mínimos y RLS de `phr_profiles`.
+- `supabase/tests/phr_rls_test.sql` verifica aislamiento entre propietarios y conserva las
+  pruebas del flujo institucional dormido.
+- Smoke real validado: registro por correo, onboarding, cinco secciones y edición de perfil.
+
+## PHR autónomo — Fases 2 y 3
+
+- Un laboratorio PDF se guarda primero como documento privado. El usuario decide cuándo analizarlo;
+  el original no se transforma ni se reemplaza.
+- El backend reutiliza el parser local existente. Solo cuando el PDF no trae texto suficiente usa
+  la extracción de OpenAI configurada en servidor, con un máximo personal diario.
+- `phr_lab_imports` registra una sola extracción por documento y `phr_lab_results` conserva las
+  filas sugeridas. Ambas tablas están fuera de tenants, aisladas por `owner_user_id` y son de solo
+  lectura directa; las escrituras pasan por `/api/portal/labs`.
+- Todo resultado comienza en `suggested`: el propietario puede corregirlo, confirmarlo o descartarlo.
+  Solo los confirmados aparecen en historial, tendencias y exportación FHIR como `Observation`.
+- Las tendencias agrupan el mismo analito o LOINC y convierten únicamente unidades dimensionalmente
+  compatibles. El gráfico requiere al menos dos fechas y usa SVG nativo.
+- La eliminación del PDF elimina en cascada su extracción personal; una copia clínica institucional
+  previamente incorporada continúa siendo independiente.
+
+### Producción en Supabase y Render
+
+1. Aplicar las migraciones hasta `202607150008_phr_laboratory_results.sql` en Supabase.
+2. En Render configurar `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`,
+   `SUPABASE_SERVICE_ROLE_KEY` y `OPENAI_API_KEY` como secretos.
+3. Mantener `AI_EXTRACTION_ENABLED=true` y ajustar `PHR_AI_MAX_PER_DAY` según presupuesto.
+4. En Supabase Auth habilitar registro, SMTP y la URL pública de `/portal` como redirect URL.
+5. Ejecutar `portal_grants_check.sql` y `phr_rls_test.sql` después del push de esquema.

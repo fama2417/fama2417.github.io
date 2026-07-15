@@ -11,7 +11,11 @@ const plexMono = IBM_Plex_Mono({ subsets: ["latin"], weight: ["400", "600"], var
 export const metadata: Metadata = {
   title: "Agenda Clínica de Imagenología",
   description: "Agenda clínica, pacientes, worklist y visualización DICOM con Orthanc/OHIF.",
+  manifest: "/manifest.webmanifest",
+  icons: { icon: "/health-record-icon.svg", apple: "/health-record-icon.svg" },
 };
+
+export const viewport = { themeColor: "#0f766e" };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (

@@ -15,6 +15,8 @@ const authMessage = (error: AuthError) => {
   if (error.code === "email_not_confirmed") return "El correo del usuario todavía no está confirmado.";
   if (error.code === "invalid_credentials") return "Correo o contraseña incorrectos.";
   if (error.code === "email_provider_disabled") return "El acceso por correo está deshabilitado en Supabase.";
+  if (error.code === "over_email_send_rate_limit") return "Espera un momento antes de solicitar otro enlace.";
+  if (error.code === "signup_disabled") return "El registro de nuevas cuentas está deshabilitado.";
   return "No fue posible completar la autenticación.";
 };
 
@@ -35,9 +37,11 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     if (!session?.user.id) { setProfile(null); setKind("loading"); return; }
     supabase.from("profiles").select("full_name, role, platform, tenant_id, active_tenant_id, tenant:tenants!profiles_tenant_id_fkey(name), activeTenant:tenants!profiles_active_tenant_id_fkey(name)").eq("id", session.user.id).maybeSingle().then(async ({ data }) => {
       if (!data) {
-        // Sin perfil staff: ¿cuenta vinculada como paciente? (RLS solo devuelve la fila propia).
-        const patient = await supabase.from("patients").select("id").limit(1).maybeSingle();
-        setKind(resolveSessionKind({ hasProfile: false, hasPatient: !!patient.data }));
+        const [patient, phrProfile] = await Promise.all([
+          supabase.from("patients").select("id").limit(1).maybeSingle(),
+          supabase.from("phr_profiles").select("user_id").maybeSingle(),
+        ]);
+        setKind(resolveSessionKind({ hasProfile: false, hasPatient: !!patient.data, hasPhrProfile: !!phrProfile.data }));
         return;
       }
       setKind("staff");
@@ -60,7 +64,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
   // El paciente solo navega el portal; cualquier otra ruta lo devuelve a /portal.
   useEffect(() => {
-    if (kind === "patient" && pathname !== "/portal") router.replace("/portal");
+    if ((kind === "patient" || kind === "onboarding") && !pathname.startsWith("/portal")) router.replace("/portal");
     if (kind === "staff" && pathname === "/portal") router.replace("/");
   }, [kind, pathname, router]);
 
@@ -85,14 +89,17 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     return () => data.subscription.unsubscribe();
   }, []);
 
-  async function login(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
+  async function loginWithPassword(password: string) {
     setSubmitting(true);
     setError("");
-    const { error: authError } = await supabase.auth.signInWithPassword({ email, password: String(form.get("password")) });
+    const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
     setSubmitting(false);
     if (authError) setError(authMessage(authError));
+  }
+
+  async function login(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await loginWithPassword(String(new FormData(event.currentTarget).get("password")));
   }
 
   async function requestRecovery() {
@@ -103,6 +110,16 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     setSubmitting(false);
     if (authError) return setError(authMessage(authError));
     setNotice("Te enviamos un enlace para cambiar la contraseña.");
+  }
+
+  async function requestPatientAccess(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!email) return;
+    setSubmitting(true); setError(""); setNotice("");
+    const { error: authError } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: `${window.location.origin}/portal`, shouldCreateUser: true } });
+    setSubmitting(false);
+    if (authError) return setError(authMessage(authError));
+    setNotice("Te enviamos un enlace seguro. Revisa tu correo para continuar.");
   }
 
   async function updatePassword(event: FormEvent<HTMLFormElement>) {
@@ -127,6 +144,30 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       {error && <p className="form-error" role="alert">{error}</p>}
     </form></main>
   );
+  if (!session && pathname === "/portal/privacidad") return <>{children}</>;
+  if (!session && pathname === "/portal") return (
+    <main className="login-page phr-login-page">
+      <section className="phr-login-copy">
+        <p className="eyebrow">Mi Salud</p><h1>Todos tus exámenes, en un solo lugar.</h1>
+        <p>Guarda documentos de cualquier institución y construye un historial personal que tú controlas.</p>
+        <ul><li>Privado por defecto</li><li>El original nunca se modifica</li><li>Exporta o elimina tus datos cuando quieras</li></ul>
+      </section>
+      <form className="login-card" onSubmit={requestPatientAccess}>
+        <p className="eyebrow">Registro personal de salud</p><h2>Entrar o crear mi registro</h2>
+        <p>Usaremos tu correo para enviarte un enlace de acceso. Si es tu primera vez, completarás tu perfil al ingresar.</p>
+        <label>Correo electrónico<input value={email} onChange={(event) => setEmail(event.target.value)} name="email" type="email" autoComplete="email" required /></label>
+        <button className="button primary" disabled={submitting} type="submit">{submitting ? "Enviando…" : "Continuar con correo"}</button>
+        <details className="login-password"><summary>Ingresar con contraseña</summary>
+          <label>Contraseña<input name="password" type="password" autoComplete="current-password" /></label>
+          <button className="button secondary" disabled={submitting} type="button" onClick={(event) => void loginWithPassword(String(new FormData(event.currentTarget.form!).get("password")))}>Ingresar</button>
+          <button className="text-button" disabled={submitting} type="button" onClick={requestRecovery}>Olvidé mi contraseña</button>
+        </details>
+        {error && <p className="form-error" role="alert">{error}</p>}
+        {notice && <p className="form-notice" role="status">{notice}</p>}
+        <small>Al continuar aceptas el tratamiento de tus datos según nuestra <a href="/portal/privacidad">política de privacidad</a>.</small>
+      </form>
+    </main>
+  );
   if (!session) return (
     <main className="login-page">
       <form className="login-card" onSubmit={login}>
@@ -143,8 +184,8 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   );
 
   if (kind === "loading") return <main className="login-page"><p>Cargando sesión…</p></main>;
-  if (kind === "patient") {
-    if (pathname !== "/portal") return <main className="login-page"><p>Redirigiendo a tu portal…</p></main>;
+  if (kind === "patient" || kind === "onboarding") {
+    if (!pathname.startsWith("/portal")) return <main className="login-page"><p>Redirigiendo a tu portal…</p></main>;
     return <>{children}</>;
   }
   if (kind === "unknown") return (

@@ -1,0 +1,89 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { labCategory, labCategoryLabels, labCategoryOrder, labFlagLabels } from "@/features/reports/lab-observations.ts";
+import { buildPhrLabTrend, phrLabDraftOf, phrLabTrendKey, type PhrLabDraft, type PhrLabResult } from "./labs";
+import { analyzePhrLabDocument, discardPhrLabResult, fetchPhrLabResults, savePhrLabResult, type PortalDocument } from "./repository";
+
+const resultValue = (result: PhrLabResult) => `${result.valueNum ?? result.valueText}${result.unit ? ` ${result.unit}` : ""}`;
+const reference = (result: PhrLabResult) => result.refLow !== null || result.refHigh !== null ? `${result.refLow ?? "…"}–${result.refHigh ?? "…"}` : result.refText;
+const shownDate = (value: string) => new Date(`${value.slice(0, 10)}T00:00:00`).toLocaleDateString("es-CL", { day: "2-digit", month: "short", year: "numeric" });
+
+function SuggestedResult({ result, busy, onDone, onError }: { result: PhrLabResult; busy: boolean; onDone: (message: string) => Promise<void>; onError: (message: string) => void }) {
+  const [draft, setDraft] = useState<PhrLabDraft>(() => phrLabDraftOf(result));
+  const change = (patch: Partial<PhrLabDraft>) => setDraft((current) => ({ ...current, ...patch }));
+  async function save(confirm: boolean) {
+    try { await savePhrLabResult(result.id, draft, confirm); await onDone(confirm ? "Resultado confirmado." : "Corrección guardada."); }
+    catch (cause) { onError(cause instanceof Error ? cause.message : "No fue posible guardar el resultado."); }
+  }
+  async function discard() {
+    if (!window.confirm(`¿Descartar la sugerencia «${result.analyte}»?`)) return;
+    try { await discardPhrLabResult(result.id); await onDone("Sugerencia descartada."); }
+    catch (cause) { onError(cause instanceof Error ? cause.message : "No fue posible descartar el resultado."); }
+  }
+  return <article className="phr-lab-review-card">
+    <div className="phr-lab-review-grid">
+      <label>Analito<input value={draft.analyte} maxLength={160} onChange={(event) => change({ analyte: event.target.value })} /></label>
+      <label>Resultado<input value={draft.value} maxLength={80} onChange={(event) => change({ value: event.target.value })} /></label>
+      <label>Unidad<input value={draft.unit} maxLength={32} onChange={(event) => change({ unit: event.target.value })} /></label>
+      <label>Referencia<input value={draft.reference} maxLength={120} onChange={(event) => change({ reference: event.target.value })} /></label>
+      <label>Fecha<input type="date" value={draft.observedAt} onChange={(event) => change({ observedAt: event.target.value })} /></label>
+    </div>
+    <div className="phr-lab-review-meta"><span className={`lab-flag lab-flag-${result.flag || "none"}`}>{labFlagLabels[result.flag]}</span><span>{result.source === "ai" ? "Extracción automática" : "Lectura local del PDF"}</span></div>
+    <div className="phr-actions"><button className="button secondary" disabled={busy} type="button" onClick={() => void save(false)}>Guardar corrección</button><button className="button primary" disabled={busy} type="button" onClick={() => void save(true)}>Confirmar</button><button className="text-button danger-text" disabled={busy} type="button" onClick={() => void discard()}>Descartar</button></div>
+  </article>;
+}
+
+function TrendChart({ result, all }: { result: PhrLabResult; all: PhrLabResult[] }) {
+  const trend = buildPhrLabTrend(all.filter((item) => phrLabTrendKey(item) === phrLabTrendKey(result)));
+  if (!trend) return null;
+  const values = trend.points.map((point) => point.value), min = Math.min(...values), max = Math.max(...values), spread = max - min || 1;
+  const points = trend.points.map((point, index) => `${20 + index * (280 / (trend.points.length - 1))},${100 - ((point.value - min) / spread) * 75}`).join(" ");
+  const latest = trend.points[trend.points.length - 1];
+  return <article className="phr-trend-card">
+    <div><strong>{trend.analyte}</strong><span>{latest.value.toLocaleString("es-CL")} {trend.unit}</span></div>
+    <svg viewBox="0 0 320 120" role="img" aria-label={`Tendencia de ${trend.analyte}`}><title>Tendencia de {trend.analyte}</title><polyline points={points} fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />{trend.points.map((point, index) => <circle key={point.id} cx={20 + index * (280 / (trend.points.length - 1))} cy={100 - ((point.value - min) / spread) * 75} r="4"><title>{shownDate(point.date)}: {point.value} {trend.unit}</title></circle>)}</svg>
+    <small>{shownDate(trend.points[0].date)} → {shownDate(latest.date)} · {trend.points.length} mediciones</small>
+  </article>;
+}
+
+export function PhrLaboratories({ documents, onUpload }: { documents: PortalDocument[]; onUpload: () => void }) {
+  const [results, setResults] = useState<PhrLabResult[]>([]), [loading, setLoading] = useState(true), [busyId, setBusyId] = useState("");
+  const [error, setError] = useState(""), [notice, setNotice] = useState("");
+  const labs = documents.filter((document) => document.documentType === "laboratory");
+  async function reload() { setResults(await fetchPhrLabResults()); setLoading(false); }
+  useEffect(() => { reload().catch(() => { setError("No fue posible cargar los resultados."); setLoading(false); }); }, [documents.map((document) => document.id).join("|")]);
+
+  async function analyze(document: PortalDocument) {
+    setBusyId(document.id); setError(""); setNotice("");
+    try {
+      const response = await analyzePhrLabDocument(document.id); await reload();
+      setNotice(`${response.duplicate ? "Este PDF ya estaba analizado." : `${response.created} resultado(s) listos para revisión.`}${response.warnings.length ? ` ${response.warnings.join(" ")}` : ""}`);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "No fue posible analizar el laboratorio."); }
+    finally { setBusyId(""); }
+  }
+  async function changed(message: string) { setBusyId("refresh"); await reload(); setBusyId(""); setNotice(message); setError(""); }
+
+  const suggested = results.filter((result) => result.reviewStatus === "suggested");
+  const confirmed = results.filter((result) => result.reviewStatus === "confirmed");
+  const analyzedDocuments = new Set(results.map((result) => result.documentId));
+  const categories = labCategoryOrder.map((key) => ({ key, items: confirmed.filter((result) => labCategory({ analyte: result.analyte }) === key) })).filter((group) => group.items.length);
+  const trends = useMemo(() => {
+    const seen = new Set<string>();
+    return confirmed.filter((result) => { const key = phrLabTrendKey(result); if (seen.has(key)) return false; seen.add(key); return !!buildPhrLabTrend(confirmed.filter((item) => phrLabTrendKey(item) === key)); });
+  }, [confirmed]);
+
+  return <div className="phr-labs-stack">
+    {error && <p className="notice danger-text" role="alert">{error}</p>}{notice && <p className="form-notice" role="status">{notice}</p>}
+    <section className="card portal-card"><div className="card-heading"><div><p className="eyebrow">Extracción segura</p><h2>Mis laboratorios</h2><p>Analiza una copia de trabajo. El PDF original no cambia y ningún resultado cuenta hasta que lo confirmes.</p></div><button className="button primary" type="button" onClick={onUpload}>Subir laboratorio</button></div>
+      {!labs.length ? <p className="empty-state">Todavía no tienes laboratorios.</p> : <ul className="portal-list">{labs.map((document) => <li key={document.id}><div className="portal-document-detail"><strong>{document.filename}</strong><span>{document.sourceInstitution} · {shownDate(document.documentDate ?? document.createdAt)}</span></div><div className="portal-document-actions"><a className="button secondary" href={document.url} target="_blank" rel="noreferrer">Abrir PDF</a>{document.mimeType !== "application/pdf" ? <span>OCR disponible para PDF</span> : analyzedDocuments.has(document.id) ? <span className="status-badge">Analizado</span> : <button className="button primary" disabled={!!busyId} type="button" onClick={() => void analyze(document)}>{busyId === document.id ? "Analizando…" : "Analizar resultados"}</button>}</div></li>)}</ul>}
+    </section>
+
+    {suggested.length > 0 && <section className="card portal-card"><p className="eyebrow">Revisión obligatoria</p><h2>{suggested.length} resultado(s) sugerido(s)</h2><p>Corrige, confirma o descarta cada fila. Esto no reemplaza la interpretación de un profesional.</p><div className="phr-lab-review-list">{suggested.map((result) => <SuggestedResult key={result.id} result={result} busy={!!busyId} onDone={changed} onError={setError} />)}</div></section>}
+
+    {confirmed.length > 0 && <section className="card portal-card"><p className="eyebrow">Resultados confirmados</p><h2>Historial de laboratorio</h2>{categories.map((group) => <div className="phr-lab-category" key={group.key}><h3>{labCategoryLabels[group.key]}</h3><ul>{group.items.map((result) => <li key={result.id}><div><strong>{result.analyte}</strong><span>{shownDate(result.observedAt)}</span></div><div><strong>{resultValue(result)}</strong><span>{reference(result)} · {labFlagLabels[result.flag]}</span></div></li>)}</ul></div>)}</section>}
+
+    {confirmed.length > 0 && <section className="card portal-card"><p className="eyebrow">Evolución</p><h2>Tendencias</h2>{trends.length ? <div className="phr-trends-grid">{trends.map((result) => <TrendChart key={phrLabTrendKey(result)} result={result} all={confirmed} />)}</div> : <p className="empty-state">Las tendencias aparecerán al confirmar dos mediciones comparables del mismo analito.</p>}</section>}
+    {loading && <p className="empty-state">Cargando resultados…</p>}
+  </div>;
+}

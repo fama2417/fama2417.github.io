@@ -1,4 +1,24 @@
-import { supabase } from "@/lib/supabase-client";
+import { authenticatedFetch, supabase } from "@/lib/supabase-client";
+import { validatePatientDocument } from "./documents";
+import type { PhrLabDraft, PhrLabResult } from "./labs";
+
+export type PhrProfile = { userId: string; fullName: string; birthDate: string; identifier: string; createdAt: string };
+
+export async function fetchPhrProfile(): Promise<PhrProfile | null> {
+  const { data, error } = await supabase.from("phr_profiles").select("user_id, full_name, birth_date, identifier, created_at").maybeSingle();
+  if (error) throw error;
+  return data ? { userId: data.user_id, fullName: data.full_name, birthDate: data.birth_date, identifier: data.identifier, createdAt: data.created_at } : null;
+}
+
+export async function savePhrProfile(input: { fullName: string; birthDate: string; identifier: string; acceptedPrivacy?: boolean }, exists = false) {
+  await authenticatedFetch("/api/portal/account", {
+    method: exists ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input),
+  });
+}
+
+export async function deletePhrAccount(confirmation: string) {
+  await authenticatedFetch("/api/portal/account", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirmation }) });
+}
 
 /**
  * Data layer del Portal de Paciente. Reglas:
@@ -14,59 +34,58 @@ export type PortalPatient = {
   allergies: string; morbidHistory: string; consentAt: string | null; institution: string;
 };
 
-export async function fetchCurrentPatient(): Promise<PortalPatient | null> {
+export async function fetchCurrentPatients(): Promise<PortalPatient[]> {
   const { data, error } = await supabase.from("patients")
     .select("id, identifier, identifier_type, full_name, birth_date, sex, phone, email, address, comuna, prevision, allergies, morbid_history, privacy_consent_at, tenant:tenants(name)")
-    .limit(1).maybeSingle();
+    .order("full_name");
   if (error) throw error;
-  if (!data) return null;
-  return {
-    id: data.id, identifier: data.identifier, identifierType: data.identifier_type ?? "run", name: data.full_name,
-    birthDate: data.birth_date, sex: data.sex, phone: data.phone ?? "", email: data.email ?? "",
-    address: data.address ?? "", comuna: data.comuna ?? "", prevision: data.prevision ?? "",
-    allergies: data.allergies ?? "", morbidHistory: data.morbid_history ?? "", consentAt: data.privacy_consent_at,
-    institution: (data.tenant as unknown as { name: string } | null)?.name ?? "",
-  };
+  return (data ?? []).map((row) => ({
+    id: row.id, identifier: row.identifier, identifierType: row.identifier_type ?? "run", name: row.full_name,
+    birthDate: row.birth_date, sex: row.sex, phone: row.phone ?? "", email: row.email ?? "",
+    address: row.address ?? "", comuna: row.comuna ?? "", prevision: row.prevision ?? "",
+    allergies: row.allergies ?? "", morbidHistory: row.morbid_history ?? "", consentAt: row.privacy_consent_at,
+    institution: (row.tenant as unknown as { name: string } | null)?.name ?? "",
+  })).sort((a, b) => a.institution.localeCompare(b.institution, "es"));
 }
 
 export type PortalAppointment = {
   id: string; date: string; time: string; modality: string; reason: string; status: string;
-  location: string; reportAvailable: boolean;
+  location: string; institution: string; reportAvailable: boolean;
 };
 
 /** Citas propias (RLS). El informe embebido solo aparece si está liberado, gracias a la política del paciente. */
 export async function fetchPatientAppointments(): Promise<PortalAppointment[]> {
   const { data, error } = await supabase.from("appointments")
-    .select("id, appointment_date, start_time, modality, reason, status, location_name, report:radiology_reports(id)")
+    .select("id, appointment_date, start_time, modality, reason, status, location_name, report:radiology_reports(id), patient:patients!inner(tenant:tenants(name))")
     .order("appointment_date", { ascending: false }).order("start_time", { ascending: false });
   if (error) throw error;
-  return ((data ?? []) as unknown as { id: string; appointment_date: string; start_time: string; modality: string; reason: string; status: string; location_name: string; report: { id: string } | null }[])
+  return ((data ?? []) as unknown as { id: string; appointment_date: string; start_time: string; modality: string; reason: string; status: string; location_name: string; report: { id: string } | null; patient: { tenant: { name: string } | null } }[])
     .map((row) => ({
       id: row.id, date: row.appointment_date, time: (row.start_time ?? "").slice(0, 5), modality: row.modality,
-      reason: row.reason, status: row.status, location: row.location_name ?? "", reportAvailable: !!row.report,
+      reason: row.reason, status: row.status, location: row.location_name ?? "", institution: row.patient.tenant?.name ?? "", reportAvailable: !!row.report,
     }));
 }
 
 export type PortalReport = {
   id: string; appointmentId: string; date: string; time: string; modality: string; reason: string;
   clinicalIndication: string; technique: string; comparison: string; findings: string; impression: string;
-  signedAt: string | null; signerName: string; signerRegistration: string; releasedAt: string;
+  signedAt: string | null; signerName: string; signerRegistration: string; releasedAt: string; institution: string;
 };
 
 /** Informes liberados al paciente (RLS ya garantiza final + released + propios). */
 export async function fetchReleasedReports(): Promise<PortalReport[]> {
   const { data, error } = await supabase.from("radiology_reports")
-    .select("id, appointment_id, clinical_indication, technique, comparison, findings, impression, signed_at, signer_name, signer_registration, released_to_patient_at, appointment:appointments!inner(appointment_date, start_time, modality, reason)")
+    .select("id, appointment_id, clinical_indication, technique, comparison, findings, impression, signed_at, signer_name, signer_registration, released_to_patient_at, appointment:appointments!inner(appointment_date, start_time, modality, reason, patient:patients!inner(tenant:tenants(name)))")
     .order("released_to_patient_at", { ascending: false });
   if (error) throw error;
-  return ((data ?? []) as unknown as { id: string; appointment_id: string; clinical_indication: string; technique: string; comparison: string; findings: string; impression: string; signed_at: string | null; signer_name: string; signer_registration: string; released_to_patient_at: string; appointment: { appointment_date: string; start_time: string; modality: string; reason: string } }[])
+  return ((data ?? []) as unknown as { id: string; appointment_id: string; clinical_indication: string; technique: string; comparison: string; findings: string; impression: string; signed_at: string | null; signer_name: string; signer_registration: string; released_to_patient_at: string; appointment: { appointment_date: string; start_time: string; modality: string; reason: string; patient: { tenant: { name: string } | null } } }[])
     .map((row) => ({
       id: row.id, appointmentId: row.appointment_id, date: row.appointment.appointment_date,
       time: (row.appointment.start_time ?? "").slice(0, 5), modality: row.appointment.modality, reason: row.appointment.reason,
       clinicalIndication: row.clinical_indication ?? "", technique: row.technique ?? "", comparison: row.comparison ?? "",
       findings: row.findings ?? "", impression: row.impression ?? "",
       signedAt: row.signed_at, signerName: row.signer_name ?? "", signerRegistration: row.signer_registration ?? "",
-      releasedAt: row.released_to_patient_at,
+      releasedAt: row.released_to_patient_at, institution: row.appointment.patient.tenant?.name ?? "",
     }));
 }
 
@@ -96,4 +115,115 @@ export async function fetchReleasedAddenda(): Promise<PortalAddendum[]> {
   if (error) throw error;
   return ((data ?? []) as { id: string; appointment_id: string; text: string; signed_at: string; signer_name: string }[])
     .map((row) => ({ id: row.id, appointmentId: row.appointment_id, text: row.text, signedAt: row.signed_at, signerName: row.signer_name ?? "" }));
+}
+
+export type PortalDocument = {
+  id: string; filename: string; mimeType: string; sizeBytes: number; documentDate: string | null;
+  documentType: "imaging" | "laboratory" | "prescription" | "other"; sourceInstitution: string; createdAt: string; url: string;
+  sharedPatientIds: string[]; reviewByPatientId: Record<string, "accepted" | "rejected">;
+};
+
+export async function fetchPatientDocuments(): Promise<PortalDocument[]> {
+  const [documents, shares, reviews] = await Promise.all([
+    supabase.from("patient_documents")
+      .select("id, original_filename, storage_path, mime_type, size_bytes, document_date, document_type, source_institution, created_at")
+      .order("document_date", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false }),
+    supabase.from("patient_document_shares").select("document_id, patient_id").is("revoked_at", null),
+    supabase.from("patient_document_reviews").select("document_id, patient_id, status, created_at").order("created_at", { ascending: false }),
+  ]);
+  if (documents.error || shares.error || reviews.error) throw documents.error ?? shares.error ?? reviews.error;
+  const rows = (documents.data ?? []) as { id: string; original_filename: string; storage_path: string; mime_type: string; size_bytes: number; document_date: string | null; document_type: PortalDocument["documentType"]; source_institution: string; created_at: string }[];
+  const sharedByDocument = new Map<string, string[]>();
+  for (const share of shares.data ?? []) sharedByDocument.set(share.document_id, [...(sharedByDocument.get(share.document_id) ?? []), share.patient_id]);
+  const reviewedByDocument = new Map<string, Record<string, "accepted" | "rejected">>();
+  for (const review of reviews.data ?? []) {
+    if (!review.document_id) continue;
+    const current = reviewedByDocument.get(review.document_id) ?? {};
+    if (!current[review.patient_id]) current[review.patient_id] = review.status as "accepted" | "rejected";
+    reviewedByDocument.set(review.document_id, current);
+  }
+  return Promise.all(rows.map(async (row) => {
+    const signed = await supabase.storage.from("patient-documents").createSignedUrl(row.storage_path, 3600);
+    if (signed.error) throw signed.error;
+    return {
+      id: row.id, filename: row.original_filename, mimeType: row.mime_type, sizeBytes: row.size_bytes,
+      documentDate: row.document_date, documentType: row.document_type, sourceInstitution: row.source_institution,
+      createdAt: row.created_at, url: signed.data.signedUrl, sharedPatientIds: sharedByDocument.get(row.id) ?? [], reviewByPatientId: reviewedByDocument.get(row.id) ?? {},
+    };
+  }));
+}
+
+export async function uploadPatientDocument(input: { file: File; documentDate: string; documentType: PortalDocument["documentType"]; sourceInstitution: string }) {
+  const validation = validatePatientDocument(input.file);
+  if (validation) throw new Error(validation);
+  const form = new FormData();
+  form.set("file", input.file); form.set("documentDate", input.documentDate); form.set("documentType", input.documentType); form.set("sourceInstitution", input.sourceInstitution);
+  await authenticatedFetch("/api/portal/documents", { method: "POST", body: form });
+}
+
+export async function setPatientDocumentShare(documentId: string, patientId: string, shared: boolean) {
+  await authenticatedFetch("/api/portal/documents", {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ documentId, patientId, shared }),
+  });
+}
+
+export async function deletePatientDocument(documentId: string) {
+  await authenticatedFetch(`/api/portal/documents?documentId=${encodeURIComponent(documentId)}`, { method: "DELETE" });
+}
+
+type PhrLabRow = {
+  id: string; document_id: string; loinc_code: string; analyte: string; value_num: number | null; value_text: string;
+  unit: string; ref_low: number | null; ref_high: number | null; ref_text: string; flag: PhrLabResult["flag"];
+  observed_at: string; source: PhrLabResult["source"]; review_status: PhrLabResult["reviewStatus"];
+};
+
+export async function fetchPhrLabResults(): Promise<PhrLabResult[]> {
+  const { data, error } = await supabase.from("phr_lab_results")
+    .select("id, document_id, loinc_code, analyte, value_num, value_text, unit, ref_low, ref_high, ref_text, flag, observed_at, source, review_status")
+    .order("observed_at", { ascending: false }).order("analyte");
+  if (error) throw error;
+  return ((data ?? []) as PhrLabRow[]).map((row) => ({
+    id: row.id, documentId: row.document_id, loincCode: row.loinc_code, analyte: row.analyte,
+    valueNum: row.value_num, valueText: row.value_text, unit: row.unit, refLow: row.ref_low,
+    refHigh: row.ref_high, refText: row.ref_text, flag: row.flag, observedAt: row.observed_at,
+    source: row.source, reviewStatus: row.review_status,
+  }));
+}
+
+export async function analyzePhrLabDocument(documentId: string) {
+  const response = await authenticatedFetch("/api/portal/labs", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ documentId }),
+  });
+  return await response.json() as { created: number; duplicate: boolean; warnings: string[] };
+}
+
+export async function savePhrLabResult(resultId: string, draft: PhrLabDraft, confirm = false) {
+  await authenticatedFetch("/api/portal/labs", {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ resultId, confirm, ...draft }),
+  });
+}
+
+export async function discardPhrLabResult(resultId: string) {
+  await authenticatedFetch(`/api/portal/labs?resultId=${encodeURIComponent(resultId)}`, { method: "DELETE" });
+}
+
+export type PortalDocumentRequest = { id: string; patientId: string; institution: string; message: string; createdAt: string };
+
+export async function fetchPatientDocumentRequests(): Promise<PortalDocumentRequest[]> {
+  const { data, error } = await supabase.from("patient_document_requests")
+    .select("id, patient_id, message, created_at, patient:patients!inner(tenant:tenants(name))").eq("status", "pending").order("created_at", { ascending: false });
+  if (error) throw error;
+  return ((data ?? []) as unknown as { id: string; patient_id: string; message: string; created_at: string; patient: { tenant: { name: string } | null } }[]).map((row) => ({
+    id: row.id, patientId: row.patient_id, institution: row.patient.tenant?.name ?? "Institución", message: row.message, createdAt: row.created_at,
+  }));
+}
+
+export async function respondToDocumentRequest(requestId: string, status: "approved" | "rejected", documentIds: string[] = []) {
+  await authenticatedFetch("/api/portal/document-requests", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ requestId, status, documentIds }) });
+}
+
+export async function downloadFhirBundle() {
+  const response = await authenticatedFetch("/api/portal/fhir");
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a"); link.href = url; link.download = "mi-registro-fhir.json"; link.click(); URL.revokeObjectURL(url);
 }
