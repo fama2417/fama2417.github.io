@@ -3,7 +3,7 @@ import { convertLabValue, labFlag, parseLabNumber, parseLabReference, type LabFl
 export type PhrLabResult = {
   id: string; documentId: string; analyte: string; loincCode: string; valueNum: number | null; valueText: string;
   unit: string; refLow: number | null; refHigh: number | null; refText: string; flag: LabFlag; observedAt: string;
-  source: "ocr" | "ai"; reviewStatus: "suggested" | "confirmed"; loincMetadata?: LoincMetadata;
+  source: "ocr" | "ai"; sourceSentence?: string; reviewStatus: "suggested" | "confirmed"; loincMetadata?: LoincMetadata;
 };
 
 export type PhrLabDraft = { analyte: string; value: string; unit: string; reference: string; observedAt: string };
@@ -29,6 +29,14 @@ export const phrLabDraftOf = (result: PhrLabResult): PhrLabDraft => ({
 });
 
 export const phrLabTrendKey = (result: Pick<PhrLabResult, "loincCode" | "analyte">) => result.loincCode.trim() || plain(result.analyte);
+
+export function phrSpecimenLabel(metadata?: LoincMetadata) {
+  const specimen = plain(metadata?.specimen ?? "");
+  if (/urine|urin/.test(specimen)) return "Orina";
+  if (/ser\/plas|serum|plasma/.test(specimen)) return "Sangre (suero/plasma)";
+  if (/\bbld\b|blood|whole blood/.test(specimen)) return "Sangre";
+  return "Muestra no determinada";
+}
 
 export function reusedPhrLoinc(rows: Pick<PhrLabResult, "analyte" | "unit">[], prior: Pick<PhrLabResult, "analyte" | "unit" | "loincCode">[]) {
   const priorByKey = new Map<string, Set<string>>();

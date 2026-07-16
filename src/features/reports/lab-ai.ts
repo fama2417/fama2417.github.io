@@ -47,6 +47,8 @@ export type LabCandidate = {
   source: "ocr" | "ai";
 };
 
+export type LabSourceBox = { x: number; y: number; width: number; height: number };
+
 export type PreparedLabPdf = {
   patientName: string;
   patientIdentifier: string;
@@ -92,6 +94,21 @@ export function groupLabLayoutPages(pages: StructuredTextItem[][]): LayoutRow[][
     }
     return rows.sort((a, b) => b.y - a.y).map((row, index) => ({ ...row, id: `p${pageIndex + 1}-r${index + 1}`, items: row.items.sort((a, b) => a.x - b.x) }));
   });
+}
+
+/** Ubica el valor dentro de su fila PDF; soporta tanto columnas separadas como líneas monoespaciadas. */
+export function labSourceHighlight(items: StructuredTextItem[], value: string, analyte = ""): LabSourceBox | null {
+  const clean = value.trim();
+  if (!clean) return null;
+  const exact = items.find((item) => item.str.trim() === clean);
+  if (exact) return { x: exact.x, y: exact.y, width: exact.width, height: exact.height };
+  for (const item of items) {
+    const analyteIndex = analyte ? item.str.indexOf(analyte) : -1;
+    const index = item.str.indexOf(clean, analyteIndex < 0 ? 0 : analyteIndex + analyte.length);
+    if (index < 0 || !item.str.length) continue;
+    return { x: item.x + item.width * index / item.str.length, y: item.y, width: Math.max(12, item.width * clean.length / item.str.length), height: item.height };
+  }
+  return null;
 }
 
 function findHeader(rows: LayoutRow[]): Header | null {
@@ -290,7 +307,7 @@ export function parseLabLayoutPages(pages: StructuredTextItem[][]): Omit<Prepare
 }
 
 export async function prepareLabPdf(bytes: Uint8Array): Promise<PreparedLabPdf> {
-  const extracted = await extractTextItems(bytes);
+  const extracted = await extractTextItems(bytes.slice());
   const parsed = parseLabLayoutPages(extracted.items);
   const scanned = extracted.items.every((page) => page.every((item) => !item.str.trim()));
   return { ...parsed, scanned, needsAi: scanned || parsed.needsAi, pageCount: extracted.totalPages };
@@ -369,14 +386,14 @@ export async function structureLabDocument(input: { text?: string; pdfBytes?: Ui
   };
 }
 
-export async function suggestLabLoinc(rows: Pick<LabCandidate, "analyte" | "unit" | "valueNum" | "valueText">[]) {
+export async function suggestLabLoinc(rows: Pick<LabCandidate, "analyte" | "unit" | "valueNum" | "valueText">[], englishTerms: string[] = []) {
   const config = aiConfig();
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const response = await client.responses.parse({
     model: config.model,
     input: [
-      { role: "system", content: `Homologa analitos de laboratorio a LOINC. Devuelve un código sólo cuando el analito y la unidad permitan una equivalencia suficientemente específica; si muestra, método o significado son ambiguos, usa loincCode vacío y confidence baja. No inventes códigos. sourceId debe copiarse exactamente.` },
-      { role: "user", content: JSON.stringify(rows.map((row, index) => ({ sourceId: String(index), analyte: row.analyte, unit: row.unit, valueType: row.valueNum === null ? "text" : "number" }))) },
+      { role: "system", content: `Homologa analitos de laboratorio a LOINC. El nombre original puede estar en español o abreviado; usa englishSearchTerm como equivalencia inglesa, sin reemplazar el significado del original. Devuelve un código sólo cuando analito, unidad y una muestra explícita o inequívoca en el nombre permitan una equivalencia suficientemente específica; si muestra, método o significado son ambiguos, usa loincCode vacío y confidence baja. No inventes códigos. sourceId debe copiarse exactamente.` },
+      { role: "user", content: JSON.stringify(rows.map((row, index) => ({ sourceId: String(index), analyte: row.analyte, englishSearchTerm: englishTerms[index] ?? "", unit: row.unit, valueType: row.valueNum === null ? "text" : "number" }))) },
     ],
     text: { format: zodTextFormat(LabLoincExtractionSchema, "lab_loinc") },
     max_output_tokens: Math.min(config.maxOutputTokens, 2000),

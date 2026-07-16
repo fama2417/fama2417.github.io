@@ -205,12 +205,12 @@ export async function deletePatientDocument(documentId: string) {
 type PhrLabRow = {
   id: string; document_id: string; loinc_code: string; analyte: string; value_num: number | null; value_text: string;
   unit: string; ref_low: number | null; ref_high: number | null; ref_text: string; flag: PhrLabResult["flag"];
-  observed_at: string; source: PhrLabResult["source"]; review_status: PhrLabResult["reviewStatus"];
+  observed_at: string; source: PhrLabResult["source"]; source_sentence: string; review_status: PhrLabResult["reviewStatus"];
 };
 
 export async function fetchPhrLabResults(ownerUserId?: string): Promise<PhrLabResult[]> {
   let query = supabase.from("phr_lab_results")
-    .select("id, document_id, loinc_code, analyte, value_num, value_text, unit, ref_low, ref_high, ref_text, flag, observed_at, source, review_status")
+    .select("id, document_id, loinc_code, analyte, value_num, value_text, unit, ref_low, ref_high, ref_text, flag, observed_at, source, source_sentence, review_status")
     .order("observed_at", { ascending: false }).order("analyte");
   if (ownerUserId) query = query.eq("owner_user_id", ownerUserId);
   const { data, error } = await query;
@@ -229,7 +229,7 @@ export async function fetchPhrLabResults(ownerUserId?: string): Promise<PhrLabRe
     id: row.id, documentId: row.document_id, loincCode: row.loinc_code, analyte: row.analyte,
     valueNum: row.value_num, valueText: row.value_text, unit: row.unit, refLow: row.ref_low,
     refHigh: row.ref_high, refText: row.ref_text, flag: row.flag, observedAt: row.observed_at,
-    source: row.source, reviewStatus: row.review_status, loincMetadata: metadataByCode.get(row.loinc_code),
+    source: row.source, sourceSentence: row.source_sentence, reviewStatus: row.review_status, loincMetadata: metadataByCode.get(row.loinc_code),
   }));
 }
 
@@ -269,6 +269,16 @@ export async function downloadFhirBundle() {
   const response = await authenticatedFetch("/api/portal/fhir");
   const url = URL.createObjectURL(await response.blob());
   const link = document.createElement("a"); link.href = url; link.download = "mi-registro-fhir.json"; link.click(); URL.revokeObjectURL(url);
+}
+
+export async function confirmPhrLabResults(resultIds: string[]) {
+  const response = await authenticatedFetch("/api/portal/labs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ resultIds, confirm: true }) });
+  return await response.json() as { confirmed: number };
+}
+
+export async function fetchPhrLabSource(resultId: string) {
+  const response = await authenticatedFetch(`/api/portal/labs?resultId=${encodeURIComponent(resultId)}`);
+  return { url: URL.createObjectURL(await response.blob()), highlighted: response.headers.get("X-PHR-Highlight") === "true" };
 }
 
 export type PhrFavorite = { trendKey: string; label: string };

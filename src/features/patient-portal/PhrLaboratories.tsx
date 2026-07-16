@@ -2,17 +2,17 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { labCategory, labCategoryLabels, labCategoryOrder, labFlagLabels, type LabCategory } from "@/features/reports/lab-observations.ts";
-import { buildPhrLabTrend, phrLabDraftOf, phrLabTrendKey, type PhrLabDraft, type PhrLabResult } from "./labs";
+import { buildPhrLabTrend, phrLabDraftOf, phrLabTrendKey, phrSpecimenLabel, type PhrLabDraft, type PhrLabResult } from "./labs";
 import { measurementExplanation, reportedRangeLabel } from "./longitudinal";
 import { PhrPeriodComparison } from "./PhrLongitudinal";
 import { friendlyDocumentName } from "./presentation";
-import { analyzePhrLabDocument, discardPhrLabResult, downloadPhrFile, fetchPhrFavorites, fetchPhrLabResults, savePhrLabResult, setPhrFavorite, type PortalDocument, type PhrFavorite } from "./repository";
+import { analyzePhrLabDocument, confirmPhrLabResults, discardPhrLabResult, downloadPhrFile, fetchPhrFavorites, fetchPhrLabResults, fetchPhrLabSource, savePhrLabResult, setPhrFavorite, type PortalDocument, type PhrFavorite } from "./repository";
 
 const resultValue = (result: PhrLabResult) => `${result.valueNum ?? result.valueText}${result.unit ? ` ${result.unit}` : ""}`;
 const reference = (result: PhrLabResult) => result.refLow !== null || result.refHigh !== null ? `${result.refLow ?? "…"}–${result.refHigh ?? "…"}` : result.refText;
 const shownDate = (value: string) => new Date(`${value.slice(0, 10)}T00:00:00`).toLocaleDateString("es-CL", { day: "2-digit", month: "short", year: "numeric" });
 
-function SuggestedResult({ result, busy, onDone, onError }: { result: PhrLabResult; busy: boolean; onDone: (message: string) => Promise<void>; onError: (message: string) => void }) {
+function SuggestedResult({ result, busy, selected, onSource, onDone, onError }: { result: PhrLabResult; busy: boolean; selected: boolean; onSource: (result: PhrLabResult) => Promise<void>; onDone: (message: string) => Promise<void>; onError: (message: string) => void }) {
   const [draft, setDraft] = useState<PhrLabDraft>(() => phrLabDraftOf(result));
   const change = (patch: Partial<PhrLabDraft>) => setDraft((current) => ({ ...current, ...patch }));
   async function save(confirm: boolean) {
@@ -24,7 +24,7 @@ function SuggestedResult({ result, busy, onDone, onError }: { result: PhrLabResu
     try { await discardPhrLabResult(result.id); await onDone("Sugerencia descartada."); }
     catch (cause) { onError(cause instanceof Error ? cause.message : "No fue posible descartar el resultado."); }
   }
-  return <article className="phr-lab-review-card">
+  return <article className={`phr-lab-review-card${selected ? " selected" : ""}`}>
     <div className="phr-lab-review-grid">
       <label>Analito<input value={draft.analyte} maxLength={160} onChange={(event) => change({ analyte: event.target.value })} /></label>
       <label>Resultado<input value={draft.value} maxLength={80} onChange={(event) => change({ value: event.target.value })} /></label>
@@ -32,8 +32,8 @@ function SuggestedResult({ result, busy, onDone, onError }: { result: PhrLabResu
       <label>Referencia<input value={draft.reference} maxLength={120} onChange={(event) => change({ reference: event.target.value })} /></label>
       <label>Fecha<input type="date" value={draft.observedAt} onChange={(event) => change({ observedAt: event.target.value })} /></label>
     </div>
-    <div className="phr-lab-review-meta"><span className={`lab-flag lab-flag-${result.flag || "none"}`}>{labFlagLabels[result.flag]}</span><span>{result.source === "ai" ? "Extracción automática" : "Lectura local del PDF"}</span><span className="phr-loinc-badge">{result.loincCode ? `LOINC ${result.loincCode}` : "Sin LOINC"}</span></div>
-    <div className="phr-actions"><button className="button secondary" disabled={busy} type="button" onClick={() => void save(false)}>Guardar corrección</button><button className="button primary" disabled={busy} type="button" onClick={() => void save(true)}>Confirmar</button><button className="text-button danger-text" disabled={busy} type="button" onClick={() => void discard()}>Descartar</button></div>
+    <div className="phr-lab-review-meta"><span className={`lab-flag lab-flag-${result.flag || "none"}`}>{labFlagLabels[result.flag]}</span><span>{result.source === "ai" ? "Extracción automática" : "Lectura local del PDF"}</span><span className="phr-loinc-badge">{result.loincCode ? `LOINC ${result.loincCode}` : "Sin LOINC"}</span><span>{phrSpecimenLabel(result.loincMetadata)}</span></div>
+    <div className="phr-actions"><button className="button secondary" disabled={busy} type="button" onClick={() => void onSource(result)}>Ver en PDF</button><button className="button secondary" disabled={busy} type="button" onClick={() => void save(false)}>Guardar corrección</button><button className="button primary" disabled={busy} type="button" onClick={() => void save(true)}>Confirmar</button><button className="text-button danger-text" disabled={busy} type="button" onClick={() => void discard()}>Descartar</button></div>
   </article>;
 }
 
@@ -54,9 +54,11 @@ export function PhrLaboratories({ documents, ownerUserId, readOnly, onUpload }: 
   const [results, setResults] = useState<PhrLabResult[]>([]), [loading, setLoading] = useState(true), [busyId, setBusyId] = useState("");
   const [favorites, setFavorites] = useState<PhrFavorite[]>([]), [filter, setFilter] = useState<LabCategory | "all">("all");
   const [error, setError] = useState(""), [notice, setNotice] = useState("");
+  const [source, setSource] = useState<{ resultId: string; url: string; highlighted: boolean }>();
   const labs = documents.filter((document) => document.documentType === "laboratory");
   async function reload() { const [nextResults, nextFavorites] = await Promise.all([fetchPhrLabResults(ownerUserId), fetchPhrFavorites(ownerUserId)]); setResults(nextResults); setFavorites(nextFavorites); setLoading(false); }
   useEffect(() => { reload().catch(() => { setError("No fue posible cargar los resultados."); setLoading(false); }); }, [ownerUserId, documents.map((document) => document.id).join("|")]);
+  useEffect(() => () => { if (source?.url) URL.revokeObjectURL(source.url); }, [source?.url]);
 
   async function analyze(document: PortalDocument, rematch = false) {
     setBusyId(document.id); setError(""); setNotice("");
@@ -67,6 +69,19 @@ export function PhrLaboratories({ documents, ownerUserId, readOnly, onUpload }: 
     finally { setBusyId(""); }
   }
   async function changed(message: string) { setBusyId("refresh"); await reload(); setBusyId(""); setNotice(message); setError(""); }
+  async function openSource(result: PhrLabResult) {
+    setBusyId(result.id); setError("");
+    try { const next = await fetchPhrLabSource(result.id); setSource({ resultId: result.id, ...next }); if (!next.highlighted) setNotice("Se abrió el PDF original, pero este resultado no tiene coordenadas de texto para resaltarlo."); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "No fue posible abrir el PDF fuente."); }
+    finally { setBusyId(""); }
+  }
+  async function confirmAll() {
+    if (!window.confirm(`¿Confirmar los ${suggested.length} resultados tal como fueron extraídos? Las correcciones que no hayas guardado no se aplicarán.`)) return;
+    setBusyId("confirm-all"); setError("");
+    try { const response = await confirmPhrLabResults(suggested.map((result) => result.id)); await reload(); setNotice(`${response.confirmed} resultados confirmados.`); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "No fue posible confirmar los resultados."); }
+    finally { setBusyId(""); }
+  }
   async function toggleFavorite(result: PhrLabResult) {
     const trendKey = phrLabTrendKey(result), favorite = !favorites.some((item) => item.trendKey === trendKey);
     try { await setPhrFavorite(trendKey, result.analyte, favorite); await reload(); setNotice(favorite ? "Biomarcador agregado a favoritos." : "Biomarcador quitado de favoritos."); }
@@ -90,11 +105,17 @@ export function PhrLaboratories({ documents, ownerUserId, readOnly, onUpload }: 
       {!labs.length ? <p className="empty-state">Todavía no tienes laboratorios.</p> : <ul className="portal-list">{labs.map((document) => <li key={document.id}><div className="portal-document-detail"><strong title={document.filename}>{friendlyDocumentName(document.documentType)}</strong><span>{document.sourceInstitution} · {shownDate(document.documentDate ?? document.createdAt)} · {document.filename}</span></div><div className="portal-document-actions"><a className="button secondary" href={document.url} target="_blank" rel="noreferrer">Abrir PDF</a>{document.mimeType !== "application/pdf" ? <span>OCR disponible para PDF</span> : analyzedDocuments.has(document.id) ? <span className="phr-lab-document-status"><span className="status-badge">Analizado</span>{unmappedDocuments.has(document.id) && !readOnly && <button className="button secondary" disabled={!!busyId} type="button" onClick={() => void analyze(document, true)}>{busyId === document.id ? "Agrupando…" : "Completar LOINC con IA"}</button>}</span> : !readOnly && <button className="button primary" disabled={!!busyId} type="button" onClick={() => void analyze(document)}>{busyId === document.id ? "Analizando…" : "Analizar resultados"}</button>}</div></li>)}</ul>}
     </section>
 
-    {!readOnly && suggested.length > 0 && <section className="card portal-card"><p className="eyebrow">Revisión obligatoria</p><h2>{suggested.length} resultado(s) por revisar</h2><p>Están agrupados por perfil para revisarlos con calma. Corrige, confirma o descarta cada resultado.</p><div className="phr-lab-review-groups">{suggestedCategories.map((group, index) => <details className="phr-lab-review-group" key={group.key} open={index === 0}><summary>{labCategoryLabels[group.key]} <span>{group.items.length} resultado(s)</span></summary><div className="phr-lab-review-list">{group.items.map((result) => <SuggestedResult key={result.id} result={result} busy={!!busyId} onDone={changed} onError={setError} />)}</div></details>)}</div></section>}
+    {!readOnly && suggested.length > 0 && <section className="card portal-card">
+      <div className="card-heading"><div><p className="eyebrow">Revisión obligatoria</p><h2>{suggested.length} resultado(s) por revisar</h2><p>Compara con el PDF, corrige lo necesario y confirma en conjunto.</p></div><button className="button primary" disabled={!!busyId} type="button" onClick={() => void confirmAll()}>{busyId === "confirm-all" ? "Confirmando…" : `Confirmar los ${suggested.length}`}</button></div>
+      <div className="phr-lab-review-workspace">
+        <aside className="phr-lab-source-viewer" aria-label="Documento fuente">{source ? <><iframe src={`${source.url}#toolbar=1&navpanes=0`} title="PDF fuente del resultado seleccionado" /><p>{source.highlighted ? "El valor seleccionado está resaltado en amarillo." : "PDF visible sin resaltado exacto."}</p></> : <p className="empty-state">Selecciona <strong>Ver en PDF</strong> en un resultado para contrastarlo con el documento original.</p>}</aside>
+        <div className="phr-lab-review-groups">{suggestedCategories.map((group, index) => <details className="phr-lab-review-group" key={group.key} open={index === 0}><summary>{labCategoryLabels[group.key]} <span>{group.items.length} resultado(s)</span></summary><div className="phr-lab-review-list">{group.items.map((result) => <SuggestedResult key={result.id} result={result} busy={!!busyId} selected={source?.resultId === result.id} onSource={openSource} onDone={changed} onError={setError} />)}</div></details>)}</div>
+      </div>
+    </section>}
 
     {confirmed.length > 0 && <section className="card portal-card"><div className="card-heading"><div><p className="eyebrow">Resultados confirmados</p><h2>Historial de laboratorio</h2></div>{!readOnly && <div className="phr-actions"><button className="button secondary" type="button" onClick={() => void downloadPhrFile("/api/portal/trends", "tendencias-laboratorio.csv", "csv")}>Descargar CSV</button><button className="button secondary" type="button" onClick={() => void downloadPhrFile("/api/portal/trends", "tendencias-laboratorio.pdf", "pdf")}>Descargar PDF</button></div>}</div>
       <div className="phr-filter-row"><button className={`filter-chip${filter === "all" ? " active" : ""}`} type="button" onClick={() => setFilter("all")}>Todos</button>{(["hematology", "lipids", "metabolic", "renal", "hepatic", "hormones"] as LabCategory[]).map((key) => <button className={`filter-chip${filter === key ? " active" : ""}`} key={key} type="button" onClick={() => setFilter(key)}>{labCategoryLabels[key]}</button>)}</div>
-      {categories.length ? categories.map((group) => <div className="phr-lab-category" key={group.key}><h3>{labCategoryLabels[group.key]}</h3><p className="phr-measurement-help">{group.items[0] && measurementExplanation(group.items[0])} No interpreta lo que el resultado significa para una persona.</p><ul>{group.items.map((result) => { const favorite = favorites.some((item) => item.trendKey === phrLabTrendKey(result)); return <li key={result.id}><div><span className="phr-result-title"><strong>{result.analyte}</strong>{!readOnly && <button className="favorite-button" type="button" aria-label={favorite ? `Quitar ${result.analyte} de favoritos` : `Agregar ${result.analyte} a favoritos`} aria-pressed={favorite} onClick={() => void toggleFavorite(result)}>{favorite ? "★" : "☆"}</button>}</span><span>{shownDate(result.observedAt)}{result.loincCode && ` · LOINC ${result.loincCode}`}</span></div><div><strong>{resultValue(result)}</strong><span>{reference(result)} · {reportedRangeLabel(result)}</span></div></li>; })}</ul></div>) : <p className="empty-state">No hay resultados en este perfil.</p>}
+      {categories.length ? categories.map((group) => <div className="phr-lab-category" key={group.key}><h3>{labCategoryLabels[group.key]}</h3><p className="phr-measurement-help">{group.items[0] && measurementExplanation(group.items[0])} No interpreta lo que el resultado significa para una persona.</p><ul>{group.items.map((result) => { const favorite = favorites.some((item) => item.trendKey === phrLabTrendKey(result)); return <li key={result.id}><div><span className="phr-result-title"><strong>{result.analyte}</strong>{!readOnly && <button className="favorite-button" type="button" aria-label={favorite ? `Quitar ${result.analyte} de favoritos` : `Agregar ${result.analyte} a favoritos`} aria-pressed={favorite} onClick={() => void toggleFavorite(result)}>{favorite ? "★" : "☆"}</button>}</span><span>{shownDate(result.observedAt)}{result.loincCode && ` · LOINC ${result.loincCode}`} · {phrSpecimenLabel(result.loincMetadata)}</span></div><div><strong>{resultValue(result)}</strong><span>{reference(result)} · {reportedRangeLabel(result)}</span></div></li>; })}</ul></div>) : <p className="empty-state">No hay resultados en este perfil.</p>}
     </section>}
 
     {confirmed.length > 0 && <section className="card portal-card"><p className="eyebrow">Evolución</p><h2>Tendencias</h2>{trends.length ? <div className="phr-trends-grid">{trends.map((result) => <TrendChart key={phrLabTrendKey(result)} result={result} all={confirmed} />)}</div> : <p className="empty-state">Las tendencias aparecerán al confirmar dos mediciones comparables del mismo analito.</p>}</section>}

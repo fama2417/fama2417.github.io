@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildPhrLabTrend, phrLabDraftOf, reusedPhrLoinc, validatePhrLabDraft, type PhrLabResult } from "./labs.ts";
+import { buildPhrLabTrend, phrLabDraftOf, phrSpecimenLabel, reusedPhrLoinc, validatePhrLabDraft, type PhrLabResult } from "./labs.ts";
 
 const row = (id: string, date: string, value: number, unit = "mg/dL", status: PhrLabResult["reviewStatus"] = "confirmed"): PhrLabResult => ({
   id, documentId: id, analyte: "Glucosa", loincCode: "", valueNum: value, valueText: "", unit,
@@ -32,4 +32,11 @@ test("reutiliza LOINC confirmado sólo cuando analito y unidad son inequívocos"
   const rows = [row("nuevo", "2026-07-01", 90), { ...row("otro", "2026-07-01", 5), analyte: "TSH", unit: "mUI/L" }];
   const prior = [{ ...row("previo", "2026-01-01", 92), analyte: "GLÚCOSA", unit: "MG/DL", loincCode: "2345-7" }];
   assert.deepEqual([...reusedPhrLoinc(rows, prior)], [[0, "2345-7"]]);
+});
+
+test("presenta la muestra LOINC sin inventarla cuando falta", () => {
+  const metadata = { component: "Glucose", property: "MCnc", timeAspect: "Pt", specimen: "Urine", scaleType: "Qn", methodType: "", className: "UA", status: "ACTIVE", exampleUcumUnits: "mg/dL" };
+  assert.equal(phrSpecimenLabel(metadata), "Orina");
+  assert.equal(phrSpecimenLabel({ ...metadata, specimen: "Ser/Plas" }), "Sangre (suero/plasma)");
+  assert.equal(phrSpecimenLabel(), "Muestra no determinada");
 });

@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { PDFDocument, rgb } from "pdf-lib";
+import { extractTextItems } from "unpdf";
 import { aiConfig } from "@/features/reports/ai-budget.ts";
 import { sanitizeTextForAi } from "@/features/reports/ai-sanitizer.ts";
-import { dedupeLabCandidates, normalizeIdentity, prepareLabPdf, structureLabDocument, suggestLabLoinc, verifiedLabLoinc, type LabCandidate } from "@/features/reports/lab-ai.ts";
+import { dedupeLabCandidates, groupLabLayoutPages, labSourceHighlight, normalizeIdentity, prepareLabPdf, structureLabDocument, suggestLabLoinc, suggestLabLoincSearchTerms, verifiedLabLoinc, type LabCandidate } from "@/features/reports/lab-ai.ts";
 import { reusedPhrLoinc, validatePhrLabDraft } from "@/features/patient-portal/labs.ts";
 import { requirePhrApi } from "@/lib/server-auth";
 
 const MAX_BYTES = 10 * 1024 * 1024;
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
 const dateOr = (value: string, fallback: string) => validDate(value) ? value : fallback;
 const redact = (text: string, values: string[]) => values.filter((value) => value.trim()).reduce((result, value) => result.replace(new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), "[PATIENT]"), sanitizeTextForAi(text));
@@ -25,7 +28,9 @@ async function matchPhrLoinc(db: any, ownerUserId: string, rows: LabCandidate[])
   if (!config.enabled || !process.env.OPENAI_API_KEY) return { loincByIndex, warnings: ["La IA no está habilitada para homologar analitos nuevos con LOINC."] };
 
   try {
-    const suggested = await suggestLabLoinc(unresolved.map(({ row }) => row));
+    const translated = await suggestLabLoincSearchTerms(unresolved.map(({ row }) => row));
+    const terms = new Map(translated.terms.map((row) => [row.sourceId, row.searchTerm]));
+    const suggested = await suggestLabLoinc(unresolved.map(({ row }) => row), unresolved.map((_, index) => terms.get(String(index)) ?? ""));
     const proposed = [...new Set(suggested.suggestions.map((row) => row.loincCode.trim()).filter(Boolean))];
     const known = proposed.length ? await db.from("terminology_codes").select("code").eq("system", "LOINC").in("code", proposed) : { data: [], error: null };
     if (known.error) throw known.error;
@@ -33,9 +38,39 @@ async function matchPhrLoinc(db: any, ownerUserId: string, rows: LabCandidate[])
       const original = unresolved[Number(sourceId)];
       if (original) loincByIndex.set(original.index, code);
     }
-    warnings.push(`${loincByIndex.size} de ${rows.length} analitos fueron homologados automáticamente con LOINC y verificados contra el catálogo.`);
+    warnings.push(`${loincByIndex.size} de ${rows.length} analitos fueron homologados con equivalencias español–inglés y verificados contra el catálogo LOINC.`);
   } catch { warnings.push("No fue posible completar la homologación LOINC; los resultados siguen disponibles para revisión."); }
   return { loincByIndex, warnings };
+}
+
+export async function GET(request: NextRequest) {
+  const auth = await requirePhrApi(request);
+  if (auth instanceof NextResponse) return auth;
+  const resultId = request.nextUrl.searchParams.get("resultId") ?? "";
+  if (!uuid.test(resultId)) return NextResponse.json({ error: "Resultado inválido." }, { status: 400 });
+  const result = await auth.db.from("phr_lab_results").select("document_id, source_sentence").eq("id", resultId).eq("owner_user_id", auth.user.id).maybeSingle();
+  if (!result.data) return NextResponse.json({ error: "Resultado inexistente." }, { status: 404 });
+  const document = await auth.db.from("patient_documents").select("storage_path, mime_type").eq("id", result.data.document_id).eq("owner_user_id", auth.user.id).maybeSingle();
+  if (!document.data || document.data.mime_type !== "application/pdf") return NextResponse.json({ error: "El documento fuente no es un PDF." }, { status: 404 });
+  const downloaded = await auth.db.storage.from("patient-documents").download(document.data.storage_path);
+  if (downloaded.error) return NextResponse.json({ error: "No fue posible abrir el PDF fuente." }, { status: 502 });
+  const original = new Uint8Array(await downloaded.data.arrayBuffer());
+  let output = Buffer.from(original), highlighted = false;
+  const [sourceId, sourceAnalyte, sourceValue] = result.data.source_sentence.split(/\s+\|\s+/);
+  const locator = sourceId?.match(/^p(\d+)-r\d+$/);
+  if (locator && sourceValue) {
+    try {
+      const pageNumber = Number(locator[1]), extracted = await extractTextItems(original.slice());
+      const row = groupLabLayoutPages(extracted.items)[pageNumber - 1]?.find((item) => item.id === sourceId);
+      const box = row && labSourceHighlight(row.items, sourceValue, sourceAnalyte);
+      if (box) {
+        const pdf = await PDFDocument.load(original), page = pdf.getPages()[pageNumber - 1];
+        page?.drawRectangle({ x: box.x - 3, y: box.y - 2, width: box.width + 6, height: box.height + 4, color: rgb(1, .86, .18), opacity: .38, borderColor: rgb(.92, .62, 0), borderWidth: 1 });
+        output = Buffer.from(await pdf.save()); highlighted = !!page;
+      }
+    } catch { /* El PDF original sigue disponible aunque no tenga coordenadas utilizables. */ }
+  }
+  return new NextResponse(output, { headers: { "Content-Type": "application/pdf", "Content-Disposition": "inline; filename=fuente-laboratorio.pdf", "Cache-Control": "private, no-store", "X-PHR-Highlight": highlighted ? "true" : "false" } });
 }
 
 export async function POST(request: NextRequest) {
@@ -134,7 +169,13 @@ export async function POST(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   const auth = await requirePhrApi(request);
   if (auth instanceof NextResponse) return auth;
-  const body = await request.json().catch(() => ({})) as { resultId?: string; confirm?: boolean; analyte?: string; value?: string; unit?: string; reference?: string; observedAt?: string };
+  const body = await request.json().catch(() => ({})) as { resultId?: string; resultIds?: string[]; confirm?: boolean; analyte?: string; value?: string; unit?: string; reference?: string; observedAt?: string };
+  if (Array.isArray(body.resultIds)) {
+    const ids = [...new Set(body.resultIds)].filter((id) => uuid.test(id)).slice(0, 200);
+    if (!ids.length || ids.length !== body.resultIds.length || body.confirm !== true) return NextResponse.json({ error: "Resultados inválidos." }, { status: 400 });
+    const updated = await auth.db.from("phr_lab_results").update({ review_status: "confirmed" }).eq("owner_user_id", auth.user.id).eq("review_status", "suggested").in("id", ids).select("id");
+    return updated.error ? NextResponse.json({ error: "No fue posible confirmar los resultados." }, { status: 502 }) : NextResponse.json({ confirmed: updated.data?.length ?? 0 });
+  }
   if (!body.resultId) return NextResponse.json({ error: "Resultado inválido." }, { status: 400 });
   const validated = validatePhrLabDraft({ analyte: body.analyte ?? "", value: body.value ?? "", unit: body.unit ?? "", reference: body.reference ?? "", observedAt: body.observedAt ?? "" });
   if ("error" in validated) return NextResponse.json({ error: validated.error }, { status: 400 });
