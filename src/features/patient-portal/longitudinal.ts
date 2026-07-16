@@ -25,8 +25,8 @@ const explanationByCategory: Record<LabCategory, string> = {
   other: "Describe una medición informada por el laboratorio.",
 };
 
-export const measurementExplanation = (result: Pick<PhrLabResult, "analyte">) =>
-  explanationByCategory[labCategory({ analyte: result.analyte })];
+export const measurementExplanation = (result: Pick<PhrLabResult, "analyte" | "loincMetadata">) =>
+  explanationByCategory[labCategory({ analyte: result.analyte, loincMetadata: result.loincMetadata })];
 
 const inPeriod = (date: string, period: PhrPeriod) => date >= period.from && date <= period.to;
 
