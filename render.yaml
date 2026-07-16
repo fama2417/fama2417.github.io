@@ -48,6 +48,16 @@ services:
         value: "false"
       - key: PHR_AI_MAX_PER_DAY
         value: "5"
+      - key: PHR_LEGAL_NAME
+        sync: false
+      - key: PHR_LEGAL_ID
+        sync: false
+      - key: PHR_LEGAL_ADDRESS
+        sync: false
+      - key: PHR_PRIVACY_EMAIL
+        sync: false
+      - key: PHR_SUPPORT_EMAIL
+        sync: false
 
   - type: web
     runtime: image

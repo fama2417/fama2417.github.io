@@ -1302,11 +1302,70 @@ body:has(.report-workstation) .app-shell-main { min-height: 0; overflow: hidden;
 .phr-app .phr-check-row span { min-width: 0; }
 .phr-app .phr-check-row small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* Acceso público de Mi Salud: aislado del login del sistema clínico. */
+.phr-public-page { background: radial-gradient(42rem 34rem at 88% 4%, rgba(246, 215, 194, .72), transparent 65%), radial-gradient(46rem 38rem at 5% 94%, rgba(168, 197, 181, .38), transparent 65%), #f6f2e9; }
+.phr-public-shell { margin: 0 auto; max-width: 1200px; padding: 0 32px; }
+.phr-public-header { align-items: center; display: flex; justify-content: space-between; min-height: 82px; }
+.phr-public-brand { align-items: center; color: #123b2e; display: inline-flex; font-family: Georgia, serif; font-size: 1.25rem; gap: 10px; }
+.phr-public-brand > span { align-items: center; background: #1e5c47; border-radius: 12px; color: #f6f2e9; display: flex; font-family: sans-serif; height: 38px; justify-content: center; transform: rotate(2deg); width: 38px; }
+.phr-public-header nav, .phr-public-footer nav { align-items: center; display: flex; gap: 24px; }
+.phr-public-header nav a, .phr-public-footer a { color: #3d5a4e; font-size: .88rem; font-weight: 600; }
+.phr-public-header nav a:hover, .phr-public-footer a:hover { color: #123b2e; }
+.phr-public-header .phr-public-nav-cta { border: 1px solid #123b2e; border-radius: 999px; color: #123b2e; padding: 9px 18px; }
+.phr-public-header .phr-public-nav-cta:hover { background: #123b2e; color: #f6f2e9; }
+.phr-public-hero { align-items: center; display: grid; gap: clamp(38px, 6vw, 74px); grid-template-columns: minmax(0, 1.12fr) minmax(340px, .88fr); min-height: calc(100vh - 150px); padding: 50px 0 80px; }
+.phr-public-copy { display: grid; justify-items: start; }
+.phr-public-eyebrow { align-items: center; background: rgba(46, 125, 100, .1); border: 1px solid rgba(46, 125, 100, .2); border-radius: 999px; color: #1e5c47; display: inline-flex; font-size: .76rem; font-weight: 750; gap: 8px; letter-spacing: .08em; margin: 0 0 26px; padding: 7px 14px; text-transform: uppercase; }
+.phr-public-eyebrow span { background: #2e7d64; border-radius: 50%; height: 7px; width: 7px; }
+.phr-public-copy h1 { color: #123b2e; font-family: Georgia, serif; font-size: clamp(2.8rem, 5vw, 4.35rem); font-weight: 600; letter-spacing: -.045em; line-height: 1.04; margin: 0 0 24px; }
+.phr-public-copy h1 em { color: #1e5c47; font-weight: 500; }
+.phr-public-copy > p:not(.phr-public-eyebrow) { color: #5b6660; font-size: 1.1rem; line-height: 1.7; margin: 0 0 30px; max-width: 47ch; }
+.phr-public-chips { display: flex; flex-wrap: wrap; gap: 10px; }
+.phr-public-chips span { background: #fbf8f1; border: 1px solid rgba(18, 59, 46, .12); border-radius: 13px; box-shadow: 0 3px 9px rgba(18, 59, 46, .05); color: #3d5a4e; font-size: .84rem; font-weight: 650; padding: 10px 13px; }
+.phr-public-access { display: flex; justify-content: center; padding-top: 110px; position: relative; }
+.phr-public-art { height: 220px; left: 50%; overflow: hidden; pointer-events: none; position: absolute; top: -112px; transform: translateX(-50%); width: 390px; }
+.phr-public-art img { left: 50%; max-width: none; position: absolute; top: 0; transform: translate(-50%, -55px); width: 440px; }
+.phr-public-access .login-card { background: #fffdf9; border: 1px solid rgba(18, 59, 46, .12); border-top: 4px solid #2e7d64; border-radius: 20px; box-shadow: 0 24px 60px -18px rgba(18, 59, 46, .24); gap: 15px; max-width: 420px; padding: 32px; position: relative; z-index: 1; }
+.phr-public-access .login-card h2 { font-family: Georgia, serif; font-size: 1.55rem; margin: 0; }
+.phr-public-access .login-card > p:not(.eyebrow):not(.form-error):not(.form-notice):not(.phr-public-secure), .phr-public-access .login-card > small { color: #5b6660; line-height: 1.55; margin: 0; }
+.phr-public-access .login-card label { color: #123b2e; font-size: .84rem; font-weight: 700; }
+.phr-public-access .login-card input { background: #fff; border: 1.5px solid rgba(18, 59, 46, .14); border-radius: 11px; color: #123b2e; font-size: 16px; min-height: 48px; padding: 12px 14px; }
+.phr-public-access .login-card input:focus { border-color: #2e7d64; box-shadow: 0 0 0 4px rgba(46, 125, 100, .13); outline: 0; }
+.phr-public-email-form, .phr-public-access .login-password form { display: grid; gap: 12px; }
+.phr-public-access .button { border-radius: 11px; justify-content: center; min-height: 48px; }
+.phr-public-access .button.primary { background: #1e5c47; color: #fffdf9; }
+.phr-public-access .button.primary:hover { background: #256b54; }
+.phr-public-access .login-password { border-color: rgba(18, 59, 46, .12); }
+.phr-public-access .login-password summary, .phr-public-access .text-button { color: #1e5c47; }
+.phr-public-secure { border-top: 1px solid rgba(18, 59, 46, .12); color: #5b6660; font-size: .78rem; margin: 6px 0 0; padding-top: 14px; text-align: center; }
+.phr-public-access .login-card a { color: #1e5c47; text-decoration: underline; text-underline-offset: 2px; }
+.phr-public-trust { display: grid; gap: 20px; grid-template-columns: repeat(3, 1fr); padding: 0 0 72px; }
+.phr-public-trust article { background: #fbf8f1; border: 1px solid rgba(18, 59, 46, .12); border-radius: 20px; padding: 26px; }
+.phr-public-trust article > span { align-items: center; background: rgba(46, 125, 100, .12); border-radius: 13px; display: flex; font-size: 1.2rem; height: 44px; justify-content: center; margin-bottom: 16px; width: 44px; }
+.phr-public-trust h2 { color: #123b2e; font-size: 1.02rem; margin: 0 0 7px; }
+.phr-public-trust p { color: #5b6660; font-size: .87rem; line-height: 1.6; margin: 0; }
+.phr-public-footer { align-items: center; border-top: 1px solid rgba(18, 59, 46, .12); color: #5b6660; display: flex; font-size: .8rem; justify-content: space-between; padding: 22px 0; }
+.phr-legal-page { background: #f6f2e9; min-height: 100dvh; padding-bottom: 60px; }
+.phr-legal-page .phr-public-header { margin: 0 auto; max-width: 1120px; padding: 0 28px; }
+.phr-legal-content { background: #fffdf9; border: 1px solid rgba(18, 59, 46, .12); border-radius: 20px; box-shadow: 0 14px 40px rgba(18, 59, 46, .08); color: #123b2e; display: grid; gap: 14px; line-height: 1.7; margin: 28px auto 0; max-width: 900px; padding: clamp(24px, 5vw, 54px); }
+.phr-legal-content h1 { font-family: Georgia, serif; font-size: clamp(2rem, 5vw, 3.1rem); margin: 0; }
+.phr-legal-content h2 { font-size: 1.18rem; margin: 22px 0 0; scroll-margin-top: 20px; }
+.phr-legal-content h3 { font-size: 1rem; margin: 12px 0 0; }
+.phr-legal-content p, .phr-legal-content li { color: #3d5a4e; margin: 0; }
+.phr-legal-content ul { margin: 0; padding-left: 22px; }
+.phr-legal-content a { color: #1e5c47; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+.phr-legal-nav { background: #f6f2e9; border-bottom: 1px solid rgba(18, 59, 46, .12); border-top: 1px solid rgba(18, 59, 46, .12); display: flex; flex-wrap: wrap; gap: 18px; justify-content: center; padding: 12px 20px; position: sticky; top: 0; z-index: 5; }
+.phr-legal-nav a { color: #3d5a4e; font-weight: 700; }
+.phr-legal-warning { background: #fff2d9; border: 1px solid #e8bd68; border-radius: 12px; color: #704b0f !important; padding: 12px 14px; }
+
 @media (max-width: 1024px) {
   .phr-app-header { gap: 10px; }
   .phr-app-desktop-nav button { padding-inline: 9px; }
   .phr-app-account-button > span:nth-child(2), .phr-app-account-button > span:last-child { display: none; }
   .phr-app-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .phr-public-hero { grid-template-columns: 1fr; padding-top: 36px; }
+  .phr-public-copy { justify-items: center; text-align: center; }
+  .phr-public-access { margin: 0 auto; width: min(100%, 440px); }
 }
 @media (max-width: 760px) {
   .phr-shell { gap: 16px; padding: 10px 12px calc(92px + env(safe-area-inset-bottom)); }
@@ -1348,6 +1407,21 @@ body:has(.report-workstation) .app-shell-main { min-height: 0; overflow: hidden;
   .phr-imaging-review { grid-template-columns: 1fr; }
   .phr-imaging-review aside { min-height: 360px; position: static; }
   .phr-imaging-review aside iframe, .phr-imaging-review aside img { height: 460px; }
+  .phr-public-shell { padding: 0 18px; }
+  .phr-public-header { min-height: 68px; }
+  .phr-public-header nav a:not(.phr-public-nav-cta) { display: none; }
+  .phr-public-hero { gap: 34px; padding: 34px 0 62px; }
+  .phr-public-copy h1 { font-size: clamp(2.45rem, 13vw, 3.5rem); }
+  .phr-public-copy > p:not(.phr-public-eyebrow) { font-size: 1rem; }
+  .phr-public-chips { justify-content: center; }
+  .phr-public-access { padding-top: 200px; }
+  .phr-public-art { top: -20px; transform: translateX(-50%) scale(.86); }
+  .phr-public-access .login-card { padding: 26px 22px; }
+  .phr-public-trust { grid-template-columns: 1fr; }
+  .phr-public-footer { align-items: flex-start; flex-direction: column; gap: 12px; }
+  .phr-public-footer nav { flex-wrap: wrap; gap: 15px; }
+  .phr-legal-page .phr-public-header { padding: 0 18px; }
+  .phr-legal-content { border-radius: 0; margin-top: 0; }
 }
 @media (max-width: 390px) {
   .phr-app-summary-card { min-height: 138px; }

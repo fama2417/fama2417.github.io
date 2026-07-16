@@ -38,7 +38,7 @@ export async function fetchAccessiblePhrProfiles(): Promise<PhrProfile[]> {
 }
 
 export async function savePhrProfile(input: {
-  fullName: string; birthDate: string; identifier: string; acceptedPrivacy?: boolean;
+  fullName: string; birthDate: string; identifier: string; acceptedPrivacy?: boolean; acceptedTerms?: boolean;
   bloodType?: string; allergies?: string; conditions?: string; medications?: string;
   emergencyContactName?: string; emergencyContactPhone?: string; emergencyNotes?: string;
 }, exists = false) {
