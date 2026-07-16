@@ -9,6 +9,7 @@ import {
 import { PhrCaregivers } from "./PhrCaregivers";
 import { PhrDashboard, PhrTimeline } from "./PhrLongitudinal";
 import { PhrLaboratories } from "./PhrLaboratories";
+import { PhrImagingTextDialog } from "./PhrImagingTextDialog";
 import { PhrSharing } from "./PhrSharing";
 import { friendlyDocumentName, visiblePhrTabs, type PhrTab as Tab } from "./presentation";
 const documentLabels: Record<PortalDocument["documentType"], string> = { imaging: "Radiología / imagenología", laboratory: "Laboratorio", prescription: "Receta u orden", other: "Otro" };
@@ -44,6 +45,7 @@ export function PersonalHealthRecord() {
   const [documents, setDocuments] = useState<PortalDocument[]>([]), [tab, setTab] = useState<Tab>("inicio");
   const [busy, setBusy] = useState(false), [error, setError] = useState(""), [notice, setNotice] = useState(""), [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [accountOpen, setAccountOpen] = useState(false), [moreOpen, setMoreOpen] = useState(false);
+  const [imagingDocument, setImagingDocument] = useState<PortalDocument>();
 
   useEffect(() => { (async () => {
     try { const userId = (await supabase.auth.getUser()).data.user?.id ?? "", nextProfiles = await fetchAccessiblePhrProfiles(); const selected = nextProfiles.find((profile) => profile.userId === userId) ?? nextProfiles[0]; setCurrentUserId(userId); setProfiles(nextProfiles); setOwnerUserId(selected?.userId ?? userId); }
@@ -74,7 +76,7 @@ export function PersonalHealthRecord() {
   const availableTabs = visiblePhrTabs(readOnly);
   const mainTabs = availableTabs.filter(([id]) => id !== "perfil");
   const navigate = (next: Tab) => { setTab(next); setNotice(""); setError(""); setAccountOpen(false); setMoreOpen(false); };
-  const documentList = (items: PortalDocument[]) => items.length ? <ul className="portal-list">{items.map((document) => <li key={document.id}><div className="portal-document-detail"><strong title={document.filename}>{friendlyDocumentName(document.documentType)}</strong><span>{documentLabels[document.documentType]} · {document.sourceInstitution} · {fileSize(document.sizeBytes)}</span><span>{shownDate(document.documentDate ?? document.createdAt)} · <span title={document.filename}>{document.filename}</span></span></div><div className="portal-document-actions"><a className="button secondary" href={document.url} target="_blank" rel="noreferrer" aria-label={`Abrir ${document.filename}`}>Abrir</a>{!readOnly && <button className="text-button danger-text" disabled={busy} type="button" onClick={() => void remove(document)}>Eliminar</button>}</div></li>)}</ul> : <p className="empty-state">Todavía no tienes documentos.</p>;
+  const documentList = (items: PortalDocument[]) => items.length ? <ul className="portal-list">{items.map((document) => <li key={document.id}><div className="portal-document-detail"><strong title={document.filename}>{friendlyDocumentName(document.documentType)}</strong><span>{documentLabels[document.documentType]} · {document.sourceInstitution} · {fileSize(document.sizeBytes)}</span><span>{shownDate(document.documentDate ?? document.createdAt)} · <span title={document.filename}>{document.filename}</span></span></div><div className="portal-document-actions"><a className="button secondary" href={document.url} target="_blank" rel="noreferrer" aria-label={`Abrir ${document.filename}`}>Abrir</a>{!readOnly && document.documentType === "imaging" && document.mimeType === "application/pdf" && <button className="button secondary" disabled={busy} type="button" onClick={() => setImagingDocument(document)}>{document.extractedText ? "Ver texto" : "Extraer texto"}</button>}{!readOnly && <button className="text-button danger-text" disabled={busy} type="button" onClick={() => void remove(document)}>Eliminar</button>}</div></li>)}</ul> : <p className="empty-state">Todavía no tienes documentos.</p>;
 
   return <main className="phr-app"><div className="phr-shell">
     <header className="phr-app-header">
@@ -97,5 +99,6 @@ export function PersonalHealthRecord() {
       <button type="button" aria-current={["timeline", "compartir", "perfil"].includes(tab) ? "page" : undefined} aria-expanded={moreOpen} aria-controls="phr-more-menu" onClick={() => setMoreOpen((open) => !open)}><span aria-hidden="true">…</span>Más</button>
     </nav>
     {moreOpen && <div className="phr-app-more-menu" id="phr-more-menu" role="dialog" aria-label="Más opciones"><button type="button" onClick={() => navigate("timeline")}>Línea de tiempo</button>{!readOnly && <button type="button" onClick={() => navigate("compartir")}>Compartir</button>}<button type="button" onClick={() => navigate("perfil")}>Perfil y seguridad</button><button type="button" onClick={() => supabase.auth.signOut()}>Cerrar sesión</button></div>}
+    {imagingDocument && <PhrImagingTextDialog document={imagingDocument} onClose={() => setImagingDocument(undefined)} onSaved={(text) => { setDocuments((current) => current.map((item) => item.id === imagingDocument.id ? { ...item, extractedText: text } : item)); setImagingDocument(undefined); setNotice("Texto radiológico revisado y guardado."); }} />}
   </div></main>;
 }

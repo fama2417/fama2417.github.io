@@ -1094,7 +1094,7 @@ body:has(.report-workstation) .app-shell-main { min-height: 0; overflow: hidden;
   color-scheme: light;
   font-family: var(--font-body), system-ui, sans-serif;
   min-height: 100dvh;
-  overflow-x: hidden;
+  overflow-x: clip;
 }
 .phr-app *, .phr-app *::before, .phr-app *::after { box-sizing: border-box; }
 .phr-app h1, .phr-app h2, .phr-app h3, .phr-app h4 { color: var(--phr-text); font-family: var(--font-body), system-ui, sans-serif; letter-spacing: -.025em; }
@@ -1179,9 +1179,9 @@ body:has(.report-workstation) .app-shell-main { min-height: 0; overflow: hidden;
 .phr-app-bottom-nav, .phr-app-more-menu { display: none; }
 .phr-app .phr-lab-review-groups { display: grid; gap: 10px; }
 .phr-app .phr-lab-review-workspace { align-items: start; display: grid; gap: 16px; grid-template-columns: minmax(340px, .85fr) minmax(0, 1.15fr); }
-.phr-app .phr-lab-source-viewer { background: var(--phr-surface-soft); border: 1px solid var(--phr-border); border-radius: 13px; min-height: 560px; overflow: hidden; position: sticky; top: 18px; }
+.phr-app .phr-lab-source-viewer { background: var(--phr-surface-soft); border: 1px solid var(--phr-border); border-radius: 13px; max-height: calc(100vh - 36px); min-height: 560px; overflow: hidden; position: sticky; top: 18px; }
 .phr-app .phr-lab-source-viewer iframe,
-.phr-app .phr-lab-source-viewer img { border: 0; display: block; height: 620px; width: 100%; }
+.phr-app .phr-lab-source-viewer img { border: 0; display: block; height: calc(100vh - 94px); min-height: 520px; width: 100%; }
 .phr-app .phr-lab-source-viewer img { background: #fff; object-fit: contain; }
 .phr-app .phr-lab-source-viewer > p { color: var(--phr-muted); margin: 0; padding: 12px 14px; }
 .phr-app .phr-lab-review-group { background: var(--phr-surface-soft); border: 1px solid var(--phr-border); border-radius: 13px; overflow: hidden; }
@@ -1192,6 +1192,16 @@ body:has(.report-workstation) .app-shell-main { min-height: 0; overflow: hidden;
 .phr-app .phr-lab-review-card.selected { border-color: var(--phr-sage); box-shadow: 0 0 0 2px rgba(49, 117, 104, .12); }
 .phr-app .phr-loinc-badge { background: var(--phr-mint); border-radius: 999px; color: var(--phr-sage-dark); font-weight: 700; padding: 3px 8px; }
 .phr-app .phr-lab-document-status { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
+.phr-app .phr-loinc-dialog { max-width: 860px; }
+.phr-app .phr-loinc-review-list { display: grid; gap: 8px; max-height: 55vh; overflow: auto; }
+.phr-app .phr-loinc-review-list label { align-items: center; border: 1px solid var(--phr-border); border-radius: 10px; display: grid; gap: 12px; grid-template-columns: minmax(150px, .7fr) minmax(260px, 1.3fr); padding: 10px; }
+.phr-app .phr-loinc-review-list label > span { display: grid; gap: 2px; }
+.phr-app .phr-loinc-review-list small { color: var(--phr-muted); }
+.phr-app .phr-imaging-text-dialog { max-width: 900px; }
+.phr-app .phr-imaging-text-dialog textarea { min-height: 95px; }
+.phr-app .phr-imaging-text-dialog details { border: 1px solid var(--phr-border); border-radius: 10px; padding: 10px; }
+.phr-app .phr-imaging-text-dialog summary { cursor: pointer; font-weight: 700; }
+.phr-app .phr-imaging-text-dialog pre { font: inherit; max-height: 260px; overflow: auto; white-space: pre-wrap; }
 .phr-app .portal-document-form input[type="file"] { cursor: pointer; padding: 8px; }
 .phr-app .portal-document-form input[type="file"]::file-selector-button { background: var(--phr-mint); border: 0; border-radius: 8px; color: var(--phr-sage-dark); cursor: pointer; font-weight: 700; margin-right: 10px; min-height: 36px; padding: 8px 12px; }
 .phr-app .phr-check-row span { min-width: 0; }
@@ -1238,6 +1248,7 @@ body:has(.report-workstation) .app-shell-main { min-height: 0; overflow: hidden;
   .phr-app .phr-lab-source-viewer { min-height: 420px; position: static; }
   .phr-app .phr-lab-source-viewer iframe,
   .phr-app .phr-lab-source-viewer img { height: 520px; }
+  .phr-app .phr-loinc-review-list label { grid-template-columns: 1fr; }
 }
 @media (max-width: 390px) {
   .phr-app-summary-card { min-height: 138px; }

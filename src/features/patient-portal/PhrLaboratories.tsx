@@ -7,7 +7,7 @@ import { measurementExplanation, reportedRangeLabel } from "./longitudinal";
 import { PhrPeriodComparison } from "./PhrLongitudinal";
 import { isAnalyzableLabDocument } from "./documents";
 import { friendlyDocumentName } from "./presentation";
-import { analyzePhrLabDocument, confirmPhrLabResults, discardPhrLabResult, downloadPhrFile, fetchPhrFavorites, fetchPhrLabResults, fetchPhrLabSource, savePhrLabResult, setPhrFavorite, type PortalDocument, type PhrFavorite } from "./repository";
+import { analyzePhrLabDocument, confirmPhrLabResults, discardPhrLabResult, downloadPhrFile, fetchPhrFavorites, fetchPhrLabResults, fetchPhrLabSource, fetchPhrLoincSuggestions, savePhrLabResult, savePhrLoincSelections, setPhrFavorite, type PortalDocument, type PhrFavorite, type PhrLoincSuggestion } from "./repository";
 
 const resultValue = (result: PhrLabResult) => `${result.valueNum ?? result.valueText}${result.unit ? ` ${result.unit}` : ""}`;
 const reference = (result: PhrLabResult) => result.refLow !== null || result.refHigh !== null ? `${result.refLow ?? "…"}–${result.refHigh ?? "…"}` : result.refText;
@@ -57,6 +57,8 @@ export function PhrLaboratories({ documents, ownerUserId, readOnly, onUpload }: 
   const [favorites, setFavorites] = useState<PhrFavorite[]>([]), [filter, setFilter] = useState<LabCategory | "all">("all");
   const [error, setError] = useState(""), [notice, setNotice] = useState("");
   const [source, setSource] = useState<{ resultId: string; url: string; contentType: string; highlighted: boolean; page: number }>();
+  const [loincDialog, setLoincDialog] = useState<{ documentId: string; suggestions: PhrLoincSuggestion[]; warnings: string[] }>();
+  const [loincSelections, setLoincSelections] = useState<Record<string, string>>({});
   const labs = documents.filter((document) => document.documentType === "laboratory");
   async function reload() { const [nextResults, nextFavorites] = await Promise.all([fetchPhrLabResults(ownerUserId), fetchPhrFavorites(ownerUserId)]); setResults(nextResults); setFavorites(nextFavorites); setLoading(false); }
   useEffect(() => { reload().catch(() => { setError("No fue posible cargar los resultados."); setLoading(false); }); }, [ownerUserId, documents.map((document) => document.id).join("|")]);
@@ -71,6 +73,23 @@ export function PhrLaboratories({ documents, ownerUserId, readOnly, onUpload }: 
     finally { setBusyId(""); }
   }
   async function changed(message: string) { setBusyId("refresh"); await reload(); setBusyId(""); setNotice(message); setError(""); }
+  async function openLoinc(document: PortalDocument) {
+    setBusyId(document.id); setError(""); setNotice("");
+    try {
+      const result = await fetchPhrLoincSuggestions(document.id);
+      setLoincDialog({ documentId: document.id, ...result });
+      setLoincSelections(Object.fromEntries(result.suggestions.filter((item) => item.options[0]).map((item) => [item.resultId, item.options[0].code])));
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "No fue posible obtener sugerencias LOINC."); }
+    finally { setBusyId(""); }
+  }
+  async function applyLoinc() {
+    const selections = Object.entries(loincSelections).filter(([, code]) => code).map(([resultId, loincCode]) => ({ resultId, loincCode }));
+    if (!selections.length) return;
+    setBusyId("loinc"); setError("");
+    try { const response = await savePhrLoincSelections(selections); await reload(); setLoincDialog(undefined); setNotice(`${response.updated} código(s) LOINC guardados después de tu revisión.`); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "No fue posible guardar los códigos LOINC."); }
+    finally { setBusyId(""); }
+  }
   async function openSource(result: PhrLabResult) {
     setBusyId(result.id); setError("");
     try { const next = await fetchPhrLabSource(result.id); setSource({ resultId: result.id, ...next }); if (!next.highlighted) setNotice(next.contentType.startsWith("image/") ? "Se abrió la fotografía original para contrastar el resultado." : "Se abrió el PDF original, pero este resultado no tiene coordenadas de texto para resaltarlo."); }
@@ -103,8 +122,8 @@ export function PhrLaboratories({ documents, ownerUserId, readOnly, onUpload }: 
 
   return <div className="phr-labs-stack">
     {error && <p className="notice danger-text" role="alert">{error}</p>}{notice && <p className="form-notice" role="status">{notice}</p>}
-    <section className="card portal-card"><div className="card-heading"><div><p className="eyebrow">Extracción segura</p><h2>Mis laboratorios</h2><p>El archivo original no cambia y ningún resultado cuenta hasta que la persona lo confirma. Puedes subir PDF o una foto JPG/PNG completa, recta, nítida y sin reflejos.</p></div>{!readOnly && <button className="button primary" type="button" onClick={onUpload}>Subir laboratorio</button>}</div>
-      {!labs.length ? <p className="empty-state">Todavía no tienes laboratorios.</p> : <ul className="portal-list">{labs.map((document) => <li key={document.id}><div className="portal-document-detail"><strong title={document.filename}>{friendlyDocumentName(document.documentType)}</strong><span>{document.sourceInstitution} · {shownDate(document.documentDate ?? document.createdAt)} · {document.filename}</span></div><div className="portal-document-actions"><a className="button secondary" href={document.url} target="_blank" rel="noreferrer">Abrir archivo</a>{!isAnalyzableLabDocument(document.mimeType) ? <span>Análisis disponible para PDF, JPG o PNG</span> : analyzedDocuments.has(document.id) ? <span className="phr-lab-document-status"><span className="status-badge">Analizado</span>{!readOnly && <button className="button secondary" disabled={!!busyId} type="button" onClick={() => void analyze(document, false, true)}>{busyId === document.id ? "Releyendo…" : "Releer archivo"}</button>}{unmappedDocuments.has(document.id) && !readOnly && <button className="button secondary" disabled={!!busyId} type="button" onClick={() => void analyze(document, true)}>{busyId === document.id ? "Agrupando…" : "Completar LOINC con IA"}</button>}</span> : !readOnly && <button className="button primary" disabled={!!busyId} type="button" onClick={() => void analyze(document)}>{busyId === document.id ? "Analizando…" : "Analizar resultados"}</button>}</div></li>)}</ul>}
+    <section className="card portal-card"><div className="card-heading"><div><p className="eyebrow">Extracción segura</p><h2>Mis laboratorios</h2><p>Los PDF se leen sólo localmente y las fotos JPG/PNG usan reconocimiento visual. El archivo original no cambia y ningún resultado cuenta hasta que lo confirmas.</p></div>{!readOnly && <button className="button primary" type="button" onClick={onUpload}>Subir laboratorio</button>}</div>
+      {!labs.length ? <p className="empty-state">Todavía no tienes laboratorios.</p> : <ul className="portal-list">{labs.map((document) => <li key={document.id}><div className="portal-document-detail"><strong title={document.filename}>{friendlyDocumentName(document.documentType)}</strong><span>{document.sourceInstitution} · {shownDate(document.documentDate ?? document.createdAt)} · {document.filename}</span></div><div className="portal-document-actions"><a className="button secondary" href={document.url} target="_blank" rel="noreferrer">Abrir archivo</a>{!isAnalyzableLabDocument(document.mimeType) ? <span>Análisis disponible para PDF, JPG o PNG</span> : analyzedDocuments.has(document.id) ? <span className="phr-lab-document-status"><span className="status-badge">Analizado</span>{!readOnly && <button className="button secondary" disabled={!!busyId} type="button" onClick={() => void analyze(document, false, true)}>{busyId === document.id ? "Releyendo…" : "Releer archivo"}</button>}{unmappedDocuments.has(document.id) && !readOnly && <button className="button secondary" disabled={!!busyId} type="button" onClick={() => void openLoinc(document)}>{busyId === document.id ? "Buscando…" : "Resolver LOINC con IA"}</button>}</span> : !readOnly && <button className="button primary" disabled={!!busyId} type="button" onClick={() => void analyze(document)}>{busyId === document.id ? "Analizando…" : "Analizar resultados"}</button>}</div></li>)}</ul>}
     </section>
 
     {!readOnly && suggested.length > 0 && <section className="card portal-card">
@@ -123,5 +142,6 @@ export function PhrLaboratories({ documents, ownerUserId, readOnly, onUpload }: 
     {confirmed.length > 0 && <section className="card portal-card"><p className="eyebrow">Evolución</p><h2>Tendencias</h2>{trends.length ? <div className="phr-trends-grid">{trends.map((result) => <TrendChart key={phrLabTrendKey(result)} result={result} all={confirmed} />)}</div> : <p className="empty-state">Las tendencias aparecerán al confirmar dos mediciones comparables del mismo analito.</p>}</section>}
     {!loading && <PhrPeriodComparison results={confirmed} />}
     {loading && <p className="empty-state">Cargando resultados…</p>}
+    {loincDialog && <div className="appointment-info-backdrop" role="dialog" aria-modal="true" aria-label="Sugerencias LOINC" onClick={(event) => { if (event.target === event.currentTarget && !busyId) setLoincDialog(undefined); }}><div className="appointment-info phr-loinc-dialog"><div className="card-heading"><div><p className="eyebrow">Revisión humana</p><h2>Resolver LOINC pendientes</h2><p>La IA ordenó alternativas existentes en el catálogo; el PDF no fue enviado. Revisa antes de guardar.</p></div><button className="text-button" type="button" disabled={!!busyId} onClick={() => setLoincDialog(undefined)}>Cerrar</button></div>{loincDialog.warnings.map((warning) => <p className="form-notice" key={warning}>{warning}</p>)}<div className="phr-loinc-review-list">{loincDialog.suggestions.map((suggestion) => <label key={suggestion.resultId}><span><strong>{suggestion.analyte}</strong><small>{suggestion.options.length ? `${suggestion.options.length} alternativa(s)` : "Sin coincidencia segura"}</small></span><select value={loincSelections[suggestion.resultId] ?? ""} disabled={!suggestion.options.length || !!busyId} onChange={(event) => setLoincSelections((current) => ({ ...current, [suggestion.resultId]: event.target.value }))}><option value="">Sin asignar</option>{suggestion.options.map((option) => <option value={option.code} key={option.code}>{option.code} · {option.display}</option>)}</select></label>)}</div><button className="button primary" type="button" disabled={!!busyId || !Object.values(loincSelections).some(Boolean)} onClick={() => void applyLoinc()}>{busyId === "loinc" ? "Guardando…" : "Guardar sugerencias seleccionadas"}</button></div></div>}
   </div>;
 }

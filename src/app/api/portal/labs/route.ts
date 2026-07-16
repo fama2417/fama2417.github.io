@@ -2,22 +2,21 @@ import { NextRequest, NextResponse } from "next/server";
 import { PDFDocument, rgb } from "pdf-lib";
 import { extractTextItems } from "unpdf";
 import { aiConfig } from "@/features/reports/ai-budget.ts";
-import { sanitizeTextForAi } from "@/features/reports/ai-sanitizer.ts";
-import { dedupeLabCandidates, groupLabLayoutPages, labSourceHighlight, normalizeIdentity, prepareLabPdf, structureLabDocument, suggestLabLoinc, suggestLabLoincSearchTerms, verifiedLabLoinc, type LabCandidate } from "@/features/reports/lab-ai.ts";
+import { dedupeLabCandidates, groupLabLayoutPages, labSourceHighlight, loincSearchQueries, normalizeIdentity, prepareLabPdf, structureLabDocument, suggestLabLoinc, suggestLabLoincSearchTerms, verifiedLabLoinc, type LabCandidate } from "@/features/reports/lab-ai.ts";
 import { reusedPhrLoinc, validatePhrLabDraft } from "@/features/patient-portal/labs.ts";
-import { isAnalyzableLabDocument } from "@/features/patient-portal/documents.ts";
+import { isAnalyzableLabDocument, labImageMime } from "@/features/patient-portal/documents.ts";
 import { requirePhrApi } from "@/lib/server-auth";
 
 const MAX_BYTES = 10 * 1024 * 1024;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
 const dateOr = (value: string, fallback: string) => validDate(value) ? value : fallback;
-const redact = (text: string, values: string[]) => values.filter((value) => value.trim()).reduce((result, value) => result.replace(new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), "[PATIENT]"), sanitizeTextForAi(text));
+type LoincOption = { code: string; display: string };
 
-async function matchPhrLoinc(db: any, ownerUserId: string, rows: LabCandidate[]) {
-  const warnings: string[] = [], loincByIndex = new Map<number, string>();
+async function matchPhrLoinc(db: any, ownerUserId: string, rows: LabCandidate[], useAi: boolean) {
+  const warnings: string[] = [], loincByIndex = new Map<number, string>(), optionsByIndex = new Map<number, LoincOption[]>();
   const catalog = await db.from("terminology_codes").select("code", { count: "exact", head: true }).eq("system", "LOINC");
-  if (catalog.error || !catalog.count) return { loincByIndex, warnings: [catalog.error ? "No fue posible consultar el catálogo LOINC." : "El catálogo LOINC está vacío; debe cargarse para homologar resultados."] };
+  if (catalog.error || !catalog.count) return { loincByIndex, optionsByIndex, warnings: [catalog.error ? "No fue posible consultar el catálogo LOINC." : "El catálogo LOINC está vacío; debe cargarse para homologar resultados."] };
 
   const prior = await db.from("phr_lab_results").select("analyte, unit, loinc_code")
     .eq("owner_user_id", ownerUserId).eq("review_status", "confirmed").neq("loinc_code", "");
@@ -25,23 +24,35 @@ async function matchPhrLoinc(db: any, ownerUserId: string, rows: LabCandidate[])
 
   const unresolved = rows.map((row, index) => ({ row, index })).filter(({ index }) => !loincByIndex.has(index));
   const config = aiConfig();
-  if (!unresolved.length) return { loincByIndex, warnings };
-  if (!config.enabled || !process.env.OPENAI_API_KEY) return { loincByIndex, warnings: ["La IA no está habilitada para homologar analitos nuevos con LOINC."] };
+  if (!unresolved.length || !useAi) return { loincByIndex, optionsByIndex, warnings };
+  if (!config.enabled || !process.env.OPENAI_API_KEY) return { loincByIndex, optionsByIndex, warnings: ["La IA no está habilitada para homologar analitos nuevos con LOINC."] };
 
   try {
-    const translated = await suggestLabLoincSearchTerms(unresolved.map(({ row }) => row));
-    const terms = new Map(translated.terms.map((row) => [row.sourceId, row.searchTerm]));
-    const candidateSets = await Promise.all(unresolved.map(async ({ row }, index) => {
+    const search = async (queries: string[]) => {
       const found = new Map<string, string>();
-      for (const term of [row.analyte, terms.get(String(index)) ?? ""].filter(Boolean)) {
+      for (const term of [...new Set(queries.filter(Boolean))]) {
         const result = await db.rpc("search_terminology", { p_system: "LOINC", p_term: term });
         if (result.error) continue;
         for (const candidate of result.data ?? []) if (!found.has(candidate.code)) found.set(candidate.code, candidate.display);
         if (found.size >= 8) break;
       }
       return [...found].slice(0, 8).map(([code, display]) => ({ code, display }));
-    }));
-    const suggested = await suggestLabLoinc(unresolved.map(({ row }) => row), unresolved.map((_, index) => terms.get(String(index)) ?? ""), candidateSets);
+    };
+    const candidateSets = await Promise.all(unresolved.map(({ row }) => search(loincSearchQueries(row.analyte))));
+    const missing = candidateSets.map((options, index) => ({ options, index })).filter(({ options }) => !options.length);
+    const englishTerms = new Map<number, string>();
+    if (missing.length) {
+      const translated = await suggestLabLoincSearchTerms(missing.map(({ index }) => unresolved[index].row));
+      translated.terms.forEach((row) => { const target = missing[Number(row.sourceId)]; if (target) englishTerms.set(target.index, row.searchTerm); });
+      await Promise.all(missing.map(async ({ index }) => { candidateSets[index] = await search(loincSearchQueries(englishTerms.get(index) ?? "")); }));
+    }
+    const suggested = await suggestLabLoinc(unresolved.map(({ row }) => row), unresolved.map((_, index) => englishTerms.get(index) ?? ""), candidateSets);
+    const preferred = new Map(suggested.suggestions.map((row) => [row.sourceId, row.loincCode.trim()]));
+    candidateSets.forEach((options, index) => {
+      const code = preferred.get(String(index));
+      const ranked = code ? [...options].sort((a, b) => Number(b.code === code) - Number(a.code === code)) : options;
+      if (ranked.length) optionsByIndex.set(unresolved[index].index, ranked.slice(0, 3));
+    });
     const proposed = [...new Set(suggested.suggestions.map((row) => row.loincCode.trim()).filter(Boolean))];
     const known = proposed.length ? await db.from("terminology_codes").select("code").eq("system", "LOINC").in("code", proposed) : { data: [], error: null };
     if (known.error) throw known.error;
@@ -51,7 +62,7 @@ async function matchPhrLoinc(db: any, ownerUserId: string, rows: LabCandidate[])
     }
     warnings.push(`${loincByIndex.size} de ${rows.length} analitos fueron homologados con equivalencias español–inglés y verificados contra el catálogo LOINC.`);
   } catch { warnings.push("No fue posible completar la homologación LOINC; los resultados siguen disponibles para revisión."); }
-  return { loincByIndex, warnings };
+  return { loincByIndex, optionsByIndex, warnings };
 }
 
 export async function GET(request: NextRequest) {
@@ -91,7 +102,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const auth = await requirePhrApi(request);
   if (auth instanceof NextResponse) return auth;
-  const body = await request.json().catch(() => ({})) as { documentId?: string; rematch?: boolean; rescan?: boolean };
+  const body = await request.json().catch(() => ({})) as { documentId?: string; rematch?: boolean; rescan?: boolean; suggestLoinc?: boolean };
   if (!body.documentId) return NextResponse.json({ error: "Documento inválido." }, { status: 400 });
 
   const document = await auth.db.from("patient_documents")
@@ -105,14 +116,29 @@ export async function POST(request: NextRequest) {
   let existingRows: any[] = [];
   const previous = await auth.db.from("phr_lab_imports").select("id, warnings").eq("document_id", body.documentId).eq("owner_user_id", auth.user.id).maybeSingle();
   if (previous.data) {
-    const existing = await auth.db.from("phr_lab_results").select("id, analyte, value_num, value_text, unit, ref_low, ref_high, ref_text, flag, observed_at, source, source_sentence, loinc_code").eq("import_id", previous.data.id).order("analyte");
+    const existing = await auth.db.from("phr_lab_results").select("id, analyte, value_num, value_text, unit, ref_low, ref_high, ref_text, flag, observed_at, source, source_sentence, loinc_code, review_status").eq("import_id", previous.data.id).order("analyte");
     existingRows = existing.data ?? [];
+    if (body.suggestLoinc) {
+      const pending = existingRows.filter((row) => row.review_status === "suggested" && !row.loinc_code);
+      if (!pending.length) return NextResponse.json({ suggestions: [], warnings: ["No quedan resultados pendientes sin LOINC."] });
+      const rows = pending.map((row) => ({ analyte: row.analyte, valueNum: row.value_num, valueText: row.value_text, unit: row.unit, refLow: row.ref_low, refHigh: row.ref_high, refText: row.ref_text, flag: row.flag, observedAt: row.observed_at, source: row.source, sourceSentence: row.source_sentence, specimen: row.source_sentence.match(/(?:^|\|)\s*Muestra:\s*([^|]+)$/i)?.[1]?.trim() })) as LabCandidate[];
+      const matched = await matchPhrLoinc(auth.db, auth.user.id, rows, true);
+      const reusedCodes = [...new Set(matched.loincByIndex.values())];
+      const reused = reusedCodes.length ? await auth.db.from("terminology_codes").select("code, display").eq("system", "LOINC").in("code", reusedCodes) : { data: [], error: null };
+      const reusedDisplay = new Map((reused.data ?? []).map((row: { code: string; display: string }) => [row.code, row.display]));
+      const suggestions = pending.map((row, index) => {
+        const reusedCode = matched.loincByIndex.get(index);
+        const options = reusedCode ? [{ code: reusedCode, display: reusedDisplay.get(reusedCode) ?? reusedCode }] : matched.optionsByIndex.get(index) ?? [];
+        return { resultId: row.id, analyte: row.analyte, options };
+      });
+      return NextResponse.json({ suggestions, warnings: matched.warnings });
+    }
     if (body.rescan && existingRows.length) previousImportId = previous.data.id;
     if (existing.data?.length && body.rematch && !body.rescan) {
       const pending = existing.data.map((row, originalIndex) => ({ row, originalIndex })).filter(({ row }) => !row.loinc_code);
       if (!pending.length) return NextResponse.json({ duplicate: true, created: existing.data.length, loincMapped: existing.data.length, warnings: ["Todos los resultados ya tienen agrupación LOINC."] });
       const rows = pending.map(({ row }) => ({ analyte: row.analyte, valueNum: row.value_num, valueText: row.value_text, unit: row.unit, refLow: row.ref_low, refHigh: row.ref_high, refText: row.ref_text, flag: row.flag, observedAt: row.observed_at, source: row.source, sourceSentence: row.source_sentence, specimen: row.source_sentence.match(/(?:^|\|)\s*Muestra:\s*([^|]+)$/i)?.[1]?.trim() })) as LabCandidate[];
-      const matched = await matchPhrLoinc(auth.db, auth.user.id, rows);
+      const matched = await matchPhrLoinc(auth.db, auth.user.id, rows, true);
       const updates = await Promise.all([...matched.loincByIndex].map(([index, code]) => auth.db.from("phr_lab_results").update({ loinc_code: code }).eq("id", existing.data[pending[index].originalIndex].id).eq("owner_user_id", auth.user.id)));
       const applied = updates.filter((result) => !result.error).length;
       if (applied < updates.length) matched.warnings.push("Algunas homologaciones no pudieron guardarse y permanecen pendientes.");
@@ -125,7 +151,7 @@ export async function POST(request: NextRequest) {
   const downloaded = await auth.db.storage.from("patient-documents").download(document.data.storage_path);
   if (downloaded.error || !downloaded.data) return NextResponse.json({ error: "No fue posible leer el archivo original." }, { status: 502 });
   const bytes = new Uint8Array(await downloaded.data.arrayBuffer());
-  const imageMime = document.data.mime_type === "image/jpeg" || document.data.mime_type === "image/png" ? document.data.mime_type : "";
+  const imageMime = labImageMime(document.data.mime_type);
   let prepared: Awaited<ReturnType<typeof prepareLabPdf>>;
   if (imageMime) prepared = { patientName: "", patientIdentifier: "", observedAt: "", observations: [], aiText: "", scanned: true, needsAi: true, pageCount: 1 };
   else {
@@ -135,7 +161,7 @@ export async function POST(request: NextRequest) {
 
   let rows: LabCandidate[] = prepared.observations;
   let aiResult: Awaited<ReturnType<typeof structureLabDocument>> | null = null;
-  if (prepared.needsAi) {
+  if (imageMime) {
     const config = aiConfig();
     if (!config.enabled || !process.env.OPENAI_API_KEY) return NextResponse.json({ error: "Este archivo necesita reconocimiento visual y la extracción automática no está habilitada." }, { status: 503 });
     const start = new Date(); start.setUTCHours(0, 0, 0, 0);
@@ -146,7 +172,7 @@ export async function POST(request: NextRequest) {
     try {
       aiResult = await structureLabDocument({
         procedureName: "Laboratorio personal",
-        ...(imageMime ? { imageBytes: bytes, imageMime } : prepared.scanned ? { pdfBytes: bytes } : { text: redact(prepared.aiText, [auth.profile.full_name, auth.profile.identifier]) }),
+        imageBytes: bytes, imageMime,
       });
       rows = aiResult.observations;
     } catch { return NextResponse.json({ error: "No fue posible extraer resultados de este archivo." }, { status: 502 }); }
@@ -156,6 +182,7 @@ export async function POST(request: NextRequest) {
   const extractedIdentifier = prepared.patientIdentifier || aiResult?.extraction.patientIdentifier || "";
   const profileIdentifier = auth.profile.identifier.trim();
   const warnings = [...(aiResult?.extraction.warnings ?? [])];
+  if (!imageMime && prepared.needsAi) warnings.push("El PDF se leyó sólo localmente y puede contener filas que requieren corrección manual; no se envió contenido a IA.");
   if (extractedIdentifier && profileIdentifier) {
     if (normalizeIdentity(extractedIdentifier) !== normalizeIdentity(profileIdentifier)) return NextResponse.json({ error: "La identidad del archivo no coincide con tu perfil. No se guardó ningún resultado." }, { status: 422 });
   } else if (extractedName) {
@@ -169,11 +196,11 @@ export async function POST(request: NextRequest) {
     if (!candidates.length) return NextResponse.json({ duplicate: true, created: 0, loincMapped: existingRows.filter((row) => row.loinc_code).length, warnings: ["La relectura no encontró resultados nuevos."] });
   }
   if (!candidates.length) return NextResponse.json({ error: "No se detectaron resultados para revisar." }, { status: 422 });
-  const matched = await matchPhrLoinc(auth.db, auth.user.id, candidates);
+  const matched = await matchPhrLoinc(auth.db, auth.user.id, candidates, !!imageMime);
   warnings.push(...matched.warnings);
   const fallbackDate = document.data.document_date ?? document.data.created_at.slice(0, 10);
   if (candidates.some((row) => !row.observedAt)) warnings.push("No se encontró fecha de muestra en todas las filas; se usó la fecha del documento.");
-  const extractionMethod = !prepared.needsAi ? "local" : imageMime || prepared.scanned ? "ai_visual" : "ai_text";
+  const extractionMethod = imageMime ? "ai_visual" : "local";
   const imported = previousImportId
     ? await auth.db.from("phr_lab_imports").update({ extraction_method: extractionMethod, patient_name: extractedName, patient_identifier: extractedIdentifier, warnings }).eq("id", previousImportId).eq("owner_user_id", auth.user.id).select("id").single()
     : await auth.db.from("phr_lab_imports").insert({ owner_user_id: auth.user.id, document_id: body.documentId, extraction_method: extractionMethod, patient_name: extractedName, patient_identifier: extractedIdentifier, warnings }).select("id").single();
@@ -196,7 +223,21 @@ export async function POST(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   const auth = await requirePhrApi(request);
   if (auth instanceof NextResponse) return auth;
-  const body = await request.json().catch(() => ({})) as { resultId?: string; resultIds?: string[]; confirm?: boolean; analyte?: string; value?: string; unit?: string; reference?: string; observedAt?: string };
+  const body = await request.json().catch(() => ({})) as { resultId?: string; resultIds?: string[]; confirm?: boolean; analyte?: string; value?: string; unit?: string; reference?: string; observedAt?: string; loincSelections?: { resultId: string; loincCode: string }[] };
+  if (Array.isArray(body.loincSelections)) {
+    const selections = body.loincSelections.filter((item) => uuid.test(item?.resultId ?? "") && /^\d{1,7}-\d$/.test(item?.loincCode ?? "")).slice(0, 100);
+    if (!selections.length || selections.length !== body.loincSelections.length) return NextResponse.json({ error: "Selecciones LOINC inválidas." }, { status: 400 });
+    const resultIds = [...new Set(selections.map((item) => item.resultId))];
+    if (resultIds.length !== selections.length) return NextResponse.json({ error: "Cada resultado debe tener una sola selección LOINC." }, { status: 400 });
+    const targets = await auth.db.from("phr_lab_results").select("id").eq("owner_user_id", auth.user.id).eq("review_status", "suggested").in("id", resultIds);
+    if (targets.error || targets.data?.length !== resultIds.length) return NextResponse.json({ error: "Uno o más resultados ya no están disponibles." }, { status: 404 });
+    const codes = [...new Set(selections.map((item) => item.loincCode))];
+    const known = await auth.db.from("terminology_codes").select("code").eq("system", "LOINC").in("code", codes);
+    if (known.error || new Set((known.data ?? []).map((row) => row.code)).size !== codes.length) return NextResponse.json({ error: "Uno o más códigos LOINC no existen en el catálogo." }, { status: 400 });
+    const updates = await Promise.all(selections.map((item) => auth.db.from("phr_lab_results").update({ loinc_code: item.loincCode }).eq("id", item.resultId).eq("owner_user_id", auth.user.id).eq("review_status", "suggested").select("id")));
+    if (updates.some((result) => result.error)) return NextResponse.json({ error: "No fue posible guardar todas las selecciones LOINC." }, { status: 502 });
+    return NextResponse.json({ updated: updates.reduce((sum, result) => sum + (result.data?.length ?? 0), 0) });
+  }
   if (Array.isArray(body.resultIds)) {
     const ids = [...new Set(body.resultIds)].filter((id) => uuid.test(id)).slice(0, 200);
     if (!ids.length || ids.length !== body.resultIds.length || body.confirm !== true) return NextResponse.json({ error: "Resultados inválidos." }, { status: 400 });

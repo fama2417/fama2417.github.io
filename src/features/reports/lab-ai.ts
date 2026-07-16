@@ -452,7 +452,7 @@ export async function suggestLabLoinc(rows: Pick<LabCandidate, "analyte" | "unit
       { role: "user", content: JSON.stringify(rows.map((row, index) => ({ sourceId: String(index), analyte: row.analyte, englishSearchTerm: englishTerms[index] ?? "", specimen: row.specimen ?? "", unit: row.unit, valueType: row.valueNum === null ? "text" : "number", candidates: candidates[index] ?? [] }))) },
     ],
     text: { format: zodTextFormat(LabLoincExtractionSchema, "lab_loinc") },
-    max_output_tokens: Math.min(config.maxOutputTokens, 2000),
+    max_output_tokens: Math.min(config.maxOutputTokens, 4000),
     store: false,
   } as any, { timeout: config.timeoutMs });
   const extraction = LabLoincExtractionSchema.parse(structuredPayload(response));
@@ -477,7 +477,7 @@ export async function suggestLabLoincSearchTerms(rows: Pick<LabCandidate, "analy
       { role: "user", content: JSON.stringify(rows.map((row, index) => ({ sourceId: String(index), analyte: row.analyte, specimen: row.specimen ?? "", unit: row.unit, valueType: row.valueNum === null ? "text" : "number" }))) },
     ],
     text: { format: zodTextFormat(LabLoincSearchSchema, "lab_loinc_search") },
-    max_output_tokens: Math.min(config.maxOutputTokens, 2000),
+    max_output_tokens: Math.min(config.maxOutputTokens, 4000),
     store: false,
   } as any, { timeout: config.timeoutMs });
   const extraction = LabLoincSearchSchema.parse(structuredPayload(response));
