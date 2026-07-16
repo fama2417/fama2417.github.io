@@ -1,18 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
+import { phrHealthItemFhirResource, type PhrHealthItem } from "@/features/patient-portal/health-summary";
 import { requirePhrApi } from "@/lib/server-auth";
 
 export async function GET(request: NextRequest) {
   const auth = await requirePhrApi(request);
   if (auth instanceof NextResponse) return auth;
-  const [documents, labResults] = await Promise.all([
+  const [documents, labResults, healthItems] = await Promise.all([
     auth.db.from("patient_documents")
       .select("id, original_filename, storage_path, mime_type, size_bytes, document_date, document_type, source_institution, created_at")
       .eq("owner_user_id", auth.user.id),
     auth.db.from("phr_lab_results")
       .select("id, document_id, loinc_code, analyte, value_num, value_text, unit, ref_low, ref_high, ref_text, flag, observed_at")
       .eq("owner_user_id", auth.user.id).eq("review_status", "confirmed"),
+    auth.db.from("phr_health_items")
+      .select("id, kind, label, status, event_date, source, source_document_id, notes, created_at")
+      .eq("owner_user_id", auth.user.id),
   ]);
-  if (documents.error || labResults.error) return NextResponse.json({ error: "No fue posible generar la exportación." }, { status: 500 });
+  if (documents.error || labResults.error || healthItems.error) return NextResponse.json({ error: "No fue posible generar la exportación." }, { status: 500 });
   const ownerId = auth.user.id;
   const entries: { fullUrl: string; resource: Record<string, unknown> }[] = [];
   const signedByDocument = new Map<string, string>();
@@ -44,6 +48,14 @@ export async function GET(request: NextRequest) {
       derivedFrom: [{ reference: `DocumentReference/${result.document_id}` }],
     }});
   }
+  const healthReferences = new Map<string, { reference: string }[]>();
+  for (const item of healthItems.data ?? []) {
+    const normalized = { id: item.id, kind: item.kind, label: item.label, status: item.status, eventDate: item.event_date ?? "", source: item.source, sourceDocumentId: item.source_document_id ?? "", notes: item.notes, createdAt: item.created_at } as PhrHealthItem;
+    const resource = phrHealthItemFhirResource(normalized, ownerId);
+    const reference = `${resource.resourceType}/${item.id}`;
+    healthReferences.set(item.kind, [...(healthReferences.get(item.kind) ?? []), { reference }]);
+    entries.push({ fullUrl: `urn:uuid:${item.id}`, resource });
+  }
   type LabResultRow = NonNullable<typeof labResults.data>[number];
   const resultsByDocument = new Map<string, LabResultRow[]>();
   for (const result of labResults.data ?? []) resultsByDocument.set(result.document_id, [...(resultsByDocument.get(result.document_id) ?? []), result]);
@@ -59,6 +71,18 @@ export async function GET(request: NextRequest) {
       presentedForm: [{ contentType: document.mime_type, url: signedByDocument.get(document.id), title: document.original_filename }],
     }});
   }
-  const bundle = { resourceType: "Bundle", type: "collection", timestamp: new Date().toISOString(), total: entries.length, entry: entries };
+  const compositionId = crypto.randomUUID(), now = new Date().toISOString();
+  const sections = [
+    ["Alergias", healthReferences.get("allergy")], ["Condiciones", healthReferences.get("condition")],
+    ["Medicamentos", healthReferences.get("medication")], ["Vacunas", healthReferences.get("immunization")],
+    ["Procedimientos", healthReferences.get("procedure")],
+    ["Resultados de laboratorio", (labResults.data ?? []).map((result) => ({ reference: `Observation/${result.id}` }))],
+    ["Documentos", (documents.data ?? []).map((document) => ({ reference: `DocumentReference/${document.id}` }))],
+  ].filter(([, references]) => references?.length).map(([title, references]) => ({ title, entry: references }));
+  entries.unshift({ fullUrl: `urn:uuid:${compositionId}`, resource: {
+    resourceType: "Composition", id: compositionId, status: "final", type: { coding: [{ system: "http://loinc.org", code: "60591-5", display: "Patient summary Document" }], text: "Resumen personal de salud" },
+    subject: { reference: `Patient/${ownerId}` }, date: now, author: [{ reference: `Patient/${ownerId}` }], title: "Resumen personal de salud", section: sections,
+  }});
+  const bundle = { resourceType: "Bundle", type: "document", identifier: { system: "urn:phr:summary", value: compositionId }, timestamp: now, total: entries.length, entry: entries };
   return new NextResponse(JSON.stringify(bundle, null, 2), { headers: { "Content-Type": "application/fhir+json", "Content-Disposition": "attachment; filename=mi-registro-fhir.json", "Cache-Control": "no-store" } });
 }
