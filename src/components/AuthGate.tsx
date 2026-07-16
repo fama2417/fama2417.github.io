@@ -148,26 +148,46 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   );
   if (!session && (pathname === "/portal/privacidad" || pathname.startsWith("/compartir/"))) return <>{children}</>;
   if (!session && pathname === "/portal") return (
-    <main className="login-page phr-login-page phr-app">
-      <section className="phr-login-copy">
-        <p className="eyebrow">Mi Salud</p><h1>Todos tus exámenes, en un solo lugar.</h1>
-        <p>Guarda documentos de cualquier institución y construye un historial personal que tú controlas.</p>
-        <ul><li>Privado por defecto</li><li>El original nunca se modifica</li><li>Exporta o elimina tus datos cuando quieras</li></ul>
-      </section>
-      <form className="login-card" onSubmit={requestPatientAccess}>
-        <p className="eyebrow">Registro personal de salud</p><h2>Entrar o crear mi registro</h2>
-        <p>Usaremos tu correo para enviarte un enlace de acceso. Si es tu primera vez, completarás tu perfil al ingresar.</p>
-        <label>Correo electrónico<input value={email} onChange={(event) => setEmail(event.target.value)} name="email" type="email" autoComplete="email" required /></label>
-        <button className="button primary" disabled={submitting} type="submit">{submitting ? "Enviando…" : "Continuar con correo"}</button>
-        <details className="login-password"><summary>Ingresar con contraseña</summary>
-          <label>Contraseña<input name="password" type="password" autoComplete="current-password" /></label>
-          <button className="button secondary" disabled={submitting} type="button" onClick={(event) => void loginWithPassword(String(new FormData(event.currentTarget.form!).get("password")))}>Ingresar</button>
-          <button className="text-button" disabled={submitting} type="button" onClick={requestRecovery}>Olvidé mi contraseña</button>
-        </details>
-        {error && <p className="form-error" role="alert">{error}</p>}
-        {notice && <p className="form-notice" role="status">{notice}</p>}
-        <small>Al continuar aceptas el tratamiento de tus datos según nuestra <a href="/portal/privacidad">política de privacidad</a>.</small>
-      </form>
+    <main className="phr-app phr-public-page">
+      <div className="phr-public-shell">
+        <header className="phr-public-header">
+          <a className="phr-public-brand" href="/portal" aria-label="Mi Salud, inicio"><span aria-hidden="true">▰</span><strong>Mi Salud</strong></a>
+          <nav aria-label="Información del portal"><a href="#como-funciona">Cómo funciona</a><a href="/portal/privacidad">Privacidad</a><a href="/portal/privacidad#ayuda">Ayuda</a><a className="phr-public-nav-cta" href="#acceso">Entrar</a></nav>
+        </header>
+
+        <section className="phr-public-hero">
+          <div className="phr-public-copy">
+            <p className="phr-public-eyebrow"><span aria-hidden="true" />Registro personal de salud</p>
+            <h1>Todos tus exámenes,<br />en <em>un solo lugar.</em></h1>
+            <p>Guarda documentos de cualquier institución y construye un historial personal que tú controlas. Sin carpetas perdidas y sin depender de un solo prestador.</p>
+            <div className="phr-public-chips" aria-label="Características principales"><span>🔒 Privado por defecto</span><span>▤ El original no se modifica</span><span>↓ Exporta o elimina tus datos</span></div>
+          </div>
+
+          <div className="phr-public-access" id="acceso">
+            <div className="phr-public-art" aria-hidden="true"><img src="/phr-login-hero.png" alt="" /></div>
+            <section className="login-card">
+              <p className="eyebrow">🔒 Acceso seguro</p><h2>Entrar o crear mi registro</h2>
+              <p>Te enviaremos un enlace de acceso. Si es tu primera vez, completarás tu perfil y consentimiento al ingresar.</p>
+              <form className="phr-public-email-form" onSubmit={requestPatientAccess}><label>Correo electrónico<input value={email} onChange={(event) => setEmail(event.target.value)} name="email" type="email" placeholder="tucorreo@ejemplo.cl" autoComplete="email" required /></label><button className="button primary" disabled={submitting} type="submit">{submitting ? "Enviando…" : "Enviarme el enlace →"}</button><small>Enlace temporal · Sin contraseña que recordar</small></form>
+              <details className="login-password"><summary>› Ingresar con contraseña</summary>
+                <form onSubmit={login}><label>Contraseña<input name="password" type="password" autoComplete="current-password" required /></label><button className="button secondary" disabled={submitting} type="submit">Ingresar</button><button className="text-button" disabled={submitting} type="button" onClick={requestRecovery}>Olvidé mi contraseña</button></form>
+              </details>
+              {error && <p className="form-error" role="alert">{error}</p>}
+              {notice && <p className="form-notice" role="status">{notice}</p>}
+              <p className="phr-public-secure">✓ Conexión cifrada · Documentos privados por defecto</p>
+              <small>Al crear tu registro deberás aceptar los <a href="/portal/privacidad#terminos">términos</a> y consentir el tratamiento descrito en la <a href="/portal/privacidad">política de privacidad</a>.</small>
+            </section>
+          </div>
+        </section>
+
+        <section className="phr-public-trust" id="como-funciona" aria-label="Cómo protegemos tu registro">
+          <article><span>🔒</span><h2>Privado por defecto</h2><p>Tus documentos no se comparten con instituciones ni otras personas salvo que tú lo autorices o la ley lo exija.</p></article>
+          <article><span>▤</span><h2>Original protegido</h2><p>El archivo que subes se conserva separado de los datos extraídos y las sugerencias que revisas.</p></article>
+          <article><span>↓</span><h2>Tus datos, tu decisión</h2><p>Puedes corregir tu perfil, exportar tu registro y eliminar tu cuenta desde Perfil y seguridad.</p></article>
+        </section>
+
+        <footer className="phr-public-footer"><span>© 2026 Mi Salud · Registro personal de salud</span><nav aria-label="Información legal"><a href="/portal/privacidad">Privacidad</a><a href="/portal/privacidad#terminos">Términos</a><a href="/portal/privacidad#contacto">Contacto</a></nav></footer>
+      </div>
     </main>
   );
   if (!session) return (

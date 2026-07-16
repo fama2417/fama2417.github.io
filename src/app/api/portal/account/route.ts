@@ -3,7 +3,7 @@ import { validatePhrEmergency, validatePhrProfile } from "@/features/patient-por
 import { requireNonStaffApi, requirePhrApi } from "@/lib/server-auth";
 
 type Body = {
-  fullName?: string; birthDate?: string; identifier?: string; acceptedPrivacy?: boolean; confirmation?: string;
+  fullName?: string; birthDate?: string; identifier?: string; acceptedPrivacy?: boolean; acceptedTerms?: boolean; confirmation?: string;
   bloodType?: string; allergies?: string; conditions?: string; medications?: string;
   emergencyContactName?: string; emergencyContactPhone?: string; emergencyNotes?: string;
 };
@@ -15,6 +15,7 @@ export async function POST(request: NextRequest) {
   const validated = validatePhrProfile({ fullName: body.fullName ?? "", birthDate: body.birthDate ?? "", identifier: body.identifier ?? "" });
   if ("error" in validated) return NextResponse.json({ error: validated.error }, { status: 400 });
   if (body.acceptedPrivacy !== true) return NextResponse.json({ error: "Debes aceptar la política de privacidad." }, { status: 400 });
+  if (body.acceptedTerms !== true) return NextResponse.json({ error: "Debes aceptar los términos de uso." }, { status: 400 });
   const exists = await auth.db.from("phr_profiles").select("user_id").eq("user_id", auth.user.id).maybeSingle();
   if (exists.data) return NextResponse.json({ error: "Tu registro personal ya existe." }, { status: 409 });
   const now = new Date().toISOString();
