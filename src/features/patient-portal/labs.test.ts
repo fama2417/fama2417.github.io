@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildPhrLabTrend, phrLabDraftOf, phrSpecimenLabel, reusedPhrLoinc, validatePhrLabDraft, type PhrLabResult } from "./labs.ts";
+import { buildPhrLabTrend, phrLabDraftOf, phrLabTrendKey, phrSpecimenLabel, reusedPhrLoinc, validatePhrLabDraft, vettedPhrLabIdentity, type PhrLabResult } from "./labs.ts";
 
 const row = (id: string, date: string, value: number, unit = "mg/dL", status: PhrLabResult["reviewStatus"] = "confirmed"): PhrLabResult => ({
   id, documentId: id, analyte: "Glucosa", loincCode: "", valueNum: value, valueText: "", unit,
@@ -41,4 +41,14 @@ test("presenta la muestra LOINC sin inventarla cuando falta", () => {
   assert.equal(phrSpecimenLabel(undefined, "p33-r31 | Nitritos | Negativo | Muestra: Orina"), "Orina");
   assert.equal(phrSpecimenLabel(undefined, "p20-r19 | Ferremia | 114 | ug/dL | 65 - 175 | Muestra: Suero"), "Sangre (suero/plasma)");
   assert.equal(phrSpecimenLabel(), "Muestra no determinada");
+});
+
+test("homologa alias frecuentes sin mezclar mediciones relacionadas", () => {
+  assert.equal(vettedPhrLabIdentity({ analyte: "% Saturación de Transferrin" })?.code, "2502-3");
+  assert.equal(vettedPhrLabIdentity({ analyte: "SATURACION TRANSFERRINA" })?.trendKey, "iron-saturation");
+  assert.equal(vettedPhrLabIdentity({ analyte: "Glicemia Media Estimada" })?.code, "27353-2");
+  assert.equal(vettedPhrLabIdentity({ analyte: "Glucosa" }), null);
+  assert.equal(vettedPhrLabIdentity({ analyte: "Vitamina D Total", specimen: "Orina" }), null);
+  assert.equal(phrLabTrendKey({ analyte: "TSH", loincCode: "24348-5" }), "tsh");
+  assert.equal(phrLabTrendKey({ analyte: "T4 LIBRE", loincCode: "24348-5" }), "free-t4");
 });

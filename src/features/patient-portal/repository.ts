@@ -1,7 +1,7 @@
 import { authenticatedFetch, supabase } from "@/lib/supabase-client";
 import { clinicalAreaForDocumentType, validatePatientDocument, type PhrClinicalArea } from "./documents";
 import type { PhrHealthItem, PhrHealthItemDraft } from "./health-summary";
-import type { PhrImagingText } from "./imaging";
+import { structurePhrImagingText, type PhrImagingText } from "./imaging";
 import type { PhrLabDraft, PhrLabResult } from "./labs";
 
 export type PhrProfile = {
@@ -179,10 +179,14 @@ export async function fetchPatientDocuments(ownerUserId?: string): Promise<Porta
   return Promise.all(rows.map(async (row) => {
     const signed = await supabase.storage.from("patient-documents").createSignedUrl(row.storage_path, 3600);
     if (signed.error) throw signed.error;
+    const savedText = row.extracted_text?.fullText ? row.extracted_text : null;
+    const extractedText = savedText && !savedText.findings && !savedText.impression
+      ? structurePhrImagingText(savedText.fullText)
+      : savedText;
     return {
       id: row.id, filename: row.original_filename, mimeType: row.mime_type, sizeBytes: row.size_bytes,
       documentDate: row.document_date, documentType: row.document_type, clinicalArea: row.clinical_area ?? clinicalAreaForDocumentType(row.document_type), sourceInstitution: row.source_institution,
-      createdAt: row.created_at, url: signed.data.signedUrl, extractedText: row.extracted_text?.fullText ? row.extracted_text : null,
+      createdAt: row.created_at, url: signed.data.signedUrl, extractedText,
       sharedPatientIds: sharedByDocument.get(row.id) ?? [], reviewByPatientId: reviewedByDocument.get(row.id) ?? {},
     };
   }));
@@ -273,7 +277,7 @@ export async function analyzePhrLabDocument(documentId: string, rematch = false,
   return await response.json() as { created: number; loincMapped: number; duplicate: boolean; warnings: string[] };
 }
 
-export type PhrLoincSuggestion = { resultId: string; analyte: string; options: { code: string; display: string }[] };
+export type PhrLoincSuggestion = { resultId: string; analyte: string; currentCode: string; recommendedCode: string; options: { code: string; display: string }[] };
 
 export async function fetchPhrLoincSuggestions(documentId: string) {
   const response = await authenticatedFetch("/api/portal/labs", {
