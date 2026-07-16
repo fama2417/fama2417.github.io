@@ -1,5 +1,8 @@
 export const PATIENT_DOCUMENT_MAX_BYTES = 20 * 1024 * 1024;
 export const PATIENT_DOCUMENT_TYPES = ["application/pdf", "image/jpeg", "image/png", "application/dicom"] as const;
+const ANALYZABLE_LAB_TYPES = new Set(["application/pdf", "image/jpeg", "image/png"]);
+
+export const isAnalyzableLabDocument = (mimeType: string) => ANALYZABLE_LAB_TYPES.has(mimeType);
 
 export function validatePatientDocument(file: { size: number; type: string }) {
   if (!PATIENT_DOCUMENT_TYPES.includes(file.type as (typeof PATIENT_DOCUMENT_TYPES)[number])) return "Solo se permiten archivos PDF, JPG, PNG o DICOM.";

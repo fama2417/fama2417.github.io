@@ -1180,7 +1180,9 @@ body:has(.report-workstation) .app-shell-main { min-height: 0; overflow: hidden;
 .phr-app .phr-lab-review-groups { display: grid; gap: 10px; }
 .phr-app .phr-lab-review-workspace { align-items: start; display: grid; gap: 16px; grid-template-columns: minmax(340px, .85fr) minmax(0, 1.15fr); }
 .phr-app .phr-lab-source-viewer { background: var(--phr-surface-soft); border: 1px solid var(--phr-border); border-radius: 13px; min-height: 560px; overflow: hidden; position: sticky; top: 18px; }
-.phr-app .phr-lab-source-viewer iframe { border: 0; display: block; height: 620px; width: 100%; }
+.phr-app .phr-lab-source-viewer iframe,
+.phr-app .phr-lab-source-viewer img { border: 0; display: block; height: 620px; width: 100%; }
+.phr-app .phr-lab-source-viewer img { background: #fff; object-fit: contain; }
 .phr-app .phr-lab-source-viewer > p { color: var(--phr-muted); margin: 0; padding: 12px 14px; }
 .phr-app .phr-lab-review-group { background: var(--phr-surface-soft); border: 1px solid var(--phr-border); border-radius: 13px; overflow: hidden; }
 .phr-app .phr-lab-review-group summary { align-items: center; color: var(--phr-text); cursor: pointer; display: flex; font-weight: 750; justify-content: space-between; min-height: 48px; padding: 12px 14px; }
@@ -1234,7 +1236,8 @@ body:has(.report-workstation) .app-shell-main { min-height: 0; overflow: hidden;
   .phr-app .phr-periods { grid-template-columns: 1fr; }
   .phr-app .phr-lab-review-workspace { grid-template-columns: 1fr; }
   .phr-app .phr-lab-source-viewer { min-height: 420px; position: static; }
-  .phr-app .phr-lab-source-viewer iframe { height: 520px; }
+  .phr-app .phr-lab-source-viewer iframe,
+  .phr-app .phr-lab-source-viewer img { height: 520px; }
 }
 @media (max-width: 390px) {
   .phr-app-summary-card { min-height: 138px; }

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { hasValidPatientDocumentSignature, PATIENT_DOCUMENT_MAX_BYTES, validatePatientDocument } from "./documents.ts";
+import { hasValidPatientDocumentSignature, isAnalyzableLabDocument, PATIENT_DOCUMENT_MAX_BYTES, validatePatientDocument } from "./documents.ts";
 
 test("acepta PDF, imágenes y DICOM de hasta 20 MB", () => {
   assert.equal(validatePatientDocument({ type: "application/pdf", size: 1 }), "");
@@ -21,4 +21,11 @@ test("comprueba la firma real y no solo el MIME declarado", () => {
   const dicom = new Uint8Array(132); dicom.set(new TextEncoder().encode("DICM"), 128);
   assert.equal(hasValidPatientDocumentSignature(dicom, "application/dicom"), true);
   assert.equal(hasValidPatientDocumentSignature(new TextEncoder().encode("archivo falso"), "application/pdf"), false);
+});
+
+test("permite analizar laboratorios PDF o fotografiados, pero no DICOM", () => {
+  assert.equal(isAnalyzableLabDocument("application/pdf"), true);
+  assert.equal(isAnalyzableLabDocument("image/jpeg"), true);
+  assert.equal(isAnalyzableLabDocument("image/png"), true);
+  assert.equal(isAnalyzableLabDocument("application/dicom"), false);
 });

@@ -27,7 +27,7 @@ const reportSections: [keyof PortalReport, string][] = [
   ["clinicalIndication", "Indicación"], ["technique", "Técnica"], ["comparison", "Comparación"], ["findings", "Hallazgos"], ["impression", "Impresión"],
 ];
 const documentTypeLabels: Record<PortalDocument["documentType"], string> = {
-  imaging: "Imagenología", laboratory: "Laboratorio", prescription: "Receta u orden", other: "Otro",
+  imaging: "Radiología / imagenología", laboratory: "Laboratorio", prescription: "Receta u orden", other: "Otro",
 };
 
 function formatDate(date: string) {
@@ -289,7 +289,7 @@ export function PatientPortal() {
           <form className="portal-document-form" onSubmit={uploadDocument}>
             <label>Institución de origen<input name="sourceInstitution" required maxLength={160} placeholder="Ej. RedSalud" /></label>
             <label>Fecha del documento<input name="documentDate" type="date" /></label>
-            <label>Tipo<select name="documentType" defaultValue="imaging"><option value="imaging">Imagenología</option><option value="laboratory">Laboratorio</option><option value="prescription">Receta u orden</option><option value="other">Otro</option></select></label>
+            <label>Tipo<select name="documentType" defaultValue="imaging"><option value="imaging">Informe de radiología / imagenología</option><option value="laboratory">Laboratorio</option><option value="prescription">Receta u orden</option><option value="other">Otro</option></select></label>
             <label className="wide-field">Archivo<input name="file" type="file" required accept="application/pdf,image/jpeg,image/png,application/dicom,.dcm" /></label>
             <button className="button primary" type="submit" disabled={documentBusy}>{documentBusy ? "Subiendo…" : "Guardar documento"}</button>
           </form>
