@@ -1,5 +1,6 @@
 import { authenticatedFetch, supabase } from "@/lib/supabase-client";
 import { validatePatientDocument } from "./documents";
+import type { PhrHealthItem, PhrHealthItemDraft } from "./health-summary";
 import type { PhrImagingText } from "./imaging";
 import type { PhrLabDraft, PhrLabResult } from "./labs";
 
@@ -185,6 +186,26 @@ export async function fetchPatientDocuments(ownerUserId?: string): Promise<Porta
       sharedPatientIds: sharedByDocument.get(row.id) ?? [], reviewByPatientId: reviewedByDocument.get(row.id) ?? {},
     };
   }));
+}
+
+export async function fetchPhrHealthItems(ownerUserId: string): Promise<PhrHealthItem[]> {
+  const { data, error } = await supabase.from("phr_health_items")
+    .select("id, owner_user_id, kind, label, status, event_date, source, source_document_id, notes, created_at, updated_at")
+    .eq("owner_user_id", ownerUserId).order("kind").order("status").order("event_date", { ascending: false, nullsFirst: false });
+  if (error) throw error;
+  return (data ?? []).map((row) => ({
+    id: row.id, ownerUserId: row.owner_user_id, kind: row.kind, label: row.label, status: row.status,
+    eventDate: row.event_date ?? "", source: row.source, sourceDocumentId: row.source_document_id ?? "",
+    notes: row.notes, createdAt: row.created_at, updatedAt: row.updated_at,
+  })) as PhrHealthItem[];
+}
+
+export async function savePhrHealthItem(value: PhrHealthItemDraft, id?: string) {
+  await authenticatedFetch("/api/portal/health-items", { method: id ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, ...value }) });
+}
+
+export async function deletePhrHealthItem(id: string) {
+  await authenticatedFetch(`/api/portal/health-items?id=${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
 export async function uploadPatientDocument(input: { file: File; documentDate: string; documentType: PortalDocument["documentType"]; sourceInstitution: string }) {

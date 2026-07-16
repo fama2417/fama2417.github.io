@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { headers } from "next/headers";
+import { healthItemKindLabels, healthItemStatusLabels, type PhrHealthItemKind, type PhrHealthItemStatus } from "@/features/patient-portal/health-summary";
 import { reportedRangeLabel } from "@/features/patient-portal/longitudinal";
 import { serviceDatabase } from "@/lib/server-auth";
 
@@ -15,10 +16,11 @@ export default async function SharedPhrPage({ params }: { params: Promise<{ toke
   const db = serviceDatabase(), tokenHash = createHash("sha256").update(token).digest("hex");
   const share = await db.from("phr_share_links").select("id, owner_user_id, title, include_emergency, expires_at, revoked_at").eq("token_hash", tokenHash).maybeSingle();
   if (!share.data || share.data.revoked_at || share.data.expires_at <= new Date().toISOString()) return unavailable;
-  const [profile, selectedDocuments, selectedResults] = await Promise.all([
+  const [profile, selectedDocuments, selectedResults, healthItems] = await Promise.all([
     db.from("phr_profiles").select("full_name, birth_date, blood_type, allergies, conditions, medications, emergency_contact_name, emergency_contact_phone, emergency_notes").eq("user_id", share.data.owner_user_id).single(),
     db.from("phr_share_documents").select("document_id").eq("share_id", share.data.id),
     db.from("phr_share_results").select("result_id").eq("share_id", share.data.id),
+    share.data.include_emergency ? db.from("phr_health_items").select("id, kind, label, status, event_date, source, notes").eq("owner_user_id", share.data.owner_user_id).order("kind").order("status") : Promise.resolve({ data: [] }),
   ]);
   if (!profile.data) return unavailable;
   const documentIds = (selectedDocuments.data ?? []).map((row) => row.document_id), resultIds = (selectedResults.data ?? []).map((row) => row.result_id);
@@ -37,6 +39,7 @@ export default async function SharedPhrPage({ params }: { params: Promise<{ toke
   return <main className="portal-shell phr-public-share"><header className="portal-header"><div><p className="eyebrow">Mi Salud · Solo lectura</p><strong>{share.data.title}</strong></div><span>Expira el {new Date(share.data.expires_at).toLocaleString("es-CL")}</span></header>
     <section className="card portal-card"><h1>Resumen compartido por {p.full_name}</h1><p>Datos seleccionados por la persona. No sustituyen una evaluación clínica ni entregan diagnósticos.</p></section>
     {share.data.include_emergency && <section className="card portal-card"><p className="eyebrow">Perfil de emergencia</p><h2>Información declarada</h2><dl className="phr-summary-grid"><div><dt>Grupo sanguíneo</dt><dd>{p.blood_type || "No informado"}</dd></div><div><dt>Alergias</dt><dd>{p.allergies || "No informadas"}</dd></div><div><dt>Condiciones</dt><dd>{p.conditions || "No informadas"}</dd></div><div><dt>Medicamentos</dt><dd>{p.medications || "No informados"}</dd></div><div><dt>Contacto</dt><dd>{[p.emergency_contact_name, p.emergency_contact_phone].filter(Boolean).join(" · ") || "No informado"}</dd></div>{p.emergency_notes && <div><dt>Notas</dt><dd>{p.emergency_notes}</dd></div>}</dl></section>}
+    {share.data.include_emergency && !!healthItems.data?.length && <section className="card portal-card"><p className="eyebrow">Resumen estructurado</p><h2>Antecedentes declarados</h2><ul className="phr-health-list">{healthItems.data.map((item) => <li key={item.id}><div><strong>{item.label}</strong><span>{healthItemKindLabels[item.kind as PhrHealthItemKind]} · {healthItemStatusLabels[item.status as PhrHealthItemStatus]}{item.event_date && ` · ${shownDate(item.event_date)}`} · {item.source === "patient" ? "Declarado por la persona" : "Vinculado a documento"}</span>{item.notes && <p>{item.notes}</p>}</div></li>)}</ul></section>}
     {!!results.data?.length && <section className="card portal-card"><p className="eyebrow">Biomarcadores seleccionados</p><h2>Resultados confirmados</h2><ul className="phr-shared-results">{results.data.map((result) => <li key={result.id}><div><strong>{result.analyte}</strong><span>{shownDate(result.observed_at)}</span></div><div><strong>{result.value_num ?? result.value_text} {result.unit}</strong><span>{reportedRangeLabel(result)}</span></div></li>)}</ul></section>}
     {!!signedDocuments.length && <section className="card portal-card"><p className="eyebrow">Documentos seleccionados</p><h2>Originales compartidos</h2><ul className="portal-list">{signedDocuments.map((document) => <li key={document.id}><div className="portal-document-detail"><strong>{document.original_filename}</strong><span>{document.source_institution} · {shownDate(document.document_date ?? document.created_at)}</span></div>{document.url && <a className="button secondary" href={document.url} target="_blank" rel="noreferrer">Abrir</a>}</li>)}</ul></section>}
   </main>;

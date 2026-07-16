@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import type { PhrHealthItem } from "./health-summary";
 import { comparePhrPeriods, type PhrPeriod } from "./longitudinal";
 import type { PhrLabResult } from "./labs";
+import { PhrHomeTools } from "./PhrHomeTools";
 import { documentDate, friendlyDocumentName, latestLaboratory, recentPhrActivity, suggestedResultCount } from "./presentation";
 import { fetchPhrFavorites, fetchPhrLabResults, type PortalDocument, type PhrFavorite } from "./repository";
 
@@ -27,9 +29,9 @@ function useLongitudinal(ownerUserId: string) {
   return { results, confirmed: results.filter((result) => result.reviewStatus === "confirmed"), favorites, loading };
 }
 
-type DashboardTarget = "laboratorios" | "documentos" | "timeline";
+type DashboardTarget = "resumen" | "laboratorios" | "documentos" | "timeline";
 
-export function PhrDashboard({ ownerUserId, documents, onNavigate }: { ownerUserId: string; documents: PortalDocument[]; onNavigate: (target: DashboardTarget) => void }) {
+export function PhrDashboard({ ownerUserId, documents, healthItems, onNavigate }: { ownerUserId: string; documents: PortalDocument[]; healthItems: PhrHealthItem[]; onNavigate: (target: DashboardTarget) => void }) {
   const { results, favorites, loading } = useLongitudinal(ownerUserId);
   const latestLab = latestLaboratory(documents);
   const pending = suggestedResultCount(results);
@@ -49,6 +51,7 @@ export function PhrDashboard({ ownerUserId, documents, onNavigate }: { ownerUser
         <span><small>{card.label}</small><strong>{card.value}</strong><span>{card.detail}</span></span>
       </button>)}
     </section>
+    <PhrHomeTools documents={documents} labs={results} healthItems={healthItems} onNavigate={onNavigate} />
     <section className="phr-app-home-grid">
       <article className="phr-app-panel">
         <div className="phr-app-section-heading"><h2>Actividad reciente</h2>{activity.length > 0 && <button type="button" onClick={() => onNavigate("timeline")}>Ver todo</button>}</div>

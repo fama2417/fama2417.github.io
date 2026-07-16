@@ -1,7 +1,7 @@
 import type { PhrLabResult } from "./labs.ts";
 import type { PortalDocument } from "./repository.ts";
 
-export const phrTabs = [["inicio", "Inicio"], ["laboratorios", "Resultados"], ["documentos", "Documentos"], ["timeline", "Línea de tiempo"], ["compartir", "Compartir"], ["perfil", "Perfil y seguridad"]] as const;
+export const phrTabs = [["inicio", "Inicio"], ["resumen", "Resumen"], ["laboratorios", "Resultados"], ["documentos", "Documentos"], ["timeline", "Línea de tiempo"], ["compartir", "Compartir"], ["perfil", "Perfil y seguridad"]] as const;
 export type PhrTab = (typeof phrTabs)[number][0];
 export const visiblePhrTabs = (readOnly: boolean) => readOnly ? phrTabs.filter(([id]) => id !== "compartir") : [...phrTabs];
 
