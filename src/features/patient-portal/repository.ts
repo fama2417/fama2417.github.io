@@ -1,5 +1,6 @@
 import { authenticatedFetch, supabase } from "@/lib/supabase-client";
 import { validatePatientDocument } from "./documents";
+import type { PhrImagingText } from "./imaging";
 import type { PhrLabDraft, PhrLabResult } from "./labs";
 
 export type PhrProfile = {
@@ -149,12 +150,13 @@ export async function fetchReleasedAddenda(): Promise<PortalAddendum[]> {
 export type PortalDocument = {
   id: string; filename: string; mimeType: string; sizeBytes: number; documentDate: string | null;
   documentType: "imaging" | "laboratory" | "prescription" | "other"; sourceInstitution: string; createdAt: string; url: string;
+  extractedText?: PhrImagingText | null;
   sharedPatientIds: string[]; reviewByPatientId: Record<string, "accepted" | "rejected">;
 };
 
 export async function fetchPatientDocuments(ownerUserId?: string): Promise<PortalDocument[]> {
   let documentQuery = supabase.from("patient_documents")
-    .select("id, original_filename, storage_path, mime_type, size_bytes, document_date, document_type, source_institution, created_at")
+    .select("id, original_filename, storage_path, mime_type, size_bytes, document_date, document_type, source_institution, created_at, extracted_text")
     .order("document_date", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false });
   if (ownerUserId) documentQuery = documentQuery.eq("owner_user_id", ownerUserId);
   const [documents, shares, reviews] = await Promise.all([
@@ -163,7 +165,7 @@ export async function fetchPatientDocuments(ownerUserId?: string): Promise<Porta
     supabase.from("patient_document_reviews").select("document_id, patient_id, status, created_at").order("created_at", { ascending: false }),
   ]);
   if (documents.error || shares.error || reviews.error) throw documents.error ?? shares.error ?? reviews.error;
-  const rows = (documents.data ?? []) as { id: string; original_filename: string; storage_path: string; mime_type: string; size_bytes: number; document_date: string | null; document_type: PortalDocument["documentType"]; source_institution: string; created_at: string }[];
+  const rows = (documents.data ?? []) as { id: string; original_filename: string; storage_path: string; mime_type: string; size_bytes: number; document_date: string | null; document_type: PortalDocument["documentType"]; source_institution: string; created_at: string; extracted_text: PhrImagingText }[];
   const sharedByDocument = new Map<string, string[]>();
   for (const share of shares.data ?? []) sharedByDocument.set(share.document_id, [...(sharedByDocument.get(share.document_id) ?? []), share.patient_id]);
   const reviewedByDocument = new Map<string, Record<string, "accepted" | "rejected">>();
@@ -179,7 +181,8 @@ export async function fetchPatientDocuments(ownerUserId?: string): Promise<Porta
     return {
       id: row.id, filename: row.original_filename, mimeType: row.mime_type, sizeBytes: row.size_bytes,
       documentDate: row.document_date, documentType: row.document_type, sourceInstitution: row.source_institution,
-      createdAt: row.created_at, url: signed.data.signedUrl, sharedPatientIds: sharedByDocument.get(row.id) ?? [], reviewByPatientId: reviewedByDocument.get(row.id) ?? {},
+      createdAt: row.created_at, url: signed.data.signedUrl, extractedText: row.extracted_text?.fullText ? row.extracted_text : null,
+      sharedPatientIds: sharedByDocument.get(row.id) ?? [], reviewByPatientId: reviewedByDocument.get(row.id) ?? {},
     };
   }));
 }
@@ -233,11 +236,36 @@ export async function fetchPhrLabResults(ownerUserId?: string): Promise<PhrLabRe
   }));
 }
 
+export async function extractPhrImagingText(documentId: string) {
+  const response = await authenticatedFetch("/api/portal/imaging", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ documentId }) });
+  return (await response.json() as { text: PhrImagingText }).text;
+}
+
+export async function savePhrImagingText(documentId: string, text: PhrImagingText) {
+  await authenticatedFetch("/api/portal/imaging", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ documentId, text }) });
+}
+
 export async function analyzePhrLabDocument(documentId: string, rematch = false, rescan = false) {
   const response = await authenticatedFetch("/api/portal/labs", {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ documentId, rematch, rescan }),
   });
   return await response.json() as { created: number; loincMapped: number; duplicate: boolean; warnings: string[] };
+}
+
+export type PhrLoincSuggestion = { resultId: string; analyte: string; options: { code: string; display: string }[] };
+
+export async function fetchPhrLoincSuggestions(documentId: string) {
+  const response = await authenticatedFetch("/api/portal/labs", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ documentId, suggestLoinc: true }),
+  });
+  return await response.json() as { suggestions: PhrLoincSuggestion[]; warnings: string[] };
+}
+
+export async function savePhrLoincSelections(selections: { resultId: string; loincCode: string }[]) {
+  const response = await authenticatedFetch("/api/portal/labs", {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ loincSelections: selections }),
+  });
+  return await response.json() as { updated: number };
 }
 
 export async function savePhrLabResult(resultId: string, draft: PhrLabDraft, confirm = false) {

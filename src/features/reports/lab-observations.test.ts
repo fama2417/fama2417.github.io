@@ -32,6 +32,15 @@ test("categoriza con metadatos LOINC antes que con la etiqueta local", () => {
   assert.equal(labCategory({ analyte: "GLUCOSA EN ORINA", loincMetadata: { component: "Glucose", property: "MCnc", timeAspect: "Pt", specimen: "Urine", scaleType: "Qn", methodType: "", className: "UA", status: "ACTIVE", exampleUcumUnits: "mg/dL" } }), "urine");
 });
 
+test("clasifica nombres habituales aunque LOINC todavía esté pendiente", () => {
+  assert.equal(labCategory({ analyte: "PROMIELOCITOS" }), "hematology");
+  assert.equal(labCategory({ analyte: "Tiempo Protrombina" }), "hematology");
+  assert.equal(labCategory({ analyte: "VFG CKD-EPI" }), "renal");
+  assert.equal(labCategory({ analyte: "Transaminasa(GPT)" }), "hepatic");
+  assert.equal(labCategory({ analyte: "Capacidad fijación fierro" }), "nutrition");
+  assert.equal(labCategory({ analyte: "TROPONINA I" }), "chemistry");
+});
+
 test("convierte unidades UCUM compatibles sin mezclar masa y cantidad molar", () => {
   assert.equal(convertLabValue(100, "mg/dL", "g/L"), 1);
   assert.equal(convertLabValue(1, "10^3/uL", "10^9/L"), 1);

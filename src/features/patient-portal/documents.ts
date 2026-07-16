@@ -3,6 +3,7 @@ export const PATIENT_DOCUMENT_TYPES = ["application/pdf", "image/jpeg", "image/p
 const ANALYZABLE_LAB_TYPES = new Set(["application/pdf", "image/jpeg", "image/png"]);
 
 export const isAnalyzableLabDocument = (mimeType: string) => ANALYZABLE_LAB_TYPES.has(mimeType);
+export const labImageMime = (mimeType: string): "image/jpeg" | "image/png" | "" => mimeType === "image/jpeg" || mimeType === "image/png" ? mimeType : "";
 
 export function validatePatientDocument(file: { size: number; type: string }) {
   if (!PATIENT_DOCUMENT_TYPES.includes(file.type as (typeof PATIENT_DOCUMENT_TYPES)[number])) return "Solo se permiten archivos PDF, JPG, PNG o DICOM.";

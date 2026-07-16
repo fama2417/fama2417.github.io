@@ -123,7 +123,7 @@ export function LabObservationsPanel({ appointmentId, appointmentCompleted, disa
       {!disabled && <label className="key-image-dropzone">
         <input type="file" accept="application/pdf" hidden disabled={busy} onChange={(event) => { upload(event.target.files?.[0]); event.target.value = ""; }} />
         <strong>{busy ? "Procesando PDF…" : "Subir PDF de resultados"}</strong>
-        <span className="empty-inline">Primero se leen tablas localmente. Nano se usa sólo si el texto es ambiguo o para sugerir la homologación LOINC desde la lista compacta de analitos.</span>
+        <span className="empty-inline">El PDF se lee sólo localmente. Nano puede recibir la lista compacta de analitos para sugerir LOINC, pero nunca recibe el PDF.</span>
       </label>}
 
       {suggested.length > 0 && <section className="lab-review-group">

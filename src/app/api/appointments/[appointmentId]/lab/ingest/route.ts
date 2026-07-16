@@ -3,12 +3,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { aiConfig, canRunAiExtraction, estimateAiCost } from "@/features/reports/ai-budget.ts";
 import { insertAiUsageLog } from "@/features/reports/ai-repository.ts";
 import { requireAiRouteUser } from "@/features/reports/ai-route-auth.ts";
-import { dedupeLabCandidates, labPatientMatches, normalizeIdentity, prepareLabPdf, structureLabDocument, suggestLabLoinc, verifiedLabLoinc, type LabCandidate } from "@/features/reports/lab-ai.ts";
-import { sanitizeTextForAi } from "@/features/reports/ai-sanitizer.ts";
+import { dedupeLabCandidates, labPatientMatches, normalizeIdentity, prepareLabPdf, suggestLabLoinc, verifiedLabLoinc, type LabCandidate } from "@/features/reports/lab-ai.ts";
 
 const MAX_BYTES = 10 * 1024 * 1024;
-const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const removePatientName = (text: string, name: string) => name.trim() ? text.replace(new RegExp(escapeRegExp(name.trim()), "gi"), "[PATIENT]") : text;
 const observedAt = (value: string, fallback: string) => `${/^20\d{2}-\d{2}-\d{2}$/.test(value) ? value : fallback}T00:00:00.000Z`;
 const loincKey = (row: Pick<LabCandidate, "analyte" | "unit">) => `${normalizeIdentity(row.analyte)}|${normalizeIdentity(row.unit)}`;
 type AiUsage = { inputTokens: number | null; outputTokens: number | null; totalTokens: number | null };
@@ -57,35 +54,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: "No fue posible leer el PDF." }, { status: 422 });
   }
 
-  let candidates: LabCandidate[] = prepared.observations;
-  let aiResult: Awaited<ReturnType<typeof structureLabDocument>> | null = null;
-  let aiWarning: string | undefined;
+  const candidates: LabCandidate[] = prepared.observations;
   let budgetResult: Awaited<ReturnType<typeof canRunAiExtraction>> | null = null;
   const aiBudget = async () => budgetResult ??= await canRunAiExtraction({ tenantId: auth.tenantId, reportId: appointmentId, supabase: auth.supabase });
-  if (prepared.needsAi) {
-    const budget = await aiBudget();
-    if (!budget.allowed) return NextResponse.json({ error: budget.reason ?? "IA no disponible para este PDF." }, { status: 429 });
-    aiWarning = budget.warning;
-    const model = aiConfig().model;
-    try {
-      const text = sanitizeTextForAi(removePatientName(prepared.aiText, patient?.full_name ?? ""));
-      aiResult = await structureLabDocument({
-        procedureName: appointment.reason ?? "",
-        ...(prepared.scanned ? { pdfBytes: bytes } : { text }),
-      });
-      candidates = aiResult.observations;
-    } catch (cause) {
-      await insertAiUsageLog(auth.supabase, {
-        tenant_id: auth.tenantId, appointment_id: appointmentId, provider: "openai", model, request_type: "lab_ingest",
-        success: false, error_message: cause instanceof Error ? cause.message : "lab ingest failed",
-      }).catch(() => undefined);
-      return NextResponse.json({ error: "No fue posible interpretar el laboratorio." }, { status: 502 });
-    }
-  }
 
   const extractedPatient = {
-    patientName: prepared.patientName || aiResult?.extraction.patientName || "",
-    patientIdentifier: prepared.patientIdentifier || aiResult?.extraction.patientIdentifier || "",
+    patientName: prepared.patientName,
+    patientIdentifier: prepared.patientIdentifier,
   };
   if (!labPatientMatches(extractedPatient, { patientName: patient?.full_name ?? "", patientIdentifier: patient?.identifier ?? "" })) {
     return NextResponse.json({ error: "La identidad del PDF no coincide con el paciente de la atención. No se guardó ningún resultado." }, { status: 422 });
@@ -133,7 +108,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       }
     }
   }
-  const extractionMethod = !prepared.needsAi ? "local" : prepared.scanned ? "ai_visual" : "ai_text";
+  const extractionMethod = "local";
   const imported = await auth.supabase.from("lab_result_imports").insert({
     tenant_id: auth.tenantId,
     appointment_id: appointmentId,
@@ -164,7 +139,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     ref_high: row.refHigh,
     ref_text: row.refText,
     flag: row.flag,
-    observed_at: observedAt(row.observedAt || prepared.observedAt || aiResult?.extraction.observedAt || "", fallbackDate),
+    observed_at: observedAt(row.observedAt || prepared.observedAt || "", fallbackDate),
     source: row.source,
     source_sentence: row.sourceSentence,
     review_status: "suggested",
@@ -176,15 +151,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
 
   const warnings = [
-    ...(aiResult?.extraction.warnings ?? []),
-    aiWarning,
+    prepared.needsAi ? "El PDF se leyó sólo localmente y puede contener filas que requieren corrección manual; no se envió contenido a IA." : undefined,
     loincWarning,
     rows.some((row) => !row.observedAt) ? "No se encontró fecha de muestra; se usó la fecha de la atención." : undefined,
     loincResult ? `Nano recibió sólo los analitos nuevos y sugirió ${loincBySource.size - reusedLoinc} homologación(es) LOINC verificadas contra el catálogo; ${reusedLoinc} se reutilizaron.` : undefined,
     extractionMethod === "local" && !loincResult ? "Extracción local: no se consumieron tokens de IA." : undefined,
   ].filter(Boolean) as string[];
 
-  const usageRows = [aiResult?.usage, loincResult?.usage].filter((usage): usage is AiUsage => !!usage);
+  const usageRows = [loincResult?.usage].filter((usage): usage is AiUsage => !!usage);
   if (usageRows.length) {
     const usage = combinedUsage(usageRows);
     const model = aiConfig().model;
