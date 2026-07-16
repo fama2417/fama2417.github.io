@@ -5,6 +5,7 @@ import { aiConfig } from "@/features/reports/ai-budget.ts";
 import { dedupeLabCandidates, groupLabLayoutPages, labSourceHighlight, loincSearchQueries, normalizeIdentity, prepareLabPdf, structureLabDocument, suggestLabLoinc, suggestLabLoincSearchTerms, verifiedLabLoinc, type LabCandidate } from "@/features/reports/lab-ai.ts";
 import { reusedPhrLoinc, validatePhrLabDraft } from "@/features/patient-portal/labs.ts";
 import { isAnalyzableLabDocument, labImageMime } from "@/features/patient-portal/documents.ts";
+import { recordPhrEvent } from "@/lib/phr-events";
 import { requirePhrApi } from "@/lib/server-auth";
 
 const MAX_BYTES = 10 * 1024 * 1024;
@@ -102,6 +103,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const auth = await requirePhrApi(request);
   if (auth instanceof NextResponse) return auth;
+  const startedAt = Date.now();
   const body = await request.json().catch(() => ({})) as { documentId?: string; rematch?: boolean; rescan?: boolean; suggestLoinc?: boolean };
   if (!body.documentId) return NextResponse.json({ error: "Documento inválido." }, { status: 400 });
 
@@ -156,7 +158,7 @@ export async function POST(request: NextRequest) {
   if (imageMime) prepared = { patientName: "", patientIdentifier: "", observedAt: "", observations: [], aiText: "", scanned: true, needsAi: true, pageCount: 1 };
   else {
     try { prepared = await prepareLabPdf(bytes); }
-    catch { return NextResponse.json({ error: "No fue posible interpretar el PDF." }, { status: 422 }); }
+    catch { await recordPhrEvent(auth.db, auth.user.id, "lab_analysis_failed", body.documentId, { method: "local", stage: "parse", duration_ms: Date.now() - startedAt }); return NextResponse.json({ error: "No fue posible interpretar el PDF." }, { status: 422 }); }
   }
 
   let rows: LabCandidate[] = prepared.observations;
@@ -175,7 +177,7 @@ export async function POST(request: NextRequest) {
         imageBytes: bytes, imageMime,
       });
       rows = aiResult.observations;
-    } catch { return NextResponse.json({ error: "No fue posible extraer resultados de este archivo." }, { status: 502 }); }
+    } catch { await recordPhrEvent(auth.db, auth.user.id, "lab_analysis_failed", body.documentId, { method: "ai_visual", stage: "recognition", duration_ms: Date.now() - startedAt }); return NextResponse.json({ error: "No fue posible extraer resultados de este archivo." }, { status: 502 }); }
   }
 
   const extractedName = prepared.patientName || aiResult?.extraction.patientName || "";
@@ -195,7 +197,7 @@ export async function POST(request: NextRequest) {
     candidates = candidates.filter((row) => !existingSourceIds.has(row.sourceSentence.split(/\s+\|\s+/)[0]));
     if (!candidates.length) return NextResponse.json({ duplicate: true, created: 0, loincMapped: existingRows.filter((row) => row.loinc_code).length, warnings: ["La relectura no encontró resultados nuevos."] });
   }
-  if (!candidates.length) return NextResponse.json({ error: "No se detectaron resultados para revisar." }, { status: 422 });
+  if (!candidates.length) { await recordPhrEvent(auth.db, auth.user.id, "lab_analysis_failed", body.documentId, { method: imageMime ? "ai_visual" : "local", stage: "no_results", duration_ms: Date.now() - startedAt }); return NextResponse.json({ error: "No se detectaron resultados para revisar." }, { status: 422 }); }
   const matched = await matchPhrLoinc(auth.db, auth.user.id, candidates, !!imageMime);
   warnings.push(...matched.warnings);
   const fallbackDate = document.data.document_date ?? document.data.created_at.slice(0, 10);
@@ -204,7 +206,7 @@ export async function POST(request: NextRequest) {
   const imported = previousImportId
     ? await auth.db.from("phr_lab_imports").update({ extraction_method: extractionMethod, patient_name: extractedName, patient_identifier: extractedIdentifier, warnings }).eq("id", previousImportId).eq("owner_user_id", auth.user.id).select("id").single()
     : await auth.db.from("phr_lab_imports").insert({ owner_user_id: auth.user.id, document_id: body.documentId, extraction_method: extractionMethod, patient_name: extractedName, patient_identifier: extractedIdentifier, warnings }).select("id").single();
-  if (imported.error) return NextResponse.json({ error: "No fue posible registrar el análisis." }, { status: 502 });
+  if (imported.error) { await recordPhrEvent(auth.db, auth.user.id, "lab_analysis_failed", body.documentId, { method: extractionMethod, stage: "import", duration_ms: Date.now() - startedAt }); return NextResponse.json({ error: "No fue posible registrar el análisis." }, { status: 502 }); }
 
   const inserted = await auth.db.from("phr_lab_results").insert(candidates.map((row, index) => ({
     owner_user_id: auth.user.id, document_id: body.documentId, import_id: imported.data.id, loinc_code: matched.loincByIndex.get(index) ?? "",
@@ -215,8 +217,10 @@ export async function POST(request: NextRequest) {
   }))).select("id");
   if (inserted.error) {
     if (!previousImportId) await auth.db.from("phr_lab_imports").delete().eq("id", imported.data.id);
+    await recordPhrEvent(auth.db, auth.user.id, "lab_analysis_failed", body.documentId, { method: extractionMethod, stage: "results", duration_ms: Date.now() - startedAt });
     return NextResponse.json({ error: "No fue posible guardar las sugerencias." }, { status: 502 });
   }
+  await recordPhrEvent(auth.db, auth.user.id, "lab_analysis_completed", body.documentId, { method: extractionMethod, duration_ms: Date.now() - startedAt, result_count: inserted.data?.length ?? 0, loinc_mapped: matched.loincByIndex.size, warning_count: warnings.length });
   return NextResponse.json({ created: inserted.data?.length ?? 0, loincMapped: matched.loincByIndex.size, duplicate: !!previousImportId, warnings });
 }
 
@@ -241,13 +245,17 @@ export async function PATCH(request: NextRequest) {
   if (Array.isArray(body.resultIds)) {
     const ids = [...new Set(body.resultIds)].filter((id) => uuid.test(id)).slice(0, 200);
     if (!ids.length || ids.length !== body.resultIds.length || body.confirm !== true) return NextResponse.json({ error: "Resultados inválidos." }, { status: 400 });
+    const pending = await auth.db.from("phr_lab_results").select("created_at").eq("owner_user_id", auth.user.id).eq("review_status", "suggested").in("id", ids);
     const updated = await auth.db.from("phr_lab_results").update({ review_status: "confirmed" }).eq("owner_user_id", auth.user.id).eq("review_status", "suggested").in("id", ids).select("id");
-    return updated.error ? NextResponse.json({ error: "No fue posible confirmar los resultados." }, { status: 502 }) : NextResponse.json({ confirmed: updated.data?.length ?? 0 });
+    if (updated.error) return NextResponse.json({ error: "No fue posible confirmar los resultados." }, { status: 502 });
+    const first = (pending.data ?? []).map((row) => Date.parse(row.created_at)).filter(Number.isFinite).sort((a, b) => a - b)[0];
+    await recordPhrEvent(auth.db, auth.user.id, "lab_results_confirmed", undefined, { result_count: updated.data?.length ?? 0, bulk: true, review_seconds: first ? Math.max(0, Math.round((Date.now() - first) / 1000)) : null });
+    return NextResponse.json({ confirmed: updated.data?.length ?? 0 });
   }
   if (!body.resultId) return NextResponse.json({ error: "Resultado inválido." }, { status: 400 });
   const validated = validatePhrLabDraft({ analyte: body.analyte ?? "", value: body.value ?? "", unit: body.unit ?? "", reference: body.reference ?? "", observedAt: body.observedAt ?? "" });
   if ("error" in validated) return NextResponse.json({ error: validated.error }, { status: 400 });
-  const current = await auth.db.from("phr_lab_results").select("flag, analyte, unit, loinc_code").eq("id", body.resultId).eq("owner_user_id", auth.user.id).eq("review_status", "suggested").maybeSingle();
+  const current = await auth.db.from("phr_lab_results").select("flag, analyte, unit, loinc_code, document_id, created_at").eq("id", body.resultId).eq("owner_user_id", auth.user.id).eq("review_status", "suggested").maybeSingle();
   if (!current.data) return NextResponse.json({ error: "La sugerencia ya no está disponible para edición." }, { status: 404 });
   const keepExplicitFlag = ["abnormal", "critical_low", "critical_high"].includes(current.data.flag);
   const value = validated.value;
@@ -258,7 +266,9 @@ export async function PATCH(request: NextRequest) {
     loinc_code: normalizeIdentity(value.analyte) === normalizeIdentity(current.data.analyte) && normalizeIdentity(value.unit) === normalizeIdentity(current.data.unit) ? current.data.loinc_code : "",
     review_status: body.confirm === true ? "confirmed" : "suggested",
   }).eq("id", body.resultId).eq("owner_user_id", auth.user.id).eq("review_status", "suggested");
-  return updated.error ? NextResponse.json({ error: "No fue posible actualizar el resultado." }, { status: 502 }) : NextResponse.json({ ok: true });
+  if (updated.error) return NextResponse.json({ error: "No fue posible actualizar el resultado." }, { status: 502 });
+  if (body.confirm === true) await recordPhrEvent(auth.db, auth.user.id, "lab_results_confirmed", current.data.document_id, { result_count: 1, bulk: false, review_seconds: Math.max(0, Math.round((Date.now() - Date.parse(current.data.created_at)) / 1000)) });
+  return NextResponse.json({ ok: true });
 }
 
 export async function DELETE(request: NextRequest) {
