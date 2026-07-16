@@ -5,6 +5,7 @@ import { aiConfig } from "@/features/reports/ai-budget.ts";
 import { sanitizeTextForAi } from "@/features/reports/ai-sanitizer.ts";
 import { dedupeLabCandidates, groupLabLayoutPages, labSourceHighlight, normalizeIdentity, prepareLabPdf, structureLabDocument, suggestLabLoinc, suggestLabLoincSearchTerms, verifiedLabLoinc, type LabCandidate } from "@/features/reports/lab-ai.ts";
 import { reusedPhrLoinc, validatePhrLabDraft } from "@/features/patient-portal/labs.ts";
+import { isAnalyzableLabDocument } from "@/features/patient-portal/documents.ts";
 import { requirePhrApi } from "@/lib/server-auth";
 
 const MAX_BYTES = 10 * 1024 * 1024;
@@ -61,10 +62,13 @@ export async function GET(request: NextRequest) {
   const result = await auth.db.from("phr_lab_results").select("document_id, source_sentence").eq("id", resultId).eq("owner_user_id", auth.user.id).maybeSingle();
   if (!result.data) return NextResponse.json({ error: "Resultado inexistente." }, { status: 404 });
   const document = await auth.db.from("patient_documents").select("storage_path, mime_type").eq("id", result.data.document_id).eq("owner_user_id", auth.user.id).maybeSingle();
-  if (!document.data || document.data.mime_type !== "application/pdf") return NextResponse.json({ error: "El documento fuente no es un PDF." }, { status: 404 });
+  if (!document.data || !isAnalyzableLabDocument(document.data.mime_type)) return NextResponse.json({ error: "El documento fuente no es compatible." }, { status: 404 });
   const downloaded = await auth.db.storage.from("patient-documents").download(document.data.storage_path);
-  if (downloaded.error) return NextResponse.json({ error: "No fue posible abrir el PDF fuente." }, { status: 502 });
+  if (downloaded.error) return NextResponse.json({ error: "No fue posible abrir el documento fuente." }, { status: 502 });
   const original = new Uint8Array(await downloaded.data.arrayBuffer());
+  if (document.data.mime_type !== "application/pdf") {
+    return new NextResponse(Buffer.from(original), { headers: { "Content-Type": document.data.mime_type, "Content-Disposition": "inline; filename=fuente-laboratorio", "Cache-Control": "private, no-store", "X-PHR-Highlight": "false", "X-PHR-Page": "1" } });
+  }
   let output = Buffer.from(original), highlighted = false, sourcePage = 1;
   const [sourceId, sourceAnalyte, sourceValue] = result.data.source_sentence.split(/\s+\|\s+/);
   const locator = sourceId?.match(/^p(\d+)-r\d+$/);
@@ -94,8 +98,8 @@ export async function POST(request: NextRequest) {
     .select("id, storage_path, mime_type, size_bytes, document_date, created_at")
     .eq("id", body.documentId).eq("owner_user_id", auth.user.id).eq("document_type", "laboratory").maybeSingle();
   if (!document.data) return NextResponse.json({ error: "Laboratorio inexistente." }, { status: 404 });
-  if (document.data.mime_type !== "application/pdf") return NextResponse.json({ error: "La extracción de laboratorio requiere un PDF." }, { status: 415 });
-  if (document.data.size_bytes > MAX_BYTES) return NextResponse.json({ error: "El PDF supera los 10 MB permitidos para análisis." }, { status: 413 });
+  if (!isAnalyzableLabDocument(document.data.mime_type)) return NextResponse.json({ error: "La extracción de laboratorio acepta PDF, JPG o PNG." }, { status: 415 });
+  if (document.data.size_bytes > MAX_BYTES) return NextResponse.json({ error: "El archivo supera los 10 MB permitidos para análisis." }, { status: 413 });
 
   let previousImportId = "";
   let existingRows: any[] = [];
@@ -119,17 +123,21 @@ export async function POST(request: NextRequest) {
   }
 
   const downloaded = await auth.db.storage.from("patient-documents").download(document.data.storage_path);
-  if (downloaded.error || !downloaded.data) return NextResponse.json({ error: "No fue posible leer el PDF original." }, { status: 502 });
+  if (downloaded.error || !downloaded.data) return NextResponse.json({ error: "No fue posible leer el archivo original." }, { status: 502 });
   const bytes = new Uint8Array(await downloaded.data.arrayBuffer());
+  const imageMime = document.data.mime_type === "image/jpeg" || document.data.mime_type === "image/png" ? document.data.mime_type : "";
   let prepared: Awaited<ReturnType<typeof prepareLabPdf>>;
-  try { prepared = await prepareLabPdf(bytes); }
-  catch { return NextResponse.json({ error: "No fue posible interpretar el PDF." }, { status: 422 }); }
+  if (imageMime) prepared = { patientName: "", patientIdentifier: "", observedAt: "", observations: [], aiText: "", scanned: true, needsAi: true, pageCount: 1 };
+  else {
+    try { prepared = await prepareLabPdf(bytes); }
+    catch { return NextResponse.json({ error: "No fue posible interpretar el PDF." }, { status: 422 }); }
+  }
 
   let rows: LabCandidate[] = prepared.observations;
   let aiResult: Awaited<ReturnType<typeof structureLabDocument>> | null = null;
   if (prepared.needsAi) {
     const config = aiConfig();
-    if (!config.enabled || !process.env.OPENAI_API_KEY) return NextResponse.json({ error: "Este PDF necesita OCR visual y la extracción automática no está habilitada." }, { status: 503 });
+    if (!config.enabled || !process.env.OPENAI_API_KEY) return NextResponse.json({ error: "Este archivo necesita reconocimiento visual y la extracción automática no está habilitada." }, { status: 503 });
     const start = new Date(); start.setUTCHours(0, 0, 0, 0);
     const usage = await auth.db.from("phr_lab_imports").select("id", { count: "exact", head: true })
       .eq("owner_user_id", auth.user.id).in("extraction_method", ["ai_text", "ai_visual"]).gte("created_at", start.toISOString());
@@ -138,10 +146,10 @@ export async function POST(request: NextRequest) {
     try {
       aiResult = await structureLabDocument({
         procedureName: "Laboratorio personal",
-        ...(prepared.scanned ? { pdfBytes: bytes } : { text: redact(prepared.aiText, [auth.profile.full_name, auth.profile.identifier]) }),
+        ...(imageMime ? { imageBytes: bytes, imageMime } : prepared.scanned ? { pdfBytes: bytes } : { text: redact(prepared.aiText, [auth.profile.full_name, auth.profile.identifier]) }),
       });
       rows = aiResult.observations;
-    } catch { return NextResponse.json({ error: "No fue posible extraer resultados de este PDF." }, { status: 502 }); }
+    } catch { return NextResponse.json({ error: "No fue posible extraer resultados de este archivo." }, { status: 502 }); }
   }
 
   const extractedName = prepared.patientName || aiResult?.extraction.patientName || "";
@@ -149,10 +157,10 @@ export async function POST(request: NextRequest) {
   const profileIdentifier = auth.profile.identifier.trim();
   const warnings = [...(aiResult?.extraction.warnings ?? [])];
   if (extractedIdentifier && profileIdentifier) {
-    if (normalizeIdentity(extractedIdentifier) !== normalizeIdentity(profileIdentifier)) return NextResponse.json({ error: "La identidad del PDF no coincide con tu perfil. No se guardó ningún resultado." }, { status: 422 });
+    if (normalizeIdentity(extractedIdentifier) !== normalizeIdentity(profileIdentifier)) return NextResponse.json({ error: "La identidad del archivo no coincide con tu perfil. No se guardó ningún resultado." }, { status: 422 });
   } else if (extractedName) {
-    if (normalizeIdentity(extractedName) !== normalizeIdentity(auth.profile.full_name)) return NextResponse.json({ error: "El nombre del PDF no coincide con tu perfil. No se guardó ningún resultado." }, { status: 422 });
-  } else warnings.push("No se encontró identidad en el PDF; revisa cuidadosamente cada resultado antes de confirmarlo.");
+    if (normalizeIdentity(extractedName) !== normalizeIdentity(auth.profile.full_name)) return NextResponse.json({ error: "El nombre del archivo no coincide con tu perfil. No se guardó ningún resultado." }, { status: 422 });
+  } else warnings.push("No se encontró identidad en el archivo; revisa cuidadosamente cada resultado antes de confirmarlo.");
 
   let candidates = dedupeLabCandidates(rows).filter((row) => row.analyte && (row.valueNum !== null || row.valueText));
   if (previousImportId) {
@@ -165,7 +173,7 @@ export async function POST(request: NextRequest) {
   warnings.push(...matched.warnings);
   const fallbackDate = document.data.document_date ?? document.data.created_at.slice(0, 10);
   if (candidates.some((row) => !row.observedAt)) warnings.push("No se encontró fecha de muestra en todas las filas; se usó la fecha del documento.");
-  const extractionMethod = !prepared.needsAi ? "local" : prepared.scanned ? "ai_visual" : "ai_text";
+  const extractionMethod = !prepared.needsAi ? "local" : imageMime || prepared.scanned ? "ai_visual" : "ai_text";
   const imported = previousImportId
     ? await auth.db.from("phr_lab_imports").update({ extraction_method: extractionMethod, patient_name: extractedName, patient_identifier: extractedIdentifier, warnings }).eq("id", previousImportId).eq("owner_user_id", auth.user.id).select("id").single()
     : await auth.db.from("phr_lab_imports").insert({ owner_user_id: auth.user.id, document_id: body.documentId, extraction_method: extractionMethod, patient_name: extractedName, patient_identifier: extractedIdentifier, warnings }).select("id").single();

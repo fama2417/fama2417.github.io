@@ -7,7 +7,7 @@ export const visiblePhrTabs = (readOnly: boolean) => readOnly ? phrTabs.filter((
 
 export const friendlyDocumentName = (type: PortalDocument["documentType"]) => ({
   laboratory: "Resultado de laboratorio",
-  imaging: "Informe o estudio de imagenología",
+  imaging: "Informe de radiología o imagenología",
   prescription: "Receta u orden médica",
   other: "Documento de salud",
 })[type];

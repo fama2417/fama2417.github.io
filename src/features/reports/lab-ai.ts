@@ -11,6 +11,7 @@ const CompactLabRowSchema = z.object({
   value: z.string(),
   unit: z.string(),
   reference: z.string(),
+  specimen: z.string(),
   reportedFlag: z.enum(["", "normal", "low", "high", "critical_low", "critical_high", "abnormal"]),
 });
 
@@ -63,7 +64,7 @@ export type PreparedLabPdf = {
 
 export const LAB_EXTRACTION_SYSTEM_PROMPT = `Extrae resultados discretos de laboratorio en español.
 No diagnostiques, no resumas y no inventes datos. Devuelve una fila por analito medido.
-"value", "unit" y "reference" deben conservar el texto del documento. "reportedFlag" solo refleja una marca explícita del laboratorio; si no existe usa "".
+"value", "unit" y "reference" deben conservar el texto del documento. "specimen" debe indicar la muestra explícita (por ejemplo Sangre, Suero u Orina); si no aparece usa "". "reportedFlag" solo refleja una marca explícita del laboratorio; si no existe usa "".
 No generes LOINC. "observedAt" es la fecha de toma de muestra en YYYY-MM-DD si aparece.
 "sourceId" debe copiar el identificador de línea recibido. Omite encabezados, datos administrativos, métodos y comentarios sin resultado.`;
 
@@ -219,7 +220,7 @@ function parseTwoColumnLabRows(rows: LayoutRow[], observedAt: string) {
       reference: range ? `${range[4]} - ${range[5]}` : "",
       reportedFlag: range?.[2] || row.items.some((item) => item.str.trim() === "*") ? "abnormal" as const : "" as const,
     };
-    const parsed = normalizedCandidate(compact, observedAt, "ocr", specimen);
+    const parsed = normalizedCandidate({ ...compact, specimen }, observedAt, "ocr", specimen);
     if (!parsed) continue;
     observations.push(parsed);
     aiLines.push([row.id, analyte, compact.value, compact.unit, compact.reference, specimen].join("\t"));
@@ -254,6 +255,7 @@ function parseMonospacedLabRows(rows: LayoutRow[], observedAt: string) {
       value: match[2],
       unit: match[4],
       reference: `${match[5]} - ${match[6]}`,
+      specimen: "",
       reportedFlag: match[3] ? "abnormal" : "",
     } : null;
 
@@ -265,6 +267,7 @@ function parseMonospacedLabRows(rows: LayoutRow[], observedAt: string) {
         value: match[2],
         unit: match[4],
         reference: "",
+        specimen: "",
         reportedFlag: match[3] ? "abnormal" : "",
       };
     }
@@ -276,12 +279,13 @@ function parseMonospacedLabRows(rows: LayoutRow[], observedAt: string) {
         value: match[2],
         unit: "",
         reference: "",
+        specimen: "",
         reportedFlag: match[3] ? "abnormal" : "",
       };
     }
     if (!compact) {
       match = text.match(/^(.+?)\s+(no reactivo|no detectado|indeterminado|positivo|negativo|reactivo|detectado|normales?\.?|ausente|presente)$/i);
-      if (match) compact = { sourceId: row.id, analyte: match[1], value: match[2], unit: "", reference: "", reportedFlag: "" };
+      if (match) compact = { sourceId: row.id, analyte: match[1], value: match[2], unit: "", reference: "", specimen: "", reportedFlag: "" };
     }
 
     if (!compact) continue;
@@ -328,7 +332,7 @@ export function parseLabLayoutPages(pages: StructuredTextItem[][]): Omit<Prepare
       if (ignored(text)) continue;
       if (values[0] && resultValue(values[1])) {
         candidateRows += 1;
-        const compact = { sourceId: row.id, analyte: values[0], value: values[1], unit: values[2], reference: values[3], reportedFlag: /\[\s*\*\s*\]/.test(values[3]) ? "abnormal" as const : "" as const };
+        const compact = { sourceId: row.id, analyte: values[0], value: values[1], unit: values[2], reference: values[3], specimen: "", reportedFlag: /\[\s*\*\s*\]/.test(values[3]) ? "abnormal" as const : "" as const };
         const parsed = normalizedCandidate(compact, documentMetadata.observedAt, "ocr");
         if (parsed) {
           observations.push(parsed);
@@ -402,11 +406,16 @@ const structuredPayload = (response: unknown) => {
   throw new Error("No fue posible interpretar la respuesta estructurada de IA.");
 };
 
-export async function structureLabDocument(input: { text?: string; pdfBytes?: Uint8Array; procedureName: string }) {
+export async function structureLabDocument(input: { text?: string; pdfBytes?: Uint8Array; imageBytes?: Uint8Array; imageMime?: "image/jpeg" | "image/png"; procedureName: string }) {
   const config = aiConfig();
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const instruction = `Prestación: ${input.procedureName || "Laboratorio"}\nExtrae solamente las filas de resultados.`;
-  const content = input.pdfBytes
+  const content = input.imageBytes && input.imageMime
+    ? [
+        { type: "input_image", image_url: `data:${input.imageMime};base64,${Buffer.from(input.imageBytes).toString("base64")}`, detail: "high" },
+        { type: "input_text", text: `${instruction}\nEs una fotografía. Asigna sourceId correlativos image-r1, image-r2, etc. e identifica la muestra de cada sección.` },
+      ]
+    : input.pdfBytes
     ? [
         { type: "input_file", filename: "resultados.pdf", file_data: `data:application/pdf;base64,${Buffer.from(input.pdfBytes).toString("base64")}` },
         { type: "input_text", text: instruction },
@@ -423,7 +432,7 @@ export async function structureLabDocument(input: { text?: string; pdfBytes?: Ui
   const usage = (response as any)?.usage ?? {};
   return {
     extraction,
-    observations: extraction.rows.map((row) => normalizedCandidate(row, extraction.observedAt, "ai")).filter((row): row is LabCandidate => !!row),
+    observations: extraction.rows.map((row) => normalizedCandidate(row, extraction.observedAt, "ai", row.specimen)).filter((row): row is LabCandidate => !!row),
     usage: {
       inputTokens: usage.input_tokens ?? usage.prompt_tokens ?? null,
       outputTokens: usage.output_tokens ?? usage.completion_tokens ?? null,

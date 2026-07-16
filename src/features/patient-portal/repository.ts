@@ -278,7 +278,7 @@ export async function confirmPhrLabResults(resultIds: string[]) {
 
 export async function fetchPhrLabSource(resultId: string) {
   const response = await authenticatedFetch(`/api/portal/labs?resultId=${encodeURIComponent(resultId)}`);
-  return { url: URL.createObjectURL(await response.blob()), highlighted: response.headers.get("X-PHR-Highlight") === "true", page: Math.max(1, Number(response.headers.get("X-PHR-Page")) || 1) };
+  return { url: URL.createObjectURL(await response.blob()), contentType: response.headers.get("Content-Type") ?? "application/pdf", highlighted: response.headers.get("X-PHR-Highlight") === "true", page: Math.max(1, Number(response.headers.get("X-PHR-Page")) || 1) };
 }
 
 export type PhrFavorite = { trendKey: string; label: string };
