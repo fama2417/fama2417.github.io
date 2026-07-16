@@ -41,15 +41,20 @@ function SuggestedResult({ result, busy, selected, onSource, onDone, onError }: 
 }
 
 function TrendChart({ result, all }: { result: PhrLabResult; all: PhrLabResult[] }) {
-  const trend = buildPhrLabTrend(all.filter((item) => phrLabTrendKey(item) === phrLabTrendKey(result)));
+  const history = all.filter((item) => phrLabTrendKey(item) === phrLabTrendKey(result)).sort((a, b) => a.observedAt.localeCompare(b.observedAt));
+  const trend = buildPhrLabTrend(history);
   if (!trend) return null;
-  const values = trend.points.map((point) => point.value), min = Math.min(...values), max = Math.max(...values), spread = max - min || 1;
-  const points = trend.points.map((point, index) => `${20 + index * (280 / (trend.points.length - 1))},${100 - ((point.value - min) / spread) * 75}`).join(" ");
-  const latest = trend.points[trend.points.length - 1];
+  const values = trend.points.map((point) => point.value), rawMin = Math.min(...values), rawMax = Math.max(...values), padding = Math.max((rawMax - rawMin) * .5, Math.abs((rawMax + rawMin) / 2) * .05, .1);
+  const min = rawMin - padding, max = rawMax + padding, spread = max - min;
+  const coordinates = trend.points.map((point, index) => ({ ...point, x: 24 + index * (272 / (trend.points.length - 1)), y: 100 - ((point.value - min) / spread) * 72 })), latest = coordinates.at(-1)!, first = coordinates[0];
+  const difference = latest.value - first.value, percent = first.value ? Math.abs(difference / first.value * 100) : null;
+  const change = difference === 0 ? "Se mantuvo sin cambios entre ambas mediciones." : `${difference > 0 ? "Subió" : "Bajó"} ${Math.abs(difference).toLocaleString("es-CL", { maximumFractionDigits: 2 })} ${trend.unit}${percent === null ? "" : ` (${percent.toLocaleString("es-CL", { maximumFractionDigits: 1 })} %)`} entre la primera y la última medición.`;
+  const latestResult = history.at(-1), range = latestResult && outsideRange(latestResult) ? "El último valor está fuera del rango informado por ese laboratorio." : latestResult?.flag === "normal" ? "El último valor está dentro del rango informado por ese laboratorio." : "El laboratorio no informó un rango comparable para el último valor.";
   return <article className="phr-trend-card">
     <div><strong>{trend.analyte}</strong><span>{latest.value.toLocaleString("es-CL")} {trend.unit}</span></div>
-    <svg viewBox="0 0 320 120" role="img" aria-label={`Tendencia de ${trend.analyte}`}><title>Tendencia de {trend.analyte}</title><polyline points={points} fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />{trend.points.map((point, index) => <circle key={point.id} cx={20 + index * (280 / (trend.points.length - 1))} cy={100 - ((point.value - min) / spread) * 75} r="4"><title>{shownDate(point.date)}: {point.value} {trend.unit}</title></circle>)}</svg>
-    <small>{shownDate(trend.points[0].date)} → {shownDate(latest.date)} · {trend.points.length} mediciones</small>
+    <svg viewBox="0 0 320 136" role="img" aria-label={`Tendencia de ${trend.analyte}`}><title>Tendencia de {trend.analyte}</title><g className="phr-trend-grid"><line x1="24" y1="28" x2="296" y2="28" /><line x1="24" y1="64" x2="296" y2="64" /><line x1="24" y1="100" x2="296" y2="100" /></g><polyline points={coordinates.map((point) => `${point.x},${point.y}`).join(" ")} fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />{coordinates.map((point) => <circle key={point.id} cx={point.x} cy={point.y} r="5"><title>{shownDate(point.date)}: {point.value} {trend.unit}</title></circle>)}<text x={first.x} y="124" textAnchor="start">{first.value.toLocaleString("es-CL")}</text><text x={latest.x} y="124" textAnchor="end">{latest.value.toLocaleString("es-CL")}</text></svg>
+    <p className="phr-trend-explanation"><strong>{change}</strong><span>{range}</span></p>
+    <small>{shownDate(first.date)} → {shownDate(latest.date)} · {trend.points.length} mediciones</small>
   </article>;
 }
 
@@ -62,6 +67,8 @@ export function PhrLaboratories({ documents, ownerUserId, readOnly, onUpload, hi
   const [loincDialog, setLoincDialog] = useState<{ documentId: string; suggestions: PhrLoincSuggestion[]; warnings: string[] }>();
   const [loincSelections, setLoincSelections] = useState<Record<string, string>>({});
   const labs = documents.filter((document) => document.documentType === "laboratory");
+  const analyzedDocuments = new Set(results.map((result) => result.documentId));
+  const pendingLabs = labs.filter((document) => !analyzedDocuments.has(document.id)), processedLabs = labs.filter((document) => analyzedDocuments.has(document.id));
   async function reload() { const [nextResults, nextFavorites] = await Promise.all([fetchPhrLabResults(ownerUserId), fetchPhrFavorites(ownerUserId)]); setResults(nextResults); setFavorites(nextFavorites); setLoading(false); }
   useEffect(() => { reload().catch(() => { setError("No fue posible cargar los resultados."); setLoading(false); }); }, [ownerUserId, documents.map((document) => document.id).join("|")]);
   useEffect(() => () => { if (source?.url) URL.revokeObjectURL(source.url); }, [source?.url]);
@@ -114,7 +121,6 @@ export function PhrLaboratories({ documents, ownerUserId, readOnly, onUpload, hi
 
   const suggested = results.filter((result) => result.reviewStatus === "suggested");
   const confirmed = results.filter((result) => result.reviewStatus === "confirmed");
-  const analyzedDocuments = new Set(results.map((result) => result.documentId));
   const suggestedCategories = labCategoryOrder.map((key) => ({ key, items: suggested.filter((result) => resultCategory(result) === key) })).filter((group) => group.items.length);
   const visibleConfirmed = confirmed.filter((result) => (!query.trim() || result.analyte.toLocaleLowerCase("es-CL").includes(query.trim().toLocaleLowerCase("es-CL"))) && (!onlyOutside || outsideRange(result)));
   const categories = labCategoryOrder.map((key) => ({ key, items: visibleConfirmed.filter((result) => resultCategory(result) === key && (filter === "all" || filter === key)) })).filter((group) => group.items.length);
@@ -130,8 +136,9 @@ export function PhrLaboratories({ documents, ownerUserId, readOnly, onUpload, hi
 
   return <div className="phr-labs-stack">
     {error && <p className="notice danger-text" role="alert">{error}</p>}{notice && <p className="form-notice" role="status">{notice}</p>}
-    <section className="card portal-card"><div className="card-heading"><div><p className="eyebrow">Extracción segura</p><h2>Mis laboratorios</h2><p>Los PDF se leen sólo localmente y las fotos JPG/PNG usan reconocimiento visual. El archivo original no cambia y ningún resultado cuenta hasta que lo confirmas.</p></div>{!hideHeading && !readOnly && <button className="button primary" type="button" onClick={onUpload}>Subir laboratorio</button>}</div>
-      {!labs.length ? <p className="empty-state">Todavía no tienes laboratorios.</p> : <ul className="portal-list">{labs.map((document) => <li key={document.id}><div className="portal-document-detail"><strong title={document.filename}>{friendlyDocumentName(document.documentType)}</strong><span>{document.sourceInstitution} · {shownDate(document.documentDate ?? document.createdAt)} · {document.filename}</span></div><div className="portal-document-actions"><a className="button secondary" href={document.url} target="_blank" rel="noreferrer">Abrir archivo</a>{!isAnalyzableLabDocument(document.mimeType) ? <span>Análisis disponible para PDF, JPG o PNG</span> : analyzedDocuments.has(document.id) ? <span className="phr-lab-document-status"><span className="status-badge">Analizado</span>{!readOnly && <button className="button secondary" disabled={!!busyId} type="button" onClick={() => void analyze(document, false, true)}>{busyId === document.id ? "Releyendo…" : "Releer archivo"}</button>}{!readOnly && <button className="button secondary" disabled={!!busyId} type="button" onClick={() => void openLoinc(document)}>{busyId === document.id ? "Buscando…" : "Revisar homologación"}</button>}</span> : !readOnly && <button className="button primary" disabled={!!busyId} type="button" onClick={() => void analyze(document)}>{busyId === document.id ? "Analizando…" : "Analizar resultados"}</button>}</div></li>)}</ul>}
+    <section className="card portal-card"><div className="card-heading"><div><p className="eyebrow">Extracción segura</p><h2>Laboratorios por procesar</h2><p>Los PDF con texto o escaneados se leen localmente. Las fotos JPG/PNG usan reconocimiento visual. Nada cuenta como resultado hasta que lo confirmas.</p></div>{!hideHeading && !readOnly && <button className="button primary" type="button" onClick={onUpload}>Subir laboratorio</button>}</div>
+      {!labs.length ? <p className="empty-state">Todavía no tienes laboratorios.</p> : pendingLabs.length ? <ul className="portal-list">{pendingLabs.map((document) => <li key={document.id}><div className="portal-document-detail"><strong title={document.filename}>{friendlyDocumentName(document.documentType)}</strong><span>{document.sourceInstitution} · {shownDate(document.documentDate ?? document.createdAt)} · {document.filename}</span></div><div className="portal-document-actions"><a className="button secondary" href={document.url} target="_blank" rel="noreferrer">Abrir archivo</a>{!isAnalyzableLabDocument(document.mimeType) ? <span>Análisis disponible para PDF, JPG o PNG</span> : !readOnly && <button className="button primary" disabled={!!busyId} type="button" onClick={() => void analyze(document)}>{busyId === document.id ? "Analizando…" : "Analizar resultados"}</button>}</div></li>)}</ul> : <p className="phr-processed-summary">✓ Todos tus archivos están procesados. Revisa abajo sólo si necesitas abrirlos o volver a analizarlos.</p>}
+      {!!processedLabs.length && <details className="phr-processed-documents"><summary><span>Archivos procesados</span><span>{processedLabs.length}</span></summary><ul className="portal-list">{processedLabs.map((document) => <li key={document.id}><div className="portal-document-detail"><strong title={document.filename}>{friendlyDocumentName(document.documentType)}</strong><span>{document.sourceInstitution} · {shownDate(document.documentDate ?? document.createdAt)}</span></div><div className="portal-document-actions"><a className="button secondary" href={document.url} target="_blank" rel="noreferrer">Abrir original</a>{!readOnly && <button className="text-button" disabled={!!busyId} type="button" onClick={() => void analyze(document, false, true)}>{busyId === document.id ? "Releyendo…" : "Volver a procesar"}</button>}{!readOnly && <button className="text-button" disabled={!!busyId} type="button" onClick={() => void openLoinc(document)}>{busyId === document.id ? "Buscando…" : "Revisar LOINC"}</button>}</div></li>)}</ul></details>}
     </section>
 
     {!readOnly && suggested.length > 0 && <section className="card portal-card">

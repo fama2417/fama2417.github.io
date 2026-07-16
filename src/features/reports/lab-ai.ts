@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
 import { z } from "zod";
 import { extractTextItems, type StructuredTextItem } from "unpdf";
+import { extractScannedPdf } from "../../lib/pdf-ocr.ts";
 import { aiConfig } from "./ai-budget.ts";
 import { labFlag, parseLabNumber, parseLabReference, type LabFlag } from "./lab-observations.ts";
 
@@ -69,7 +70,7 @@ No generes LOINC. "observedAt" es la fecha de toma de muestra en YYYY-MM-DD si a
 "sourceId" debe copiar el identificador de línea recibido. Omite encabezados, datos administrativos, métodos y comentarios sin resultado.`;
 
 type LayoutRow = { id: string; y: number; items: StructuredTextItem[] };
-type Header = { y: number; exam: number; result: number; unit: number; reference: number; method: number };
+type Header = { y: number; exam: number; result: number; unit: number; reference: number; skip: number; method: number };
 
 const plain = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 const rowText = (row: LayoutRow) => row.items.map((item) => item.str.trim()).filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
@@ -87,7 +88,7 @@ export function groupLabLayoutPages(pages: StructuredTextItem[][]): LayoutRow[][
   return pages.map((page, pageIndex) => {
     const rows: LayoutRow[] = [];
     for (const item of uniqueItems(page).sort((a, b) => b.y - a.y || a.x - b.x)) {
-      let row = rows.find((candidate) => Math.abs(candidate.y - item.y) <= 2);
+      let row = rows.find((candidate) => Math.abs(candidate.y - item.y) <= 5);
       if (!row) {
         row = { id: `p${pageIndex + 1}-r${rows.length + 1}`, y: item.y, items: [] };
         rows.push(row);
@@ -118,26 +119,35 @@ function findHeader(rows: LayoutRow[]): Header | null {
     const labels = row.items.map((item) => ({ item, text: plain(item.str) }));
     const exam = labels.find(({ text }) => text === "examen");
     const result = labels.find(({ text }) => text === "resultado");
-    const unit = labels.find(({ text }) => text === "unidad");
-    const reference = labels.find(({ text }) => text.includes("valor de referencia"));
-    if (!exam || !result || !unit || !reference) continue;
+    const unit = labels.find(({ text }) => /^unidad(?:es)?$/.test(text));
+    const reference = labels.find(({ text }) => /valor(?:es)? de referencia/.test(text));
+    if (!result || !unit || !reference) continue;
     const method = labels.find(({ text }) => text === "metodo");
-    return { y: row.y, exam: exam.item.x, result: result.item.x, unit: unit.item.x, reference: reference.item.x, method: method?.item.x ?? Number.POSITIVE_INFINITY };
+    const skip = labels.find(({ item, text }) => item.x > unit.item.x && item.x < reference.item.x && /^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$/.test(text));
+    return { y: row.y, exam: exam?.item.x ?? 0, result: result.item.x, unit: unit.item.x, reference: reference.item.x, skip: skip?.item.x ?? Number.POSITIVE_INFINITY, method: method?.item.x ?? Number.POSITIVE_INFINITY };
   }
   return null;
 }
 
 function columns(row: LayoutRow, header: Header) {
-  const cuts = [(header.exam + header.result) / 2, (header.result + header.unit) / 2, (header.unit + header.reference) / 2, Number.isFinite(header.method) ? (header.reference + header.method) / 2 : Number.POSITIVE_INFINITY];
+  const first = (header.exam + header.result) / 2, second = (header.result + header.unit) / 2;
+  const third = (header.unit + (Number.isFinite(header.skip) ? header.skip : header.reference)) / 2;
+  const referenceStart = Number.isFinite(header.skip) ? (header.skip + header.reference) / 2 : third;
+  const referenceEnd = Number.isFinite(header.method) ? (header.reference + header.method) / 2 : Number.POSITIVE_INFINITY;
   const values = ["", "", "", "", ""];
   for (const item of row.items) {
-    const index = item.x < cuts[0] ? 0 : item.x < cuts[1] ? 1 : item.x < cuts[2] ? 2 : item.x < cuts[3] ? 3 : 4;
+    const index = item.x < first ? 0 : item.x < second ? 1 : item.x < third ? 2 : item.x < referenceStart ? 4 : item.x < referenceEnd ? 3 : 4;
     values[index] = `${values[index]} ${item.str}`.trim();
   }
   return values;
 }
 
 const resultValue = (value: string) => parseLabNumber(value) !== null || /^(?:positivo|negativo|reactivo|no reactivo|indeterminado|detectado|no detectado|ausente|presente)$/i.test(value.trim());
+const cleanExtractedUnit = (value: string) => value
+  .trim()
+  .replace(/^\((.*)\)$/, "$1")
+  .replace(/^[<>]\s*/, "")
+  .replace(/mEg\/L/gi, "mEq/L");
 const ignored = (value: string) => /^(?:_{4,}|tipo de muestra|examen procesado|fecha de recepcion|metodo analitico|el resultado de este examen)/i.test(plain(value));
 const dateOnly = (value: string) => {
   const iso = value.match(/\b(20\d{2})-(\d{2})-(\d{2})\b/);
@@ -161,8 +171,8 @@ function metadata(rows: LayoutRow[][]) {
     patientName: labelledValue("nombre", 85, 400)
       || patientLine.match(/\bpaciente\s*:\s*(.+?)(?=\s+edad\s*:|\s+id\.?\s*atenci[oó]n\b|\s+r\.?\s*u\.?\s*t\.?\s*:|$)/i)?.[1]?.trim()
       || "",
-    patientIdentifier: labelledValue("rut", 85, 400)
-      || identifierLine.match(/r\.?\s*u\.?\s*t\.?\s*:\s*([0-9.\-k]+)/i)?.[1]
+    patientIdentifier: identifierLine.match(/r\.?\s*u\.?\s*t\.?\s*:\s*([0-9.\-k]+)/i)?.[1]
+      || labelledValue("rut", 85, 400)
       || "",
     observedAt: dateOnly(sampleText) || dateOnly(requestLine),
   };
@@ -180,7 +190,7 @@ function normalizedCandidate(row: z.infer<typeof CompactLabRowSchema>, observedA
     analyte,
     valueNum,
     valueText: valueNum === null ? rawValue : "",
-    unit: row.unit.trim().replace(/^\((.*)\)$/, "$1"),
+    unit: cleanExtractedUnit(row.unit),
     ...reference,
     flag: (explicit || derived) as LabFlag,
     observedAt: dateOnly(observedAt),
@@ -300,6 +310,26 @@ function parseMonospacedLabRows(rows: LayoutRow[], observedAt: string) {
   return { foundHeader, observations, aiLines };
 }
 
+function parseLooseColumnRows(rows: LayoutRow[], observedAt: string) {
+  const observations: LabCandidate[] = [];
+  const specimenLine = rows.map(rowText).find((text) => /tipo de muestra\s*:/i.test(text)) ?? "";
+  const specimen = specimenLine.match(/tipo de muestra\s*:\s*(.+?)(?=\s+servicio\s*:|$)/i)?.[1]?.trim() ?? "";
+  const historyHeader = rows.flatMap((row) => row.items).find((item) => /resultados? historicos?/i.test(plain(item.str)));
+  for (const row of rows) {
+    const cells = row.items.filter((item) => item.str.trim()).sort((a, b) => a.x - b.x), analyteCell = cells[0];
+    if (!analyteCell || analyteCell.x > 150 || /\d|:|resultado|unidad|valor|referencia|intervalo|adulto|niñ|embaraz|procesado|autorizado|tecnolog|metod|nota|tipo de muestra|fecha|rut|edad|profesional|servicio|informe|laboratorio/i.test(analyteCell.str)) continue;
+    const valueCell = cells.find((item) => item.x > analyteCell.x && /^\s*[<>]?\s*-?\d+(?:[.,]\d+)?\s*[<>]?\s*$/.test(item.str));
+    if (!valueCell) continue;
+    const unitCell = cells.find((item) => item.x > valueCell.x && /[%a-zµμ]/i.test(item.str) && item.str.length <= 30);
+    if (!unitCell) continue;
+    const reference = cells.filter((item) => item.x > unitCell.x && (!historyHeader || item.x < historyHeader.x)).map((item) => item.str).join(" ");
+    const compact = { sourceId: row.id, analyte: analyteCell.str, value: valueCell.str.replace(/[<>]/g, "").trim(), unit: unitCell.str, reference, specimen, reportedFlag: /[<>]/.test(valueCell.str) ? "abnormal" as const : "" as const };
+    const parsed = normalizedCandidate(compact, observedAt, "ocr", specimen);
+    if (parsed) observations.push(parsed);
+  }
+  return observations;
+}
+
 export function parseLabLayoutPages(pages: StructuredTextItem[][]): Omit<PreparedLabPdf, "scanned" | "pageCount"> {
   const layout = groupLabLayoutPages(pages);
   const documentMetadata = metadata(layout);
@@ -324,13 +354,17 @@ export function parseLabLayoutPages(pages: StructuredTextItem[][]): Omit<Prepare
         aiLines.push(...monospaced.aiLines);
         continue;
       }
+      const loose = parseLooseColumnRows(rows, documentMetadata.observedAt);
+      if (loose.length) { observations.push(...loose); candidateRows += loose.length; continue; }
       for (const row of rows.filter((candidate) => !ignored(rowText(candidate)))) aiLines.push(`${row.id}\t${rowText(row)}`);
       continue;
     }
+    const before = observations.length;
     let last: LabCandidate | null = null;
     for (const row of rows.filter((candidate) => candidate.y < header.y - 2)) {
       const values = columns(row, header).map((value) => value.replace(/\s+/g, " ").trim());
       const text = rowText(row);
+      if (/^(?:a partir|procesado por|autorizado por|tecnologia|metodo|el resultado de este examen|laboratorio adscrito|survey del college|informe emitido)/.test(plain(text))) break;
       if (ignored(text)) continue;
       if (values[0] && resultValue(values[1])) {
         candidateRows += 1;
@@ -348,6 +382,10 @@ export function parseLabLayoutPages(pages: StructuredTextItem[][]): Omit<Prepare
         aiLines.push(`${row.id}\t\t\t\t${values[3]}`);
       } else if (values[0] && !ignored(values[0])) aiLines.push(`${row.id}\t${values[0]}`);
     }
+    if (observations.length === before) {
+      const loose = parseLooseColumnRows(rows, documentMetadata.observedAt);
+      observations.push(...loose); candidateRows += loose.length;
+    }
   }
 
   return {
@@ -360,9 +398,10 @@ export function parseLabLayoutPages(pages: StructuredTextItem[][]): Omit<Prepare
 
 export async function prepareLabPdf(bytes: Uint8Array): Promise<PreparedLabPdf> {
   const extracted = await extractTextItems(bytes.slice());
-  const parsed = parseLabLayoutPages(extracted.items);
   const scanned = extracted.items.every((page) => page.every((item) => !item.str.trim()));
-  return { ...parsed, scanned, needsAi: scanned || parsed.needsAi, pageCount: extracted.totalPages };
+  const pages = scanned ? await extractScannedPdf(bytes) : extracted;
+  const parsed = parseLabLayoutPages(pages.items);
+  return { ...parsed, scanned, needsAi: parsed.needsAi, pageCount: pages.totalPages };
 }
 
 export function normalizeIdentity(value: string) {

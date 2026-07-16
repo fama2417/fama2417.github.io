@@ -81,6 +81,18 @@ test("loincSearchQueries relaja calificadores sin cambiar el analito", () => {
   assert.deepEqual(loincSearchQueries("Chloride serum plasma"), ["Chloride serum plasma", "Chloride serum", "Chloride"]);
 });
 
+test("parseLabLayoutPages interpreta columnas OCR y omite el resultado histórico", () => {
+  const parsed = parseLabLayoutPages([[
+    item("RUT: 18332410-1", 27, 888), item("Centro de Atención:", 183, 888),
+    item("Toma de Muestra :", 546, 906), item("16/08/2024 08:44", 668, 906),
+    item("Resultado", 235, 730), item("Unidad", 365, 730), item("06/07/2023", 476, 730), item("Valores de Referencia", 589, 730),
+    item("GLICEMIA", 35, 679), item("83", 233, 679), item("mg/dL", 365, 679), item("84", 493, 679), item("74 - 99", 667, 679),
+  ]]);
+  assert.equal(parsed.patientIdentifier, "18332410-1");
+  assert.equal(parsed.observations[0].valueNum, 83);
+  assert.deepEqual([parsed.observations[0].refLow, parsed.observations[0].refHigh], [74, 99]);
+});
+
 test("parseLabLayoutPages acepta informes concatenados con encabezados variables", () => {
   const identity = [
     item("R.u.t. : 18332410-1 Sexo : Masculino", 24, 700),

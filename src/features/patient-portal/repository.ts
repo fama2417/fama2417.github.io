@@ -1,7 +1,7 @@
 import { authenticatedFetch, supabase } from "@/lib/supabase-client";
 import { clinicalAreaForDocumentType, validatePatientDocument, type PhrClinicalArea } from "./documents";
 import type { PhrHealthItem, PhrHealthItemDraft } from "./health-summary";
-import { structurePhrImagingText, type PhrImagingText } from "./imaging";
+import { cleanPhrImagingSection, structurePhrImagingText, type PhrImagingText } from "./imaging";
 import type { PhrLabDraft, PhrLabResult } from "./labs";
 
 export type PhrProfile = {
@@ -180,9 +180,10 @@ export async function fetchPatientDocuments(ownerUserId?: string): Promise<Porta
     const signed = await supabase.storage.from("patient-documents").createSignedUrl(row.storage_path, 3600);
     if (signed.error) throw signed.error;
     const savedText = row.extracted_text?.fullText ? row.extracted_text : null;
-    const extractedText = savedText && !savedText.findings && !savedText.impression
-      ? structurePhrImagingText(savedText.fullText)
-      : savedText;
+    const baseText = savedText && !savedText.findings && !savedText.impression ? structurePhrImagingText(savedText.fullText) : savedText;
+    const extractedText = baseText ? {
+      ...baseText, clinicalIndication: cleanPhrImagingSection(baseText.clinicalIndication), technique: cleanPhrImagingSection(baseText.technique), findings: cleanPhrImagingSection(baseText.findings), impression: cleanPhrImagingSection(baseText.impression), plainLanguage: baseText.plainLanguage ?? "",
+    } : null;
     return {
       id: row.id, filename: row.original_filename, mimeType: row.mime_type, sizeBytes: row.size_bytes,
       documentDate: row.document_date, documentType: row.document_type, clinicalArea: row.clinical_area ?? clinicalAreaForDocumentType(row.document_type), sourceInstitution: row.source_institution,
