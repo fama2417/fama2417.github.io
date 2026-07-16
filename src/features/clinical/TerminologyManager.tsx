@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase-client";
-import { codeColumns, loincImportRow, parseDelimited } from "./csv";
+import { codeColumns, loincDesignationImportRow, loincImportRow, parseDelimited } from "./csv";
 
 const SYSTEMS = [
   ["ICD-10", "CIE-10", "CSV con columnas código y descripción (DEIS/eCIEMaps)."],
   ["ICD-11", "CIE-11", "CSV exportado de la tabulación simple MMS de la OMS."],
   ["LOINC", "LOINC", "Loinc.csv del paquete oficial (usa LOINC_NUM y LONG_COMMON_NAME)."],
+  ["LOINC-ES", "LOINC en español", "Archivo esES, esMX o esAR LinguisticVariant.csv del mismo paquete oficial."],
   ["SNOMEDCT", "SNOMED CT", "Archivo de descripciones RF2 (TSV; usa conceptId y term)."],
 ] as const;
 
@@ -23,7 +24,9 @@ export function TerminologyManager() {
   async function reloadCounts() {
     const next: Record<string, number> = {};
     for (const [sys] of SYSTEMS) {
-      const { count } = await supabase.from("terminology_codes").select("code", { count: "exact", head: true }).eq("system", sys);
+      const { count } = sys === "LOINC-ES"
+        ? await supabase.from("terminology_designations").select("code", { count: "exact", head: true }).eq("system", "LOINC")
+        : await supabase.from("terminology_codes").select("code", { count: "exact", head: true }).eq("system", sys);
       next[sys] = count ?? 0;
     }
     setCounts(next);
@@ -46,14 +49,18 @@ export function TerminologyManager() {
       if (rows.length < 2) throw new Error("El archivo no tiene filas de datos.");
       const { code, display } = codeColumns(rows[0]);
       const items = rows.slice(1)
-        .map((row) => system === "LOINC" ? loincImportRow(rows[0], row) : ({ code: (row[code] ?? "").trim(), display: (row[display] ?? "").trim() }))
+        .map((row) => system === "LOINC" ? loincImportRow(rows[0], row)
+          : system === "LOINC-ES" ? loincDesignationImportRow(rows[0], row, file.name)
+          : ({ code: (row[code] ?? "").trim(), display: (row[display] ?? "").trim() }))
         .filter((item) => item.code && item.display);
       if (!items.length) throw new Error("No se reconocieron columnas de código y descripción.");
       let done = 0;
       for (let i = 0; i < items.length; i += BATCH) {
         const { error: rpcError } = system === "LOINC"
           ? await supabase.rpc("import_loinc_terminology", { p_rows: items.slice(i, i + BATCH) })
-          : await supabase.rpc("import_terminology", { p_system: system, p_rows: items.slice(i, i + BATCH) });
+          : system === "LOINC-ES"
+            ? await supabase.rpc("import_loinc_designations", { p_rows: items.slice(i, i + BATCH) })
+            : await supabase.rpc("import_terminology", { p_system: system, p_rows: items.slice(i, i + BATCH) });
         if (rpcError) throw new Error(rpcError.message);
         done = Math.min(i + BATCH, items.length);
         setProgress(`Importando ${system}: ${done.toLocaleString()} / ${items.length.toLocaleString()}…`);

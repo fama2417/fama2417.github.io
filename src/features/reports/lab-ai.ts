@@ -45,6 +45,7 @@ export type LabCandidate = {
   observedAt: string;
   sourceSentence: string;
   source: "ocr" | "ai";
+  specimen?: string;
 };
 
 export type LabSourceBox = { x: number; y: number; width: number; height: number };
@@ -167,7 +168,7 @@ function metadata(rows: LayoutRow[][]) {
   };
 }
 
-function normalizedCandidate(row: z.infer<typeof CompactLabRowSchema>, observedAt: string, source: "ocr" | "ai"): LabCandidate | null {
+function normalizedCandidate(row: z.infer<typeof CompactLabRowSchema>, observedAt: string, source: "ocr" | "ai", specimen = ""): LabCandidate | null {
   const analyte = row.analyte.trim();
   const rawValue = row.value.trim();
   if (!analyte || !rawValue) return null;
@@ -183,9 +184,47 @@ function normalizedCandidate(row: z.infer<typeof CompactLabRowSchema>, observedA
     ...reference,
     flag: (explicit || derived) as LabFlag,
     observedAt: dateOnly(observedAt),
-    sourceSentence: [row.sourceId, analyte, rawValue, row.unit, row.reference].filter(Boolean).join(" | "),
+    sourceSentence: [row.sourceId, analyte, rawValue, row.unit, row.reference, specimen ? `Muestra: ${specimen}` : ""].filter(Boolean).join(" | "),
     source,
+    ...(specimen ? { specimen } : {}),
   };
+}
+
+function parseTwoColumnLabRows(rows: LayoutRow[], observedAt: string) {
+  const observations: LabCandidate[] = [];
+  const header = rows.find((row) => /^examen\s+resultado$/.test(plain(rowText(row))));
+  if (!header) return { foundHeader: false, observations, aiLines: [] as string[] };
+  const exam = header.items.find((item) => plain(item.str) === "examen");
+  const result = header.items.find((item) => plain(item.str) === "resultado");
+  if (!exam || !result) return { foundHeader: false, observations, aiLines: [] as string[] };
+
+  const cut = result.x - 15;
+  const aiLines: string[] = [];
+  let specimen = "";
+  for (const row of rows.filter((candidate) => candidate.y < header.y - 2)) {
+    const text = rowText(row), normalized = plain(text);
+    if (/^(?:examen validado|la interpretacion|unidad de medida|valor de referencia|nota\s*:)/.test(normalized)) break;
+    const sample = text.match(/^Muestra\s*:\s*(.+)$/i);
+    if (sample) { specimen = sample[1].trim(); continue; }
+    if (!text || /^(?:[-_=]{4,}|analisis\b|metodo\b|nota\b|observacion\b)/.test(normalized)) continue;
+    const analyte = row.items.filter((item) => item.x < cut).map((item) => item.str.trim()).filter(Boolean).join(" ");
+    const resultItems = row.items.filter((item) => item.x >= cut).map((item) => item.str.trim()).filter((value) => value && value !== "*");
+    const rawValue = resultItems.join(" ").trim();
+    if (!analyte || !rawValue) continue;
+    const range = rawValue.match(/^(-?\d+(?:[.,]\d+)?)\s*(\*)?\s+(\S+)\s+(-?\d+(?:[.,]\d+)?)\s*-\s*(-?\d+(?:[.,]\d+)?)$/);
+    const compact = {
+      sourceId: row.id, analyte,
+      value: range?.[1] ?? rawValue.replace(/\s+\*$/, ""),
+      unit: range?.[3] ?? "",
+      reference: range ? `${range[4]} - ${range[5]}` : "",
+      reportedFlag: range?.[2] || row.items.some((item) => item.str.trim() === "*") ? "abnormal" as const : "" as const,
+    };
+    const parsed = normalizedCandidate(compact, observedAt, "ocr", specimen);
+    if (!parsed) continue;
+    observations.push(parsed);
+    aiLines.push([row.id, analyte, compact.value, compact.unit, compact.reference, specimen].join("\t"));
+  }
+  return { foundHeader: true, observations, aiLines };
 }
 
 function parseMonospacedLabRows(rows: LayoutRow[], observedAt: string) {
@@ -265,6 +304,13 @@ export function parseLabLayoutPages(pages: StructuredTextItem[][]): Omit<Prepare
   for (const rows of layout) {
     const header = findHeader(rows);
     if (!header) {
+      const twoColumn = parseTwoColumnLabRows(rows, documentMetadata.observedAt);
+      if (twoColumn.foundHeader) {
+        observations.push(...twoColumn.observations);
+        candidateRows += twoColumn.observations.length;
+        aiLines.push(...twoColumn.aiLines);
+        continue;
+      }
       const monospaced = parseMonospacedLabRows(rows, documentMetadata.observedAt);
       if (monospaced.foundHeader) {
         observations.push(...monospaced.observations);
@@ -386,14 +432,15 @@ export async function structureLabDocument(input: { text?: string; pdfBytes?: Ui
   };
 }
 
-export async function suggestLabLoinc(rows: Pick<LabCandidate, "analyte" | "unit" | "valueNum" | "valueText">[], englishTerms: string[] = []) {
+export async function suggestLabLoinc(rows: Pick<LabCandidate, "analyte" | "unit" | "valueNum" | "valueText" | "specimen">[], englishTerms: string[] = [], candidates: { code: string; display: string }[][] = []) {
   const config = aiConfig();
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const candidateRule = candidates.length ? "Solo puedes devolver un código incluido en candidates para esa fila." : "No inventes códigos.";
   const response = await client.responses.parse({
     model: config.model,
     input: [
-      { role: "system", content: `Homologa analitos de laboratorio a LOINC. El nombre original puede estar en español o abreviado; usa englishSearchTerm como equivalencia inglesa, sin reemplazar el significado del original. Devuelve un código sólo cuando analito, unidad y una muestra explícita o inequívoca en el nombre permitan una equivalencia suficientemente específica; si muestra, método o significado son ambiguos, usa loincCode vacío y confidence baja. No inventes códigos. sourceId debe copiarse exactamente.` },
-      { role: "user", content: JSON.stringify(rows.map((row, index) => ({ sourceId: String(index), analyte: row.analyte, englishSearchTerm: englishTerms[index] ?? "", unit: row.unit, valueType: row.valueNum === null ? "text" : "number" }))) },
+      { role: "system", content: `Homologa analitos de laboratorio a LOINC. El nombre original puede estar en español o abreviado; usa englishSearchTerm como equivalencia inglesa, sin reemplazar el significado del original. ${candidateRule} Elige uno únicamente cuando analito, unidad y muestra permitan una equivalencia suficientemente específica; si muestra, método o significado son ambiguos, usa loincCode vacío y confidence baja. sourceId debe copiarse exactamente.` },
+      { role: "user", content: JSON.stringify(rows.map((row, index) => ({ sourceId: String(index), analyte: row.analyte, englishSearchTerm: englishTerms[index] ?? "", specimen: row.specimen ?? "", unit: row.unit, valueType: row.valueNum === null ? "text" : "number", candidates: candidates[index] ?? [] }))) },
     ],
     text: { format: zodTextFormat(LabLoincExtractionSchema, "lab_loinc") },
     max_output_tokens: Math.min(config.maxOutputTokens, 2000),
@@ -411,14 +458,14 @@ export async function suggestLabLoinc(rows: Pick<LabCandidate, "analyte" | "unit
   };
 }
 
-export async function suggestLabLoincSearchTerms(rows: Pick<LabCandidate, "analyte" | "unit" | "valueNum" | "valueText">[]) {
+export async function suggestLabLoincSearchTerms(rows: Pick<LabCandidate, "analyte" | "unit" | "valueNum" | "valueText" | "specimen">[]) {
   const config = aiConfig();
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const response = await client.responses.parse({
     model: config.model,
     input: [
       { role: "system", content: `Convierte cada analito a un término breve de búsqueda en inglés para el catálogo LOINC. Devuelve exactamente una fila por sourceId y no devuelvas códigos. searchTerm debe comenzar con el componente medido y usar de 1 a 5 palabras que aparecerían en LONG_COMMON_NAME; agrega total/libre, tiempo, muestra o método sólo cuando estén explícitos. Ordena primero las palabras más distintivas.` },
-      { role: "user", content: JSON.stringify(rows.map((row, index) => ({ sourceId: String(index), analyte: row.analyte, unit: row.unit, valueType: row.valueNum === null ? "text" : "number" }))) },
+      { role: "user", content: JSON.stringify(rows.map((row, index) => ({ sourceId: String(index), analyte: row.analyte, specimen: row.specimen ?? "", unit: row.unit, valueType: row.valueNum === null ? "text" : "number" }))) },
     ],
     text: { format: zodTextFormat(LabLoincSearchSchema, "lab_loinc_search") },
     max_output_tokens: Math.min(config.maxOutputTokens, 2000),

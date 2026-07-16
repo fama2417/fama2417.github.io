@@ -81,6 +81,29 @@ test("loincSearchQueries relaja calificadores sin cambiar el analito", () => {
   assert.deepEqual(loincSearchQueries("Chloride serum plasma"), ["Chloride serum plasma", "Chloride serum", "Chloride"]);
 });
 
+test("parseLabLayoutPages conserva resultados textuales de orina en formato de dos columnas", () => {
+  const page = [
+    item("EXAMEN", 28, 524), item("RESULTADO", 185, 524),
+    item("Muestra: Orina", 28, 490),
+    item("ANALISIS MICROSCOPICO:", 28, 456),
+    item("Leucocitos", 28, 434), item("0 - 2.", 179, 434),
+    item("Cristales", 28, 411), item("Uratos amorfos muy abundante.", 179, 411),
+    item("Densidad", 28, 321), item("1.035", 179, 321), item("*", 538, 321),
+    item("Nitritos", 28, 298), item("Negativo", 179, 298),
+    item("EXAMEN VALIDADO POR PROFESIONAL", 42, 78),
+  ];
+
+  const parsed = parseLabLayoutPages([page]);
+  assert.equal(parsed.needsAi, false);
+  assert.deepEqual(parsed.observations.map(({ analyte, valueNum, valueText, flag, specimen }) => ({ analyte, valueNum, valueText, flag, specimen })), [
+    { analyte: "Leucocitos", valueNum: null, valueText: "0 - 2.", flag: "", specimen: "Orina" },
+    { analyte: "Cristales", valueNum: null, valueText: "Uratos amorfos muy abundante.", flag: "", specimen: "Orina" },
+    { analyte: "Densidad", valueNum: 1.035, valueText: "", flag: "abnormal", specimen: "Orina" },
+    { analyte: "Nitritos", valueNum: null, valueText: "Negativo", flag: "", specimen: "Orina" },
+  ]);
+  assert.match(parsed.observations[0].sourceSentence, /Muestra: Orina$/);
+});
+
 test("ubica el valor en columnas y en una fila monoespaciada", () => {
   assert.deepEqual(labSourceHighlight([item("8.4", 145, 578)], "8.4"), { x: 145, y: 578, width: 15, height: 10 });
   const box = labSourceHighlight([item("Colesterol VLDL 8.4 mg/dL", 30, 500)], "8.4", "Colesterol VLDL");

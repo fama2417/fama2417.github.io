@@ -53,6 +53,19 @@ export type LoincImportRow = {
   exampleUcumUnits: string;
 };
 
+export type LoincDesignationImportRow = { code: string; languageVariant: string; display: string; searchText: string };
+
+/** Convierte una fila de xxYY##LinguisticVariant.csv oficial en un alias del LOINC canónico. */
+export function loincDesignationImportRow(header: string[], row: string[], filename: string): LoincDesignationImportRow {
+  const indexes = new Map(header.map((name, index) => [name.trim().toUpperCase(), index]));
+  const value = (name: string) => (row[indexes.get(name) ?? -1] ?? "").trim();
+  const languageVariant = filename.match(/(es[A-Z]{2})\d*LinguisticVariant/i)?.[1] ?? "es";
+  const fields = ["LINGUISTICVARIANTDISPLAYNAME", "LONG_COMMON_NAME", "SHORTNAME", "COMPONENT", "SYSTEM", "TIME_ASPCT", "PROPERTY", "SCALE_TYP", "METHOD_TYP", "RELATEDNAMES2"]
+    .map(value).filter(Boolean);
+  const searchText = [...new Set(fields)].join(" ").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return { code: value("LOINC_NUM"), languageVariant, display: fields[0] ?? "", searchText };
+}
+
 /** Extrae del Loinc.csv oficial sólo los campos usados por búsqueda, categorías y tendencias. */
 export function loincImportRow(header: string[], row: string[]): LoincImportRow {
   const indexes = new Map(header.map((name, index) => [name.trim().toUpperCase(), index]));
