@@ -10,7 +10,7 @@ test("separa un informe radiológico local sin interpretar su contenido", () => 
 });
 
 test("separa encabezados aunque el PDF entregue todo en una sola línea", () => {
-  const text = structurePhrImagingText("Paciente: Prueba Hallazgos: ATM derecha conservada. ATM izquierda con derrame. Impresión: Cambios en ambas articulaciones.");
+  const text = structurePhrImagingText("Paciente: Prueba Hallazgos: ATM derecha conservada. ATM izquierda con derrame. Impresión: Cambios en ambas articulaciones. Atentamente, Pag 1 de 2 Paciente: Prueba");
   assert.equal(text.findings, "ATM derecha conservada. ATM izquierda con derrame.");
   assert.equal(text.impression, "Cambios en ambas articulaciones.");
 });

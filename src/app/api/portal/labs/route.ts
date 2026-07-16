@@ -194,6 +194,7 @@ export async function POST(request: NextRequest) {
   const extractedIdentifier = prepared.patientIdentifier || aiResult?.extraction.patientIdentifier || "";
   const profileIdentifier = auth.profile.identifier.trim();
   const warnings = [...(aiResult?.extraction.warnings ?? [])];
+  if (prepared.scanned) warnings.push("El PDF era un escaneo sin texto y se leyó con OCR local; revisa cada cifra antes de confirmarla.");
   if (!imageMime && prepared.needsAi) warnings.push("El PDF se leyó sólo localmente y puede contener filas que requieren corrección manual; no se envió contenido a IA.");
   if (extractedIdentifier && profileIdentifier) {
     if (normalizeIdentity(extractedIdentifier) !== normalizeIdentity(profileIdentifier)) return NextResponse.json({ error: "La identidad del archivo no coincide con tu perfil. No se guardó ningún resultado." }, { status: 422 });
