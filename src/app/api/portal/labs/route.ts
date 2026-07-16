@@ -30,7 +30,17 @@ async function matchPhrLoinc(db: any, ownerUserId: string, rows: LabCandidate[])
   try {
     const translated = await suggestLabLoincSearchTerms(unresolved.map(({ row }) => row));
     const terms = new Map(translated.terms.map((row) => [row.sourceId, row.searchTerm]));
-    const suggested = await suggestLabLoinc(unresolved.map(({ row }) => row), unresolved.map((_, index) => terms.get(String(index)) ?? ""));
+    const candidateSets = await Promise.all(unresolved.map(async ({ row }, index) => {
+      const found = new Map<string, string>();
+      for (const term of [row.analyte, terms.get(String(index)) ?? ""].filter(Boolean)) {
+        const result = await db.rpc("search_terminology", { p_system: "LOINC", p_term: term });
+        if (result.error) continue;
+        for (const candidate of result.data ?? []) if (!found.has(candidate.code)) found.set(candidate.code, candidate.display);
+        if (found.size >= 8) break;
+      }
+      return [...found].slice(0, 8).map(([code, display]) => ({ code, display }));
+    }));
+    const suggested = await suggestLabLoinc(unresolved.map(({ row }) => row), unresolved.map((_, index) => terms.get(String(index)) ?? ""), candidateSets);
     const proposed = [...new Set(suggested.suggestions.map((row) => row.loincCode.trim()).filter(Boolean))];
     const known = proposed.length ? await db.from("terminology_codes").select("code").eq("system", "LOINC").in("code", proposed) : { data: [], error: null };
     if (known.error) throw known.error;
@@ -55,9 +65,10 @@ export async function GET(request: NextRequest) {
   const downloaded = await auth.db.storage.from("patient-documents").download(document.data.storage_path);
   if (downloaded.error) return NextResponse.json({ error: "No fue posible abrir el PDF fuente." }, { status: 502 });
   const original = new Uint8Array(await downloaded.data.arrayBuffer());
-  let output = Buffer.from(original), highlighted = false;
+  let output = Buffer.from(original), highlighted = false, sourcePage = 1;
   const [sourceId, sourceAnalyte, sourceValue] = result.data.source_sentence.split(/\s+\|\s+/);
   const locator = sourceId?.match(/^p(\d+)-r\d+$/);
+  if (locator) sourcePage = Number(locator[1]);
   if (locator && sourceValue) {
     try {
       const pageNumber = Number(locator[1]), extracted = await extractTextItems(original.slice());
@@ -70,13 +81,13 @@ export async function GET(request: NextRequest) {
       }
     } catch { /* El PDF original sigue disponible aunque no tenga coordenadas utilizables. */ }
   }
-  return new NextResponse(output, { headers: { "Content-Type": "application/pdf", "Content-Disposition": "inline; filename=fuente-laboratorio.pdf", "Cache-Control": "private, no-store", "X-PHR-Highlight": highlighted ? "true" : "false" } });
+  return new NextResponse(output, { headers: { "Content-Type": "application/pdf", "Content-Disposition": "inline; filename=fuente-laboratorio.pdf", "Cache-Control": "private, no-store", "X-PHR-Highlight": highlighted ? "true" : "false", "X-PHR-Page": String(sourcePage) } });
 }
 
 export async function POST(request: NextRequest) {
   const auth = await requirePhrApi(request);
   if (auth instanceof NextResponse) return auth;
-  const body = await request.json().catch(() => ({})) as { documentId?: string; rematch?: boolean };
+  const body = await request.json().catch(() => ({})) as { documentId?: string; rematch?: boolean; rescan?: boolean };
   if (!body.documentId) return NextResponse.json({ error: "Documento inválido." }, { status: 400 });
 
   const document = await auth.db.from("patient_documents")
@@ -86,21 +97,25 @@ export async function POST(request: NextRequest) {
   if (document.data.mime_type !== "application/pdf") return NextResponse.json({ error: "La extracción de laboratorio requiere un PDF." }, { status: 415 });
   if (document.data.size_bytes > MAX_BYTES) return NextResponse.json({ error: "El PDF supera los 10 MB permitidos para análisis." }, { status: 413 });
 
+  let previousImportId = "";
+  let existingRows: any[] = [];
   const previous = await auth.db.from("phr_lab_imports").select("id, warnings").eq("document_id", body.documentId).eq("owner_user_id", auth.user.id).maybeSingle();
   if (previous.data) {
     const existing = await auth.db.from("phr_lab_results").select("id, analyte, value_num, value_text, unit, ref_low, ref_high, ref_text, flag, observed_at, source, source_sentence, loinc_code").eq("import_id", previous.data.id).order("analyte");
-    if (existing.data?.length && body.rematch) {
+    existingRows = existing.data ?? [];
+    if (body.rescan && existingRows.length) previousImportId = previous.data.id;
+    if (existing.data?.length && body.rematch && !body.rescan) {
       const pending = existing.data.map((row, originalIndex) => ({ row, originalIndex })).filter(({ row }) => !row.loinc_code);
       if (!pending.length) return NextResponse.json({ duplicate: true, created: existing.data.length, loincMapped: existing.data.length, warnings: ["Todos los resultados ya tienen agrupación LOINC."] });
-      const rows = pending.map(({ row }) => ({ analyte: row.analyte, valueNum: row.value_num, valueText: row.value_text, unit: row.unit, refLow: row.ref_low, refHigh: row.ref_high, refText: row.ref_text, flag: row.flag, observedAt: row.observed_at, source: row.source, sourceSentence: row.source_sentence })) as LabCandidate[];
+      const rows = pending.map(({ row }) => ({ analyte: row.analyte, valueNum: row.value_num, valueText: row.value_text, unit: row.unit, refLow: row.ref_low, refHigh: row.ref_high, refText: row.ref_text, flag: row.flag, observedAt: row.observed_at, source: row.source, sourceSentence: row.source_sentence, specimen: row.source_sentence.match(/(?:^|\|)\s*Muestra:\s*([^|]+)$/i)?.[1]?.trim() })) as LabCandidate[];
       const matched = await matchPhrLoinc(auth.db, auth.user.id, rows);
       const updates = await Promise.all([...matched.loincByIndex].map(([index, code]) => auth.db.from("phr_lab_results").update({ loinc_code: code }).eq("id", existing.data[pending[index].originalIndex].id).eq("owner_user_id", auth.user.id)));
       const applied = updates.filter((result) => !result.error).length;
       if (applied < updates.length) matched.warnings.push("Algunas homologaciones no pudieron guardarse y permanecen pendientes.");
       return NextResponse.json({ duplicate: true, created: existing.data.length, loincMapped: existing.data.length - pending.length + applied, warnings: matched.warnings });
     }
-    if (existing.data?.length) return NextResponse.json({ duplicate: true, created: existing.data.length, loincMapped: existing.data.filter((row) => row.loinc_code).length, warnings: previous.data.warnings ?? [] });
-    await auth.db.from("phr_lab_imports").delete().eq("id", previous.data.id).eq("owner_user_id", auth.user.id);
+    if (existing.data?.length && !body.rescan) return NextResponse.json({ duplicate: true, created: existing.data.length, loincMapped: existing.data.filter((row) => row.loinc_code).length, warnings: previous.data.warnings ?? [] });
+    if (!existing.data?.length) await auth.db.from("phr_lab_imports").delete().eq("id", previous.data.id).eq("owner_user_id", auth.user.id);
   }
 
   const downloaded = await auth.db.storage.from("patient-documents").download(document.data.storage_path);
@@ -139,17 +154,21 @@ export async function POST(request: NextRequest) {
     if (normalizeIdentity(extractedName) !== normalizeIdentity(auth.profile.full_name)) return NextResponse.json({ error: "El nombre del PDF no coincide con tu perfil. No se guardó ningún resultado." }, { status: 422 });
   } else warnings.push("No se encontró identidad en el PDF; revisa cuidadosamente cada resultado antes de confirmarlo.");
 
-  const candidates = dedupeLabCandidates(rows).filter((row) => row.analyte && (row.valueNum !== null || row.valueText));
+  let candidates = dedupeLabCandidates(rows).filter((row) => row.analyte && (row.valueNum !== null || row.valueText));
+  if (previousImportId) {
+    const existingSourceIds = new Set(existingRows.map((row) => String(row.source_sentence).split(/\s+\|\s+/)[0]).filter(Boolean));
+    candidates = candidates.filter((row) => !existingSourceIds.has(row.sourceSentence.split(/\s+\|\s+/)[0]));
+    if (!candidates.length) return NextResponse.json({ duplicate: true, created: 0, loincMapped: existingRows.filter((row) => row.loinc_code).length, warnings: ["La relectura no encontró resultados nuevos."] });
+  }
   if (!candidates.length) return NextResponse.json({ error: "No se detectaron resultados para revisar." }, { status: 422 });
   const matched = await matchPhrLoinc(auth.db, auth.user.id, candidates);
   warnings.push(...matched.warnings);
   const fallbackDate = document.data.document_date ?? document.data.created_at.slice(0, 10);
   if (candidates.some((row) => !row.observedAt)) warnings.push("No se encontró fecha de muestra en todas las filas; se usó la fecha del documento.");
   const extractionMethod = !prepared.needsAi ? "local" : prepared.scanned ? "ai_visual" : "ai_text";
-  const imported = await auth.db.from("phr_lab_imports").insert({
-    owner_user_id: auth.user.id, document_id: body.documentId, extraction_method: extractionMethod,
-    patient_name: extractedName, patient_identifier: extractedIdentifier, warnings,
-  }).select("id").single();
+  const imported = previousImportId
+    ? await auth.db.from("phr_lab_imports").update({ extraction_method: extractionMethod, patient_name: extractedName, patient_identifier: extractedIdentifier, warnings }).eq("id", previousImportId).eq("owner_user_id", auth.user.id).select("id").single()
+    : await auth.db.from("phr_lab_imports").insert({ owner_user_id: auth.user.id, document_id: body.documentId, extraction_method: extractionMethod, patient_name: extractedName, patient_identifier: extractedIdentifier, warnings }).select("id").single();
   if (imported.error) return NextResponse.json({ error: "No fue posible registrar el análisis." }, { status: 502 });
 
   const inserted = await auth.db.from("phr_lab_results").insert(candidates.map((row, index) => ({
@@ -160,10 +179,10 @@ export async function POST(request: NextRequest) {
     source: row.source, source_sentence: row.sourceSentence, review_status: "suggested",
   }))).select("id");
   if (inserted.error) {
-    await auth.db.from("phr_lab_imports").delete().eq("id", imported.data.id);
+    if (!previousImportId) await auth.db.from("phr_lab_imports").delete().eq("id", imported.data.id);
     return NextResponse.json({ error: "No fue posible guardar las sugerencias." }, { status: 502 });
   }
-  return NextResponse.json({ created: inserted.data?.length ?? 0, loincMapped: matched.loincByIndex.size, duplicate: false, warnings });
+  return NextResponse.json({ created: inserted.data?.length ?? 0, loincMapped: matched.loincByIndex.size, duplicate: !!previousImportId, warnings });
 }
 
 export async function PATCH(request: NextRequest) {

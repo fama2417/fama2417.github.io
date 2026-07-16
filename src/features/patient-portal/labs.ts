@@ -30,11 +30,12 @@ export const phrLabDraftOf = (result: PhrLabResult): PhrLabDraft => ({
 
 export const phrLabTrendKey = (result: Pick<PhrLabResult, "loincCode" | "analyte">) => result.loincCode.trim() || plain(result.analyte);
 
-export function phrSpecimenLabel(metadata?: LoincMetadata) {
-  const specimen = plain(metadata?.specimen ?? "");
-  if (/urine|urin/.test(specimen)) return "Orina";
-  if (/ser\/plas|serum|plasma/.test(specimen)) return "Sangre (suero/plasma)";
-  if (/\bbld\b|blood|whole blood/.test(specimen)) return "Sangre";
+export function phrSpecimenLabel(metadata?: LoincMetadata, sourceSentence = "") {
+  const sourceSpecimen = sourceSentence.match(/(?:^|\|)\s*Muestra:\s*([^|]+)$/i)?.[1] ?? "";
+  const specimen = plain(sourceSpecimen || metadata?.specimen || "");
+  if (/urine|orina|urin/.test(specimen)) return "Orina";
+  if (/ser\/plas|serum|plasma|suero/.test(specimen)) return "Sangre (suero/plasma)";
+  if (/\bbld\b|blood|whole blood|sangre/.test(specimen)) return "Sangre";
   return "Muestra no determinada";
 }
 

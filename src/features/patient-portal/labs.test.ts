@@ -38,5 +38,7 @@ test("presenta la muestra LOINC sin inventarla cuando falta", () => {
   const metadata = { component: "Glucose", property: "MCnc", timeAspect: "Pt", specimen: "Urine", scaleType: "Qn", methodType: "", className: "UA", status: "ACTIVE", exampleUcumUnits: "mg/dL" };
   assert.equal(phrSpecimenLabel(metadata), "Orina");
   assert.equal(phrSpecimenLabel({ ...metadata, specimen: "Ser/Plas" }), "Sangre (suero/plasma)");
+  assert.equal(phrSpecimenLabel(undefined, "p33-r31 | Nitritos | Negativo | Muestra: Orina"), "Orina");
+  assert.equal(phrSpecimenLabel(undefined, "p20-r19 | Ferremia | 114 | ug/dL | 65 - 175 | Muestra: Suero"), "Sangre (suero/plasma)");
   assert.equal(phrSpecimenLabel(), "Muestra no determinada");
 });

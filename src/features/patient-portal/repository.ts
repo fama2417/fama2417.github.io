@@ -233,9 +233,9 @@ export async function fetchPhrLabResults(ownerUserId?: string): Promise<PhrLabRe
   }));
 }
 
-export async function analyzePhrLabDocument(documentId: string, rematch = false) {
+export async function analyzePhrLabDocument(documentId: string, rematch = false, rescan = false) {
   const response = await authenticatedFetch("/api/portal/labs", {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ documentId, rematch }),
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ documentId, rematch, rescan }),
   });
   return await response.json() as { created: number; loincMapped: number; duplicate: boolean; warnings: string[] };
 }
@@ -278,7 +278,7 @@ export async function confirmPhrLabResults(resultIds: string[]) {
 
 export async function fetchPhrLabSource(resultId: string) {
   const response = await authenticatedFetch(`/api/portal/labs?resultId=${encodeURIComponent(resultId)}`);
-  return { url: URL.createObjectURL(await response.blob()), highlighted: response.headers.get("X-PHR-Highlight") === "true" };
+  return { url: URL.createObjectURL(await response.blob()), highlighted: response.headers.get("X-PHR-Highlight") === "true", page: Math.max(1, Number(response.headers.get("X-PHR-Page")) || 1) };
 }
 
 export type PhrFavorite = { trendKey: string; label: string };
