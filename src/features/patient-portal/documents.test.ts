@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { hasValidPatientDocumentSignature, isAnalyzableLabDocument, labImageMime, PATIENT_DOCUMENT_MAX_BYTES, validatePatientDocument } from "./documents.ts";
+import { clinicalAreaForDocumentType, documentTypeForSelection, hasValidPatientDocumentSignature, isAnalyzableLabDocument, labImageMime, patientPhotoQuality, PATIENT_DOCUMENT_MAX_BYTES, validatePatientDocument } from "./documents.ts";
 
 test("acepta PDF, imágenes y DICOM de hasta 20 MB", () => {
   assert.equal(validatePatientDocument({ type: "application/pdf", size: 1 }), "");
@@ -30,4 +30,13 @@ test("permite analizar laboratorios PDF o fotografiados, pero no DICOM", () => {
   assert.equal(isAnalyzableLabDocument("application/dicom"), false);
   assert.equal(labImageMime("application/pdf"), "");
   assert.equal(labImageMime("image/jpeg"), "image/jpeg");
+});
+
+test("clasifica documentos clínicos y advierte fotos difíciles de leer", () => {
+  assert.equal(documentTypeForSelection("cardiology"), "other");
+  assert.equal(documentTypeForSelection("imaging"), "imaging");
+  assert.equal(clinicalAreaForDocumentType("prescription"), "other");
+  assert.match(patientPhotoQuality({ width: 600, height: 1200, size: 200_000 }), /resolución/);
+  assert.match(patientPhotoQuality({ width: 1200, height: 1800, size: 200_000, edgeScore: 2 }), /borrosa/);
+  assert.equal(patientPhotoQuality({ width: 1200, height: 1800, size: 200_000, edgeScore: 12 }), "");
 });

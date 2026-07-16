@@ -153,14 +153,13 @@ function metadata(rows: LayoutRow[][]) {
     const row = first.find((candidate) => plain(rowText(candidate)).startsWith(label));
     return row?.items.filter((item) => item.x >= fromX && item.x < toX && item.str.trim() !== ":").map((item) => item.str.trim()).join(" ").trim() ?? "";
   };
-  const sampleRow = first.find((row) => plain(rowText(row)).includes("toma de muestra"));
-  const sampleText = sampleRow?.items.filter((item) => item.x >= 470).map((item) => item.str).join(" ") ?? "";
+  const sampleText = firstPageText.find((text) => /(?:toma de muestra|fec\.?\s*t\.?\s*muestra)/i.test(text)) ?? "";
   const patientLine = firstPageText.find((text) => /\bpaciente\s*:/i.test(text)) ?? "";
   const identifierLine = firstPageText.find((text) => /r\.?\s*u\.?\s*t\.?\s*:/i.test(text)) ?? "";
   const requestLine = firstPageText.find((text) => /fec\.?\s*solicitud/i.test(text)) ?? "";
   return {
     patientName: labelledValue("nombre", 85, 400)
-      || patientLine.match(/\bpaciente\s*:\s*(.+?)(?=\s+id\.?\s*atenci[oó]n\b|\s+r\.?\s*u\.?\s*t\.?\s*:|$)/i)?.[1]?.trim()
+      || patientLine.match(/\bpaciente\s*:\s*(.+?)(?=\s+edad\s*:|\s+id\.?\s*atenci[oó]n\b|\s+r\.?\s*u\.?\s*t\.?\s*:|$)/i)?.[1]?.trim()
       || "",
     patientIdentifier: labelledValue("rut", 85, 400)
       || identifierLine.match(/r\.?\s*u\.?\s*t\.?\s*:\s*([0-9.\-k]+)/i)?.[1]
@@ -233,20 +232,23 @@ function parseMonospacedLabRows(rows: LayoutRow[], observedAt: string) {
   const aiLines: string[] = [];
   let foundHeader = false;
   let insideTable = false;
+  const specimens = rows.map(rowText).map((text) => text.match(/^(?:tipo(?: de)?\s+)?muestra\s*:\s*(.+)$/i)?.[1]?.trim()).filter((value): value is string => !!value);
+  const rawSpecimen = specimens.at(-1) ?? "";
+  const specimen = /orina|urin/i.test(rawSpecimen) ? "Orina" : /sangre total/i.test(rawSpecimen) ? "Sangre total" : /suero/i.test(rawSpecimen) ? "Suero" : rawSpecimen;
 
   for (const row of rows) {
     const text = rowText(row);
     const normalized = plain(text);
-    if (/examen\s+resultado\s+unidad\s+valor de referencia/.test(normalized)) {
+    if (/^examen(?:\s+resultado(?:\s+unidad)?(?:\s+.*)?)?$/.test(normalized)) {
       foundHeader = true;
       insideTable = true;
       continue;
     }
-    if (/^(?:examen validado|la interpretacion)/.test(normalized)) {
+    if (/^(?:examen validado|examen ejecutado|la interpretacion)/.test(normalized)) {
       insideTable = false;
       continue;
     }
-    if (!insideTable || !text || /^(?:[-_=]{4,}|metodo|nota|observacion|muestra|fecha|rango|valor de referencia|adultos|ninos|hombres|mujeres|mayor|menor|hasta|guia|segun|fuente|este resultado)/.test(normalized)) continue;
+    if (!insideTable || !text || /^(?:[-_=]{4,}|["']|\d+\s*(?:-|mes\b|anos?\b)|metodo|nota|observacion|comentario|muestra|tipo de muestra|fecha|rango|valores? de referencia|normal\b|prediabetes|diabetes|suficiencia|insuficiencia|deficiencia|adultos|ninos|hombres|mujeres|mayor|menor|hasta|guia|segun|fuente|este resultado|un criterio|reemplaza|por cambio)/.test(normalized)) continue;
 
     let match = text.match(/^(.+?)\s+(-?\d+(?:[.,]\d+)?)(?:\s*(\*))?\s+(\S+)\s+(-?\d+(?:[.,]\d+)?)\s*-\s*(-?\d+(?:[.,]\d+)?)$/);
     let compact: z.infer<typeof CompactLabRowSchema> | null = match ? {
@@ -289,7 +291,7 @@ function parseMonospacedLabRows(rows: LayoutRow[], observedAt: string) {
     }
 
     if (!compact) continue;
-    const parsed = normalizedCandidate(compact, observedAt, "ocr");
+    const parsed = normalizedCandidate({ ...compact, specimen }, observedAt, "ocr", specimen);
     if (!parsed) continue;
     observations.push(parsed);
     aiLines.push([row.id, compact.analyte, compact.value, compact.unit, compact.reference].join("\t"));

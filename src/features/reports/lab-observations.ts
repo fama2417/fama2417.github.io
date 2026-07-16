@@ -119,7 +119,7 @@ export function labCategory(observation: Pick<LabObservation, "analyte" | "loinc
   if (/creatinin|cystatin|urea|uremia|nitrogeno ureico|uric acid|acido urico|glomerular|\bvfg\b|beta 2 microglobulin|sodium|sodio|potassium|potasio|chloride|cloro|electrolyte/.test(text)) return "renal";
   if (/bilirubin|bilirrubin|albumin|alanine aminotransferase|aspartate aminotransferase|transaminasa|\b(gpt|got|alat|asat|sgpt|sgot|alt|ast|ggt)\b|gamma (?:gt|glutam)|alkaline phosphatase|fosfatasa alcalina/.test(text)) return "hepatic";
   if (/thyro|tiroid|tsh|triiodothyronine|\bt3\b|\bt4\b|cortisol|testosterone|estradiol|progesterone|prolactin|gonadotropin|luteinizing|follicle.stimulating|parathyroid|hormona/.test(text) || /FERT/.test(className)) return "hormones";
-  if (/ferritin|transferrin|ferremia|fijacion fierro|saturacion de transferrin|\biron\b|hierro|folate|folato|vitamin|vitamina|cobalamin|calcium|calcio|magnesium|magnesio|phosphorus|fosforo/.test(text)) return "nutrition";
+  if (/ferritin|transferrin|ferremia|fijacion (?:de )?(?:fe|fierro|hierro)|saturacion (?:de )?transferrin|\biron\b|hierro|folate|folato|vitamin|vitamina|cobalamin|calcium|calcio|magnesium|magnesio|phosphorus|fosforo/.test(text)) return "nutrition";
   if (/c.reactive|reactive protein|proteina c|immunoglobulin|anticuer|antibody|complement|rheumatoid|reumato|sedimentation|eritrosediment/.test(text) || /SERO|ALLERGY|CELLMARK|HLA/.test(className)) return "immunology";
   return /CHEM|CHAL/.test(className) || /proteinas? totales|desh.*lactica|\bldh\b|troponina/.test(text) ? "chemistry" : "other";
 }

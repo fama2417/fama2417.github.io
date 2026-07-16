@@ -7,7 +7,7 @@ export async function GET(request: NextRequest) {
   if (auth instanceof NextResponse) return auth;
   const [documents, labResults, healthItems] = await Promise.all([
     auth.db.from("patient_documents")
-      .select("id, original_filename, storage_path, mime_type, size_bytes, document_date, document_type, source_institution, created_at")
+      .select("id, original_filename, storage_path, mime_type, size_bytes, document_date, document_type, clinical_area, source_institution, created_at")
       .eq("owner_user_id", auth.user.id),
     auth.db.from("phr_lab_results")
       .select("id, document_id, loinc_code, analyte, value_num, value_text, unit, ref_low, ref_high, ref_text, flag, observed_at")
@@ -31,6 +31,7 @@ export async function GET(request: NextRequest) {
     entries.push({ fullUrl: `urn:uuid:${document.id}`, resource: {
       resourceType: "DocumentReference", id: document.id, status: "current", subject: { reference: `Patient/${ownerId}` },
       date: document.created_at, description: `${document.source_institution} · ${document.document_type}`,
+      category: [{ text: document.clinical_area }],
       author: [{ display: document.source_institution }],
       content: [{ attachment: { contentType: document.mime_type, url: signed.data?.signedUrl, size: document.size_bytes, title: document.original_filename, creation: document.document_date } }],
     }});

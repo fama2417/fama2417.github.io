@@ -1,5 +1,5 @@
 import { authenticatedFetch, supabase } from "@/lib/supabase-client";
-import { validatePatientDocument } from "./documents";
+import { clinicalAreaForDocumentType, validatePatientDocument, type PhrClinicalArea } from "./documents";
 import type { PhrHealthItem, PhrHealthItemDraft } from "./health-summary";
 import type { PhrImagingText } from "./imaging";
 import type { PhrLabDraft, PhrLabResult } from "./labs";
@@ -150,14 +150,14 @@ export async function fetchReleasedAddenda(): Promise<PortalAddendum[]> {
 
 export type PortalDocument = {
   id: string; filename: string; mimeType: string; sizeBytes: number; documentDate: string | null;
-  documentType: "imaging" | "laboratory" | "prescription" | "other"; sourceInstitution: string; createdAt: string; url: string;
+  documentType: "imaging" | "laboratory" | "prescription" | "other"; clinicalArea: PhrClinicalArea; sourceInstitution: string; createdAt: string; url: string;
   extractedText?: PhrImagingText | null;
   sharedPatientIds: string[]; reviewByPatientId: Record<string, "accepted" | "rejected">;
 };
 
 export async function fetchPatientDocuments(ownerUserId?: string): Promise<PortalDocument[]> {
   let documentQuery = supabase.from("patient_documents")
-    .select("id, original_filename, storage_path, mime_type, size_bytes, document_date, document_type, source_institution, created_at, extracted_text")
+    .select("id, original_filename, storage_path, mime_type, size_bytes, document_date, document_type, clinical_area, source_institution, created_at, extracted_text")
     .order("document_date", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false });
   if (ownerUserId) documentQuery = documentQuery.eq("owner_user_id", ownerUserId);
   const [documents, shares, reviews] = await Promise.all([
@@ -166,7 +166,7 @@ export async function fetchPatientDocuments(ownerUserId?: string): Promise<Porta
     supabase.from("patient_document_reviews").select("document_id, patient_id, status, created_at").order("created_at", { ascending: false }),
   ]);
   if (documents.error || shares.error || reviews.error) throw documents.error ?? shares.error ?? reviews.error;
-  const rows = (documents.data ?? []) as { id: string; original_filename: string; storage_path: string; mime_type: string; size_bytes: number; document_date: string | null; document_type: PortalDocument["documentType"]; source_institution: string; created_at: string; extracted_text: PhrImagingText }[];
+  const rows = (documents.data ?? []) as { id: string; original_filename: string; storage_path: string; mime_type: string; size_bytes: number; document_date: string | null; document_type: PortalDocument["documentType"]; clinical_area: PhrClinicalArea; source_institution: string; created_at: string; extracted_text: PhrImagingText }[];
   const sharedByDocument = new Map<string, string[]>();
   for (const share of shares.data ?? []) sharedByDocument.set(share.document_id, [...(sharedByDocument.get(share.document_id) ?? []), share.patient_id]);
   const reviewedByDocument = new Map<string, Record<string, "accepted" | "rejected">>();
@@ -181,7 +181,7 @@ export async function fetchPatientDocuments(ownerUserId?: string): Promise<Porta
     if (signed.error) throw signed.error;
     return {
       id: row.id, filename: row.original_filename, mimeType: row.mime_type, sizeBytes: row.size_bytes,
-      documentDate: row.document_date, documentType: row.document_type, sourceInstitution: row.source_institution,
+      documentDate: row.document_date, documentType: row.document_type, clinicalArea: row.clinical_area ?? clinicalAreaForDocumentType(row.document_type), sourceInstitution: row.source_institution,
       createdAt: row.created_at, url: signed.data.signedUrl, extractedText: row.extracted_text?.fullText ? row.extracted_text : null,
       sharedPatientIds: sharedByDocument.get(row.id) ?? [], reviewByPatientId: reviewedByDocument.get(row.id) ?? {},
     };
@@ -208,11 +208,11 @@ export async function deletePhrHealthItem(id: string) {
   await authenticatedFetch(`/api/portal/health-items?id=${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
-export async function uploadPatientDocument(input: { file: File; documentDate: string; documentType: PortalDocument["documentType"]; sourceInstitution: string }) {
+export async function uploadPatientDocument(input: { file: File; documentDate: string; documentType: PortalDocument["documentType"]; clinicalArea?: PhrClinicalArea; sourceInstitution: string }) {
   const validation = validatePatientDocument(input.file);
   if (validation) throw new Error(validation);
   const form = new FormData();
-  form.set("file", input.file); form.set("documentDate", input.documentDate); form.set("documentType", input.documentType); form.set("sourceInstitution", input.sourceInstitution);
+  form.set("file", input.file); form.set("documentDate", input.documentDate); form.set("documentType", input.documentType); form.set("clinicalArea", input.clinicalArea ?? clinicalAreaForDocumentType(input.documentType)); form.set("sourceInstitution", input.sourceInstitution);
   await authenticatedFetch("/api/portal/documents", { method: "POST", body: form });
 }
 

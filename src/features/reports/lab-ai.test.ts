@@ -81,6 +81,27 @@ test("loincSearchQueries relaja calificadores sin cambiar el analito", () => {
   assert.deepEqual(loincSearchQueries("Chloride serum plasma"), ["Chloride serum plasma", "Chloride serum", "Chloride"]);
 });
 
+test("parseLabLayoutPages acepta informes concatenados con encabezados variables", () => {
+  const identity = [
+    item("R.u.t. : 18332410-1 Sexo : Masculino", 24, 700),
+    item("Paciente : PACIENTE PRUEBA Edad : 30 Año(s)", 24, 686),
+    item("Dirección : ejemplo Fec. T. Muestra : 28/06/2024 10:39", 24, 672),
+  ];
+  const parsed = parseLabLayoutPages([
+    [...identity, item("Tipo Muestra : SUERO", 24, 615), item("Examen Resultado Margen Histórico", 30, 576), item("FERRITINA 569.0 * ng/mL 30 - 400", 30, 537)],
+    [...identity, item("Tipo Muestra : SUERO-HORMONAS", 24, 615), item("Examen", 30, 576), item("VITAMINA D Total 17.8 ng/mL", 30, 537), item("Rango de Referencia", 30, 488)],
+  ]);
+
+  assert.equal(parsed.patientName, "PACIENTE PRUEBA");
+  assert.equal(parsed.patientIdentifier, "18332410-1");
+  assert.equal(parsed.observedAt, "2024-06-28");
+  assert.equal(parsed.needsAi, false);
+  assert.deepEqual(parsed.observations.map(({ analyte, valueNum, unit, flag, specimen }) => ({ analyte, valueNum, unit, flag, specimen })), [
+    { analyte: "FERRITINA", valueNum: 569, unit: "ng/mL", flag: "abnormal", specimen: "Suero" },
+    { analyte: "VITAMINA D Total", valueNum: 17.8, unit: "ng/mL", flag: "", specimen: "Suero" },
+  ]);
+});
+
 test("parseLabLayoutPages conserva resultados textuales de orina en formato de dos columnas", () => {
   const page = [
     item("EXAMEN", 28, 524), item("RESULTADO", 185, 524),

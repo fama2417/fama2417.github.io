@@ -5,7 +5,7 @@ import { friendlyDocumentName, latestLaboratory, recentPhrActivity, suggestedRes
 import type { PortalDocument } from "./repository.ts";
 
 const document = (id: string, date: string, type: PortalDocument["documentType"] = "laboratory"): PortalDocument => ({
-  id, documentDate: date, createdAt: `${date}T12:00:00Z`, documentType: type, filename: `informe_tecnico_${id}.pdf`,
+  id, documentDate: date, createdAt: `${date}T12:00:00Z`, documentType: type, clinicalArea: type === "laboratory" || type === "imaging" ? type : "other", filename: `informe_tecnico_${id}.pdf`,
   mimeType: "application/pdf", sizeBytes: 1000, sourceInstitution: "Laboratorio", url: `/document/${id}`, sharedPatientIds: [], reviewByPatientId: {},
 });
 const result = (id: string, documentId: string, date: string, reviewStatus: PhrLabResult["reviewStatus"]): PhrLabResult => ({

@@ -38,6 +38,7 @@ test("clasifica nombres habituales aunque LOINC todavía esté pendiente", () =>
   assert.equal(labCategory({ analyte: "VFG CKD-EPI" }), "renal");
   assert.equal(labCategory({ analyte: "Transaminasa(GPT)" }), "hepatic");
   assert.equal(labCategory({ analyte: "Capacidad fijación fierro" }), "nutrition");
+  assert.equal(labCategory({ analyte: "CAPACIDAD FIJACION DE Fe" }), "nutrition");
   assert.equal(labCategory({ analyte: "TROPONINA I" }), "chemistry");
 });
 
