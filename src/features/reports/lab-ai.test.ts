@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { StructuredTextItem } from "unpdf";
-import { labPatientMatches, loincSearchQueries, parseLabLayoutPages, verifiedLabLoinc } from "./lab-ai.ts";
+import { labPatientMatches, labSourceHighlight, loincSearchQueries, parseLabLayoutPages, verifiedLabLoinc } from "./lab-ai.ts";
 
 const item = (str: string, x: number, y: number): StructuredTextItem => ({
   str, x, y, width: str.length * 5, height: 10, fontSize: 10, fontFamily: "sans", dir: "ltr", hasEOL: false,
@@ -79,4 +79,12 @@ test("verifiedLabLoinc acepta sólo sugerencias confiables presentes en el catá
 
 test("loincSearchQueries relaja calificadores sin cambiar el analito", () => {
   assert.deepEqual(loincSearchQueries("Chloride serum plasma"), ["Chloride serum plasma", "Chloride serum", "Chloride"]);
+});
+
+test("ubica el valor en columnas y en una fila monoespaciada", () => {
+  assert.deepEqual(labSourceHighlight([item("8.4", 145, 578)], "8.4"), { x: 145, y: 578, width: 15, height: 10 });
+  const box = labSourceHighlight([item("Colesterol VLDL 8.4 mg/dL", 30, 500)], "8.4", "Colesterol VLDL");
+  assert.ok(box && box.x > 30 && box.width >= 12);
+  const b12 = labSourceHighlight([item("Vitamina B12 12 pg/mL", 30, 480)], "12", "Vitamina B12");
+  assert.ok(b12 && b12.x > 30 + "Vitamina B12".length * 5);
 });
