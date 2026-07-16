@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { PDFDocument, rgb } from "pdf-lib";
 import { extractTextItems } from "unpdf";
 import { aiConfig } from "@/features/reports/ai-budget.ts";
-import { dedupeLabCandidates, groupLabLayoutPages, labSourceHighlight, loincSearchQueries, normalizeIdentity, prepareLabPdf, structureLabDocument, suggestLabLoinc, suggestLabLoincSearchTerms, verifiedLabLoinc, type LabCandidate } from "@/features/reports/lab-ai.ts";
-import { reusedPhrLoinc, validatePhrLabDraft } from "@/features/patient-portal/labs.ts";
+import { dedupeLabCandidates, groupLabLayoutPages, labSourceHighlight, loincSearchQueries, normalizeIdentity, prepareLabPdf, structureLabDocument, suggestLabLoinc, suggestLabLoincSearchTerms, type LabCandidate } from "@/features/reports/lab-ai.ts";
+import { phrSpecimenClass, reusedPhrLoinc, validatePhrLabDraft, vettedPhrLabIdentity } from "@/features/patient-portal/labs.ts";
 import { isAnalyzableLabDocument, labImageMime } from "@/features/patient-portal/documents.ts";
 import { recordPhrEvent } from "@/lib/phr-events";
 import { requirePhrApi } from "@/lib/server-auth";
@@ -14,14 +14,30 @@ const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && new Da
 const dateOr = (value: string, fallback: string) => validDate(value) ? value : fallback;
 type LoincOption = { code: string; display: string };
 
-async function matchPhrLoinc(db: any, ownerUserId: string, rows: LabCandidate[], useAi: boolean) {
+const specimenOf = (row: { specimen?: string; source_sentence?: string; sourceSentence?: string }) => row.specimen ?? (row.source_sentence ?? row.sourceSentence ?? "").match(/(?:^|\|)\s*Muestra:\s*([^|]+)$/i)?.[1]?.trim() ?? "";
+const mappingKey = (row: { analyte: string; unit: string; specimen?: string; source_sentence?: string; sourceSentence?: string }) => `${normalizeIdentity(row.analyte)}|${normalizeIdentity(row.unit)}|${phrSpecimenClass(specimenOf(row))}`;
+const individualOption = (row: LabCandidate, option: LoincOption) => !/\bpanel\b/i.test(option.display) && !(row.valueNum !== null && !!row.unit && /\[(?:presence|arbitrary)/i.test(option.display));
+
+async function matchPhrLoinc(db: any, ownerUserId: string, rows: LabCandidate[], useAi: boolean, sourceInstitution = "") {
   const warnings: string[] = [], loincByIndex = new Map<number, string>(), optionsByIndex = new Map<number, LoincOption[]>();
   const catalog = await db.from("terminology_codes").select("code", { count: "exact", head: true }).eq("system", "LOINC");
   if (catalog.error || !catalog.count) return { loincByIndex, optionsByIndex, warnings: [catalog.error ? "No fue posible consultar el catálogo LOINC." : "El catálogo LOINC está vacío; debe cargarse para homologar resultados."] };
 
-  const prior = await db.from("phr_lab_results").select("analyte, unit, loinc_code")
+  const vetted = rows.map((row, index) => ({ index, identity: vettedPhrLabIdentity({ analyte: row.analyte, unit: row.unit, specimen: specimenOf(row) }) })).filter((row) => row.identity);
+  if (vetted.length) {
+    const codes = [...new Set(vetted.map((row) => row.identity!.code))];
+    const known = await db.from("terminology_codes").select("code").eq("system", "LOINC").in("code", codes);
+    const existing = new Set((known.data ?? []).map((row: { code: string }) => row.code));
+    vetted.forEach((row) => { if (existing.has(row.identity!.code)) loincByIndex.set(row.index, row.identity!.code); });
+  }
+
+  const learned = await db.from("phr_lab_term_mappings").select("analyte_key, unit_key, specimen_class, loinc_code").eq("source_institution", normalizeIdentity(sourceInstitution));
+  const learnedByKey = new Map<string, string>((learned.data ?? []).map((row: { analyte_key: string; unit_key: string; specimen_class: string; loinc_code: string }) => [`${row.analyte_key}|${row.unit_key}|${row.specimen_class}`, row.loinc_code]));
+  rows.forEach((row, index) => { const code = learnedByKey.get(mappingKey(row)); if (!loincByIndex.has(index) && code) loincByIndex.set(index, code); });
+
+  const prior = await db.from("phr_lab_results").select("analyte, unit, loinc_code, source_sentence")
     .eq("owner_user_id", ownerUserId).eq("review_status", "confirmed").neq("loinc_code", "");
-  for (const [index, code] of reusedPhrLoinc(rows, (prior.data ?? []).map((row: { analyte: string; unit: string; loinc_code: string }) => ({ analyte: row.analyte, unit: row.unit, loincCode: row.loinc_code })))) loincByIndex.set(index, code);
+  for (const [index, code] of reusedPhrLoinc(rows.map((row) => ({ ...row, specimen: specimenOf(row) })), (prior.data ?? []).map((row: { analyte: string; unit: string; loinc_code: string; source_sentence: string }) => ({ analyte: row.analyte, unit: row.unit, loincCode: row.loinc_code, specimen: specimenOf(row) })))) if (!loincByIndex.has(index)) loincByIndex.set(index, code);
 
   const unresolved = rows.map((row, index) => ({ row, index })).filter(({ index }) => !loincByIndex.has(index));
   const config = aiConfig();
@@ -47,6 +63,7 @@ async function matchPhrLoinc(db: any, ownerUserId: string, rows: LabCandidate[],
       translated.terms.forEach((row) => { const target = missing[Number(row.sourceId)]; if (target) englishTerms.set(target.index, row.searchTerm); });
       await Promise.all(missing.map(async ({ index }) => { candidateSets[index] = await search(loincSearchQueries(englishTerms.get(index) ?? "")); }));
     }
+    candidateSets.forEach((options, index) => { candidateSets[index] = options.filter((option) => individualOption(unresolved[index].row, option)); });
     const suggested = await suggestLabLoinc(unresolved.map(({ row }) => row), unresolved.map((_, index) => englishTerms.get(index) ?? ""), candidateSets);
     const preferred = new Map(suggested.suggestions.map((row) => [row.sourceId, row.loincCode.trim()]));
     candidateSets.forEach((options, index) => {
@@ -54,14 +71,7 @@ async function matchPhrLoinc(db: any, ownerUserId: string, rows: LabCandidate[],
       const ranked = code ? [...options].sort((a, b) => Number(b.code === code) - Number(a.code === code)) : options;
       if (ranked.length) optionsByIndex.set(unresolved[index].index, ranked.slice(0, 3));
     });
-    const proposed = [...new Set(suggested.suggestions.map((row) => row.loincCode.trim()).filter(Boolean))];
-    const known = proposed.length ? await db.from("terminology_codes").select("code").eq("system", "LOINC").in("code", proposed) : { data: [], error: null };
-    if (known.error) throw known.error;
-    for (const [sourceId, code] of verifiedLabLoinc(suggested.suggestions, (known.data ?? []).map((row: { code: string }) => row.code), config.minConfidenceToAutoSuggest)) {
-      const original = unresolved[Number(sourceId)];
-      if (original) loincByIndex.set(original.index, code);
-    }
-    warnings.push(`${loincByIndex.size} de ${rows.length} analitos fueron homologados con equivalencias español–inglés y verificados contra el catálogo LOINC.`);
+    warnings.push(`${loincByIndex.size} de ${rows.length} analitos reutilizaron una equivalencia verificada. La IA sólo ordenó alternativas existentes; no asignó códigos por sí sola.`);
   } catch { warnings.push("No fue posible completar la homologación LOINC; los resultados siguen disponibles para revisión."); }
   return { loincByIndex, optionsByIndex, warnings };
 }
@@ -108,7 +118,7 @@ export async function POST(request: NextRequest) {
   if (!body.documentId) return NextResponse.json({ error: "Documento inválido." }, { status: 400 });
 
   const document = await auth.db.from("patient_documents")
-    .select("id, storage_path, mime_type, size_bytes, document_date, created_at")
+    .select("id, storage_path, mime_type, size_bytes, document_date, source_institution, created_at")
     .eq("id", body.documentId).eq("owner_user_id", auth.user.id).eq("document_type", "laboratory").maybeSingle();
   if (!document.data) return NextResponse.json({ error: "Laboratorio inexistente." }, { status: 404 });
   if (!isAnalyzableLabDocument(document.data.mime_type)) return NextResponse.json({ error: "La extracción de laboratorio acepta PDF, JPG o PNG." }, { status: 415 });
@@ -121,26 +131,26 @@ export async function POST(request: NextRequest) {
     const existing = await auth.db.from("phr_lab_results").select("id, analyte, value_num, value_text, unit, ref_low, ref_high, ref_text, flag, observed_at, source, source_sentence, loinc_code, review_status").eq("import_id", previous.data.id).order("analyte");
     existingRows = existing.data ?? [];
     if (body.suggestLoinc) {
-      const pending = existingRows.filter((row) => row.review_status === "suggested" && !row.loinc_code);
-      if (!pending.length) return NextResponse.json({ suggestions: [], warnings: ["No quedan resultados pendientes sin LOINC."] });
+      const pending = existingRows.filter((row) => !row.loinc_code || (vettedPhrLabIdentity({ analyte: row.analyte, unit: row.unit, specimen: specimenOf(row) })?.code ?? row.loinc_code) !== row.loinc_code);
+      if (!pending.length) return NextResponse.json({ suggestions: [], warnings: ["No se detectaron homologaciones pendientes o incompatibles."] });
       const rows = pending.map((row) => ({ analyte: row.analyte, valueNum: row.value_num, valueText: row.value_text, unit: row.unit, refLow: row.ref_low, refHigh: row.ref_high, refText: row.ref_text, flag: row.flag, observedAt: row.observed_at, source: row.source, sourceSentence: row.source_sentence, specimen: row.source_sentence.match(/(?:^|\|)\s*Muestra:\s*([^|]+)$/i)?.[1]?.trim() })) as LabCandidate[];
-      const matched = await matchPhrLoinc(auth.db, auth.user.id, rows, true);
+      const matched = await matchPhrLoinc(auth.db, auth.user.id, rows, true, document.data.source_institution);
       const reusedCodes = [...new Set(matched.loincByIndex.values())];
       const reused = reusedCodes.length ? await auth.db.from("terminology_codes").select("code, display").eq("system", "LOINC").in("code", reusedCodes) : { data: [], error: null };
       const reusedDisplay = new Map((reused.data ?? []).map((row: { code: string; display: string }) => [row.code, row.display]));
       const suggestions = pending.map((row, index) => {
         const reusedCode = matched.loincByIndex.get(index);
         const options = reusedCode ? [{ code: reusedCode, display: reusedDisplay.get(reusedCode) ?? reusedCode }] : matched.optionsByIndex.get(index) ?? [];
-        return { resultId: row.id, analyte: row.analyte, options };
+        return { resultId: row.id, analyte: row.analyte, currentCode: row.loinc_code, recommendedCode: reusedCode ?? "", options };
       });
       return NextResponse.json({ suggestions, warnings: matched.warnings });
     }
     if (body.rescan && existingRows.length) previousImportId = previous.data.id;
     if (existing.data?.length && body.rematch && !body.rescan) {
-      const pending = existing.data.map((row, originalIndex) => ({ row, originalIndex })).filter(({ row }) => !row.loinc_code);
+      const pending = existing.data.map((row, originalIndex) => ({ row, originalIndex })).filter(({ row }) => !row.loinc_code || (vettedPhrLabIdentity({ analyte: row.analyte, unit: row.unit, specimen: specimenOf(row) })?.code ?? row.loinc_code) !== row.loinc_code);
       if (!pending.length) return NextResponse.json({ duplicate: true, created: existing.data.length, loincMapped: existing.data.length, warnings: ["Todos los resultados ya tienen agrupación LOINC."] });
       const rows = pending.map(({ row }) => ({ analyte: row.analyte, valueNum: row.value_num, valueText: row.value_text, unit: row.unit, refLow: row.ref_low, refHigh: row.ref_high, refText: row.ref_text, flag: row.flag, observedAt: row.observed_at, source: row.source, sourceSentence: row.source_sentence, specimen: row.source_sentence.match(/(?:^|\|)\s*Muestra:\s*([^|]+)$/i)?.[1]?.trim() })) as LabCandidate[];
-      const matched = await matchPhrLoinc(auth.db, auth.user.id, rows, true);
+      const matched = await matchPhrLoinc(auth.db, auth.user.id, rows, true, document.data.source_institution);
       const updates = await Promise.all([...matched.loincByIndex].map(([index, code]) => auth.db.from("phr_lab_results").update({ loinc_code: code }).eq("id", existing.data[pending[index].originalIndex].id).eq("owner_user_id", auth.user.id)));
       const applied = updates.filter((result) => !result.error).length;
       if (applied < updates.length) matched.warnings.push("Algunas homologaciones no pudieron guardarse y permanecen pendientes.");
@@ -198,7 +208,7 @@ export async function POST(request: NextRequest) {
     if (!candidates.length) return NextResponse.json({ duplicate: true, created: 0, loincMapped: existingRows.filter((row) => row.loinc_code).length, warnings: ["La relectura no encontró resultados nuevos."] });
   }
   if (!candidates.length) { await recordPhrEvent(auth.db, auth.user.id, "lab_analysis_failed", body.documentId, { method: imageMime ? "ai_visual" : "local", stage: "no_results", duration_ms: Date.now() - startedAt }); return NextResponse.json({ error: "No se detectaron resultados para revisar." }, { status: 422 }); }
-  const matched = await matchPhrLoinc(auth.db, auth.user.id, candidates, !!imageMime);
+  const matched = await matchPhrLoinc(auth.db, auth.user.id, candidates, !!imageMime, document.data.source_institution);
   warnings.push(...matched.warnings);
   const fallbackDate = document.data.document_date ?? document.data.created_at.slice(0, 10);
   if (candidates.some((row) => !row.observedAt)) warnings.push("No se encontró fecha de muestra en todas las filas; se usó la fecha del documento.");
@@ -233,13 +243,23 @@ export async function PATCH(request: NextRequest) {
     if (!selections.length || selections.length !== body.loincSelections.length) return NextResponse.json({ error: "Selecciones LOINC inválidas." }, { status: 400 });
     const resultIds = [...new Set(selections.map((item) => item.resultId))];
     if (resultIds.length !== selections.length) return NextResponse.json({ error: "Cada resultado debe tener una sola selección LOINC." }, { status: 400 });
-    const targets = await auth.db.from("phr_lab_results").select("id").eq("owner_user_id", auth.user.id).eq("review_status", "suggested").in("id", resultIds);
+    const targets = await auth.db.from("phr_lab_results").select("id, document_id, analyte, value_num, unit, source_sentence").eq("owner_user_id", auth.user.id).in("id", resultIds);
     if (targets.error || targets.data?.length !== resultIds.length) return NextResponse.json({ error: "Uno o más resultados ya no están disponibles." }, { status: 404 });
     const codes = [...new Set(selections.map((item) => item.loincCode))];
-    const known = await auth.db.from("terminology_codes").select("code").eq("system", "LOINC").in("code", codes);
-    if (known.error || new Set((known.data ?? []).map((row) => row.code)).size !== codes.length) return NextResponse.json({ error: "Uno o más códigos LOINC no existen en el catálogo." }, { status: 400 });
-    const updates = await Promise.all(selections.map((item) => auth.db.from("phr_lab_results").update({ loinc_code: item.loincCode }).eq("id", item.resultId).eq("owner_user_id", auth.user.id).eq("review_status", "suggested").select("id")));
+    const known = await auth.db.from("terminology_codes").select("code, display").eq("system", "LOINC").in("code", codes);
+    const knownByCode = new Map((known.data ?? []).map((row: { code: string; display: string }) => [row.code, row.display]));
+    if (known.error || knownByCode.size !== codes.length) return NextResponse.json({ error: "Uno o más códigos LOINC no existen en el catálogo." }, { status: 400 });
+    const targetById = new Map((targets.data ?? []).map((row) => [row.id, row]));
+    if (selections.some((item) => { const target = targetById.get(item.resultId), display = knownByCode.get(item.loincCode) ?? ""; return /\bpanel\b/i.test(display) || (target?.value_num !== null && !!target?.unit && /\[(?:presence|arbitrary)/i.test(display)); })) return NextResponse.json({ error: "Una selección corresponde a un panel o a una medición incompatible con el resultado." }, { status: 400 });
+    const updates = await Promise.all(selections.map((item) => auth.db.from("phr_lab_results").update({ loinc_code: item.loincCode }).eq("id", item.resultId).eq("owner_user_id", auth.user.id).select("id")));
     if (updates.some((result) => result.error)) return NextResponse.json({ error: "No fue posible guardar todas las selecciones LOINC." }, { status: 502 });
+    const documentIds = [...new Set((targets.data ?? []).map((row) => row.document_id))];
+    const documents = await auth.db.from("patient_documents").select("id, source_institution").eq("owner_user_id", auth.user.id).in("id", documentIds);
+    const institutionByDocument = new Map((documents.data ?? []).map((row) => [row.id, row.source_institution]));
+    await auth.db.from("phr_lab_term_mappings").upsert(selections.map((item) => { const target = targetById.get(item.resultId)!; return {
+      source_institution: normalizeIdentity(institutionByDocument.get(target.document_id) ?? ""), analyte_key: normalizeIdentity(target.analyte), unit_key: normalizeIdentity(target.unit),
+      specimen_class: phrSpecimenClass(specimenOf(target)), loinc_code: item.loincCode, updated_at: new Date().toISOString(),
+    }; }), { onConflict: "source_institution,analyte_key,unit_key,specimen_class" });
     return NextResponse.json({ updated: updates.reduce((sum, result) => sum + (result.data?.length ?? 0), 0) });
   }
   if (Array.isArray(body.resultIds)) {

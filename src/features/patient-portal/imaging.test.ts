@@ -8,3 +8,9 @@ test("separa un informe radiológico local sin interpretar su contenido", () => 
     clinicalIndication: "Dolor.", technique: "TC sin contraste.", findings: "Texto descriptivo.", impression: "Sin cambios.",
   });
 });
+
+test("separa encabezados aunque el PDF entregue todo en una sola línea", () => {
+  const text = structurePhrImagingText("Paciente: Prueba Hallazgos: ATM derecha conservada. ATM izquierda con derrame. Impresión: Cambios en ambas articulaciones.");
+  assert.equal(text.findings, "ATM derecha conservada. ATM izquierda con derrame.");
+  assert.equal(text.impression, "Cambios en ambas articulaciones.");
+});

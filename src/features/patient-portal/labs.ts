@@ -9,7 +9,34 @@ export type PhrLabResult = {
 export type PhrLabDraft = { analyte: string; value: string; unit: string; reference: string; observedAt: string };
 
 const plain = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
+const term = (value: string) => plain(value).replace(/[^a-z0-9]+/g, " ").trim();
 const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
+
+const vettedLoinc = [
+  { names: /^(?:porcentaje )?saturacion (?:de )?transferrin(?:a)?$/, code: "2502-3", trendKey: "iron-saturation" },
+  { names: /^(?:25 oh vitamina d|25 hidroxivitamina d(?: total)?|vitamina d total)$/, code: "62292-8", trendKey: "vitamin-d-25oh-total" },
+  { names: /^(?:hemoglobina glicosilada|hemoglobina glicada|hba1c)$/, code: "4548-4", trendKey: "hba1c" },
+  { names: /^(?:glicemia|glucosa) media estimada$/, code: "27353-2", trendKey: "estimated-average-glucose" },
+  { names: /^tsh$/, code: "3016-3", trendKey: "tsh" },
+  { names: /^t4 libre$/, code: "3024-7", trendKey: "free-t4" },
+  { names: /^ferritina$/, code: "2276-4", trendKey: "ferritin" },
+  { names: /^(?:ferremia|hierro)$/, code: "2498-4", trendKey: "serum-iron" },
+  { names: /^(?:capacidad fijacion (?:de )?(?:fierro|fe|hierro)|capacidad total de fijacion (?:de )?(?:fierro|hierro))$/, code: "2500-7", trendKey: "iron-binding-capacity" },
+  { names: /^transferrina$/, code: "3034-6", trendKey: "transferrin" },
+  { names: /^(?:vitamina b 12|vitamina b12)$/, code: "2132-9", trendKey: "vitamin-b12" },
+] as const;
+
+export function phrSpecimenClass(value = "") {
+  const specimen = term(value);
+  if (/\b(?:urine|orina|urin)\b/.test(specimen)) return "urine";
+  if (/\b(?:ser plas|serum|plasma|suero|bld|blood|sangre)\b/.test(specimen)) return "blood";
+  return "";
+}
+
+export function vettedPhrLabIdentity(input: { analyte: string; unit?: string; specimen?: string }) {
+  if (phrSpecimenClass(input.specimen) === "urine") return null;
+  return vettedLoinc.find((rule) => rule.names.test(term(input.analyte))) ?? null;
+}
 
 export function validatePhrLabDraft(input: PhrLabDraft) {
   const analyte = input.analyte.trim(), value = input.value.trim(), unit = input.unit.trim(), referenceText = input.reference.trim();
@@ -28,7 +55,7 @@ export const phrLabDraftOf = (result: PhrLabResult): PhrLabDraft => ({
   observedAt: result.observedAt.slice(0, 10),
 });
 
-export const phrLabTrendKey = (result: Pick<PhrLabResult, "loincCode" | "analyte">) => result.loincCode.trim() || plain(result.analyte);
+export const phrLabTrendKey = (result: Pick<PhrLabResult, "loincCode" | "analyte">) => vettedPhrLabIdentity(result)?.trendKey ?? (result.loincCode.trim() || plain(result.analyte));
 
 export function phrSpecimenLabel(metadata?: LoincMetadata, sourceSentence = "") {
   const sourceSpecimen = sourceSentence.match(/(?:^|\|)\s*Muestra:\s*([^|]+)$/i)?.[1] ?? "";
@@ -39,14 +66,14 @@ export function phrSpecimenLabel(metadata?: LoincMetadata, sourceSentence = "") 
   return "Muestra no determinada";
 }
 
-export function reusedPhrLoinc(rows: Pick<PhrLabResult, "analyte" | "unit">[], prior: Pick<PhrLabResult, "analyte" | "unit" | "loincCode">[]) {
+export function reusedPhrLoinc(rows: (Pick<PhrLabResult, "analyte" | "unit"> & { specimen?: string })[], prior: (Pick<PhrLabResult, "analyte" | "unit" | "loincCode"> & { specimen?: string })[]) {
   const priorByKey = new Map<string, Set<string>>();
   for (const row of prior) {
-    const key = `${plain(row.analyte)}|${plain(row.unit)}`;
+    const key = `${plain(row.analyte)}|${plain(row.unit)}|${phrSpecimenClass(row.specimen)}`;
     priorByKey.set(key, (priorByKey.get(key) ?? new Set()).add(row.loincCode));
   }
   const reused = new Map<number, string>();
-  rows.forEach((row, index) => { const codes = priorByKey.get(`${plain(row.analyte)}|${plain(row.unit)}`); if (codes?.size === 1) reused.set(index, [...codes][0]); });
+  rows.forEach((row, index) => { const codes = priorByKey.get(`${plain(row.analyte)}|${plain(row.unit)}|${phrSpecimenClass(row.specimen)}`); if (codes?.size === 1) reused.set(index, [...codes][0]); });
   return reused;
 }
 

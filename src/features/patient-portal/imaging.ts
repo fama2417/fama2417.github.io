@@ -16,7 +16,8 @@ const headings: [keyof Omit<PhrImagingText, "fullText">, string[]][] = [
 ];
 
 export function structurePhrImagingText(value: string): PhrImagingText {
-  const result = empty(), lines = value.split(/\r?\n/).map((line) => line.replace(/\s+/g, " ").trim()).filter(Boolean);
+  const separated = value.replace(/\s+(?=(?:indicaci[oó]n cl[ií]nica|indicaci[oó]n|antecedentes cl[ií]nicos|antecedentes|motivo del examen|t[eé]cnica|m[eé]todo|hallazgos|resultado|resultados|descripci[oó]n|impresi[oó]n|conclusi[oó]n|conclusiones|diagn[oó]stico)\s*:)/gi, "\n");
+  const result = empty(), lines = separated.split(/\r?\n/).map((line) => line.replace(/\s+/g, " ").trim()).filter(Boolean);
   result.fullText = lines.join("\n");
   let current: keyof Omit<PhrImagingText, "fullText"> | "" = "";
   for (const line of lines) {
