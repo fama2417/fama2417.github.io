@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { StructuredTextItem } from "unpdf";
-import { dedupeLabCandidates, labAnalyteSimilarity, labPatientMatches, labSourceHighlight, labSourcePage, loincSearchQueries, parseLabLayoutPages, verifiedLabLoinc } from "./lab-ai.ts";
+import { dedupeLabCandidates, labAnalyteSimilarity, labPatientMatches, labSourceHighlight, labSourcePage, loincSearchQueries, parseLabLayoutPages, remapVisualPages, verifiedLabLoinc, type LabCandidate } from "./lab-ai.ts";
 import { ocrImageKey, ocrTargetWidth } from "../../lib/pdf-ocr.ts";
 
 const item = (str: string, x: number, y: number): StructuredTextItem => ({
@@ -96,6 +96,16 @@ test("reconoce páginas fuente tanto del OCR local como de la extracción visual
   assert.equal(labSourcePage("p12-r18"), 12);
   assert.equal(labSourcePage("page-12-r18"), 12);
   assert.equal(labSourcePage("image-r1"), 0);
+});
+
+test("remapVisualPages reasigna el índice del sub-PDF a la página real del documento", () => {
+  const row = (sourceSentence: string) => ({ sourceSentence } as LabCandidate);
+  // El sub-PDF llevaba las páginas 3 y 5 del original como page-1 y page-2.
+  const rows = [row("page-1-r2 | Glucosa | 90"), row("page-2-r7 | Sodio | 140"), row("image-r1 | Potasio | 4.1")];
+  remapVisualPages(rows, [3, 5]);
+  assert.equal(labSourcePage(rows[0].sourceSentence.split(" | ")[0]), 3);
+  assert.equal(labSourcePage(rows[1].sourceSentence.split(" | ")[0]), 5);
+  assert.equal(rows[2].sourceSentence, "image-r1 | Potasio | 4.1"); // sin índice de página: intacto
 });
 
 test("tolera errores OCR al buscar la fila que debe resaltarse", () => {
