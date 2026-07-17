@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
       .select("id, original_filename, storage_path, mime_type, size_bytes, document_date, document_type, clinical_area, source_institution, created_at")
       .eq("owner_user_id", auth.user.id),
     auth.db.from("phr_lab_results")
-      .select("id, document_id, loinc_code, analyte, value_num, value_text, unit, ref_low, ref_high, ref_text, flag, observed_at")
+      .select("id, document_id, loinc_code, analyte, canonical_analyte, value_num, value_text, unit, ref_low, ref_high, ref_text, flag, observed_at")
       .eq("owner_user_id", auth.user.id).eq("review_status", "confirmed"),
     auth.db.from("phr_health_items")
       .select("id, kind, label, status, event_date, source, source_document_id, notes, created_at")
@@ -37,12 +37,13 @@ export async function GET(request: NextRequest) {
     }});
   }
   for (const result of labResults.data ?? []) {
+    const display = result.canonical_analyte || result.analyte;
     const referenceRange = result.ref_low !== null || result.ref_high !== null || result.ref_text
       ? [{ low: result.ref_low !== null ? { value: result.ref_low, unit: result.unit } : undefined, high: result.ref_high !== null ? { value: result.ref_high, unit: result.unit } : undefined, text: result.ref_text || undefined }]
       : undefined;
     entries.push({ fullUrl: `urn:uuid:${result.id}`, resource: {
       resourceType: "Observation", id: result.id, status: "final", subject: { reference: `Patient/${ownerId}` },
-      code: { coding: result.loinc_code ? [{ system: "http://loinc.org", code: result.loinc_code, display: result.analyte }] : undefined, text: result.analyte },
+      code: { coding: result.loinc_code ? [{ system: "http://loinc.org", code: result.loinc_code, display }] : undefined, text: display },
       effectiveDateTime: `${result.observed_at}T00:00:00Z`,
       ...(result.value_num !== null ? { valueQuantity: { value: result.value_num, unit: result.unit } } : { valueString: result.value_text }),
       referenceRange, interpretation: result.flag ? [{ text: result.flag }] : undefined,

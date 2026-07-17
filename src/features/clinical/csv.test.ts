@@ -37,6 +37,6 @@ test("loincDesignationImportRow conserva la variante española como alias", () =
   const header = ["LOINC_NUM", "COMPONENT", "SYSTEM", "LONG_COMMON_NAME", "LinguisticVariantDisplayName"];
   assert.deepEqual(loincDesignationImportRow(header, ["24355-0", "Panel macroscópico de análisis de orina", "Orina", "Panel macroscópico de análisis de orina: Orina", ""], "esMX28LinguisticVariant.csv"), {
     code: "24355-0", languageVariant: "esMX", display: "Panel macroscópico de análisis de orina: Orina",
-    searchText: "Panel macroscopico de analisis de orina: Orina Panel macroscopico de analisis de orina Orina",
+    searchText: "panel macroscopico de analisis de orina: orina panel macroscopico de analisis de orina orina",
   });
 });

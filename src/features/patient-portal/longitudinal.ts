@@ -1,5 +1,5 @@
 import { convertLabValue, labCategory, type LabCategory } from "../reports/lab-observations.ts";
-import { phrLabTrendKey, type PhrLabResult } from "./labs.ts";
+import { phrLabDisplayName, phrLabTrendKey, type PhrLabResult } from "./labs.ts";
 
 export type PhrPeriod = { from: string; to: string };
 
@@ -25,8 +25,8 @@ const explanationByCategory: Record<LabCategory, string> = {
   other: "Describe una medición informada por el laboratorio.",
 };
 
-export const measurementExplanation = (result: Pick<PhrLabResult, "analyte" | "loincMetadata">) =>
-  explanationByCategory[labCategory({ analyte: result.analyte, loincMetadata: result.loincMetadata })];
+export const measurementExplanation = (result: Pick<PhrLabResult, "analyte" | "canonicalAnalyte" | "loincMetadata">) =>
+  explanationByCategory[labCategory({ analyte: phrLabDisplayName(result), loincMetadata: result.loincMetadata })];
 
 const inPeriod = (date: string, period: PhrPeriod) => date >= period.from && date <= period.to;
 
@@ -42,7 +42,7 @@ export function comparePhrPeriods(results: PhrLabResult[], first: PhrPeriod, sec
     const firstValue = a ? convertLabValue(a.valueNum!, a.unit, unit) : null;
     const secondValue = b ? convertLabValue(b.valueNum!, b.unit, unit) : null;
     return {
-      key, analyte: b?.analyte ?? a!.analyte, unit,
+      key, analyte: phrLabDisplayName(b ?? a!), unit,
       first: firstValue, second: secondValue,
       change: firstValue !== null && secondValue !== null ? secondValue - firstValue : null,
     };
@@ -56,7 +56,7 @@ export function phrTrendsCsv(results: PhrLabResult[]) {
   return "\uFEFF" + [
     ["Fecha", "Biomarcador", "Resultado", "Unidad", "Rango informado", "Estado"],
     ...rows.map((result) => [
-      result.observedAt, result.analyte, result.valueNum ?? result.valueText, result.unit,
+      result.observedAt, phrLabDisplayName(result), result.valueNum ?? result.valueText, result.unit,
       result.refText || `${result.refLow ?? ""}${result.refLow !== null || result.refHigh !== null ? " - " : ""}${result.refHigh ?? ""}`,
       reportedRangeLabel(result),
     ]),

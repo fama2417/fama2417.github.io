@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { PhrHealthItem } from "./health-summary";
 import { comparePhrPeriods, type PhrPeriod } from "./longitudinal";
-import type { PhrLabResult } from "./labs";
+import { phrLabDisplayName, type PhrLabResult } from "./labs";
 import { PhrHomeTools } from "./PhrHomeTools";
 import { documentDate, friendlyDocumentName, latestLaboratory, recentPhrActivity, suggestedResultCount } from "./presentation";
 import { fetchPhrFavorites, fetchPhrLabResults, type PortalDocument, type PhrFavorite } from "./repository";
@@ -88,7 +88,7 @@ export function PhrTimeline({ ownerUserId, documents }: { ownerUserId: string; d
   for (const result of confirmed) samples.set(result.observedAt, [...(samples.get(result.observedAt) ?? []), result]);
   const events = [
     ...documents.map((document) => ({ id: `doc-${document.id}`, date: documentDate(document).slice(0, 10), kind: "Documento", title: friendlyDocumentName(document.documentType), detail: document.sourceInstitution })),
-    ...[...samples].map(([date, rows]) => ({ id: `sample-${date}`, date, kind: "Muestra", title: `${rows.length} resultado(s) confirmado(s)`, detail: rows.slice(0, 4).map((row) => row.analyte).join(" · ") })),
+    ...[...samples].map(([date, rows]) => ({ id: `sample-${date}`, date, kind: "Muestra", title: `${rows.length} resultado(s) confirmado(s)`, detail: rows.slice(0, 4).map(phrLabDisplayName).join(" · ") })),
   ].sort((a, b) => b.date.localeCompare(a.date));
   return <section className="card portal-card"><p className="eyebrow">Documentos y muestras</p><h2>Línea de tiempo</h2>{events.length ? <ol className="phr-timeline">{events.map((event) => <li key={event.id}><time>{shownDate(event.date)}</time><div><span className="status-badge">{event.kind}</span><strong>{event.title}</strong><p>{event.detail}</p></div></li>)}</ol> : <p className="empty-state">La línea de tiempo aparecerá al cargar documentos o confirmar resultados.</p>}</section>;
 }

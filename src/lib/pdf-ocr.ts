@@ -34,15 +34,16 @@ function layoutFromTsv(tsv: string, sourceWidth: number, sourceHeight: number, s
   }).filter((item) => item.x <= sourceWidth);
 }
 
-/** OCR local para PDF escaneados: no transmite el archivo ni su texto a servicios externos. */
-export async function extractScannedPdf(bytes: Uint8Array) {
+async function extractScannedPages(bytes: Uint8Array, requestedPages?: number[]) {
   const pdf = await getDocumentProxy(bytes.slice());
   if (pdf.numPages > MAX_PAGES) throw new Error(`El PDF escaneado supera el límite de ${MAX_PAGES} páginas.`);
+  const pageNumbers = requestedPages ?? Array.from({ length: pdf.numPages }, (_, index) => index + 1);
+  if (pageNumbers.some((page) => !Number.isInteger(page) || page < 1 || page > pdf.numPages)) throw new Error("Página PDF inválida.");
   const worker = await createWorker(spanish.code, 1, { langPath: spanish.langPath, gzip: spanish.gzip, cacheMethod: "readOnly" });
   const items: StructuredTextItem[][] = [], text: string[] = [], cache = new Map<string, { items: StructuredTextItem[]; text: string }>();
   try {
     await worker.setParameters({ preserve_interword_spaces: "1", user_defined_dpi: "210" });
-    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    for (const pageNumber of pageNumbers) {
       const images = await extractImages(pdf, pageNumber), source = images.sort((a, b) => b.width * b.height - a.width * a.height)[0];
       if (!source) { items.push([]); text.push(""); continue; }
       const key = ocrImageKey(source.data, source.width, source.height, source.channels), cached = cache.get(key);
@@ -56,3 +57,7 @@ export async function extractScannedPdf(bytes: Uint8Array) {
   } finally { await worker.terminate(); }
   return { items, text, totalPages: pdf.numPages };
 }
+
+/** OCR local para PDF escaneados: no transmite el archivo ni su texto a servicios externos. */
+export const extractScannedPdf = (bytes: Uint8Array) => extractScannedPages(bytes);
+export const extractScannedPdfPage = async (bytes: Uint8Array, pageNumber: number) => (await extractScannedPages(bytes, [pageNumber])).items[0] ?? [];

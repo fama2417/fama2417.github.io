@@ -1261,6 +1261,9 @@ body:has(.report-workstation) .app-shell-main { min-height: 0; overflow: hidden;
 .phr-app .phr-lab-review-card { background: var(--phr-surface); border-radius: 11px; box-shadow: none; }
 .phr-app .phr-lab-review-card.selected { border-color: var(--phr-sage); box-shadow: 0 0 0 2px rgba(49, 117, 104, .12); }
 .phr-app .phr-loinc-badge { background: var(--phr-mint); border-radius: 999px; color: var(--phr-sage-dark); font-weight: 700; padding: 3px 8px; }
+.phr-app .phr-loinc-badge.pending, .phr-app .phr-canonical-suggestion.pending { background: #fff4cf; color: #76520a; }
+.phr-app .phr-canonical-suggestion { border-radius: 8px; font-size: .82rem; margin: 0 0 9px; padding: 8px 10px; }
+.phr-app .phr-canonical-suggestion.matched { background: var(--phr-mint); color: var(--phr-sage-dark); }
 .phr-app .phr-lab-document-status { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
 .phr-app .phr-loinc-dialog { max-width: 860px; }
 .phr-app .phr-loinc-review-list { display: grid; gap: 8px; max-height: 55vh; overflow: auto; }

@@ -1,4 +1,4 @@
-import type { PhrLabResult } from "./labs.ts";
+import { phrLabDisplayName, type PhrLabResult } from "./labs.ts";
 
 export const healthItemKinds = ["allergy", "condition", "medication", "immunization", "procedure"] as const;
 export type PhrHealthItemKind = (typeof healthItemKinds)[number];
@@ -71,7 +71,7 @@ export function searchPhrRecords(query: string, documents: SearchDocument[], lab
   const matches = (text: string) => { const normalized = plain(text); return tokens.every((token) => normalized.includes(token)); };
   const results: PhrSearchResult[] = [];
   for (const item of items) if (matches(`${healthItemKindLabels[item.kind]} ${item.label} ${item.notes} ${item.status}`)) results.push({ id: item.id, kind: "health", title: item.label, detail: `${healthItemKindLabels[item.kind]} · ${healthItemStatusLabels[item.status]}` });
-  for (const lab of labs) if (matches(`${lab.analyte} ${lab.valueNum ?? lab.valueText} ${lab.unit} ${lab.loincCode} ${lab.observedAt}`)) results.push({ id: lab.id, kind: "lab", title: lab.analyte, detail: `${lab.valueNum ?? lab.valueText} ${lab.unit} · ${lab.observedAt}` });
+  for (const lab of labs) if (matches(`${phrLabDisplayName(lab)} ${lab.analyte} ${lab.valueNum ?? lab.valueText} ${lab.unit} ${lab.loincCode} ${lab.observedAt}`)) results.push({ id: lab.id, kind: "lab", title: phrLabDisplayName(lab), detail: `${lab.valueNum ?? lab.valueText} ${lab.unit} · ${lab.observedAt}` });
   for (const document of documents) if (matches(`${document.filename} ${document.documentType} ${document.sourceInstitution} ${document.documentDate ?? document.createdAt} ${document.extractedText?.fullText ?? ""}`)) results.push({ id: document.id, kind: "document", title: document.filename, detail: `${document.sourceInstitution} · ${(document.documentDate ?? document.createdAt).slice(0, 10)}` });
   return results.slice(0, limit);
 }

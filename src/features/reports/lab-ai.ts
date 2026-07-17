@@ -51,6 +51,7 @@ export type LabCandidate = {
 };
 
 export type LabSourceBox = { x: number; y: number; width: number; height: number };
+export const labSourcePage = (sourceId: string) => Number(sourceId.match(/^(?:p|page-)(\d+)-r\d+$/)?.[1] ?? 0);
 
 export type PreparedLabPdf = {
   patientName: string;
@@ -73,6 +74,22 @@ type LayoutRow = { id: string; y: number; items: StructuredTextItem[] };
 type Header = { y: number; exam: number; result: number; unit: number; reference: number; skip: number; method: number };
 
 const plain = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+export function labAnalyteSimilarity(left: string, right: string) {
+  const grams = (value: string) => {
+    const normalized = plain(value).replace(/[^a-z0-9]+/g, "");
+    if (normalized.length < 2) return normalized ? [normalized] : [];
+    return Array.from({ length: normalized.length - 1 }, (_, index) => normalized.slice(index, index + 2));
+  };
+  const a = grams(left), b = grams(right);
+  if (!a.length || !b.length) return 0;
+  const remaining = [...b];
+  let matches = 0;
+  for (const gram of a) {
+    const index = remaining.indexOf(gram);
+    if (index >= 0) { matches += 1; remaining.splice(index, 1); }
+  }
+  return 2 * matches / (a.length + b.length);
+}
 const rowText = (row: LayoutRow) => row.items.map((item) => item.str.trim()).filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
 const uniqueItems = (items: StructuredTextItem[]) => {
   const seen = new Set<string>();
@@ -485,14 +502,14 @@ export async function structureLabDocument(input: { text?: string; pdfBytes?: Ui
   };
 }
 
-export async function suggestLabLoinc(rows: Pick<LabCandidate, "analyte" | "unit" | "valueNum" | "valueText" | "specimen">[], englishTerms: string[] = [], candidates: { code: string; display: string }[][] = []) {
+export async function suggestLabLoinc(rows: Pick<LabCandidate, "analyte" | "unit" | "valueNum" | "valueText" | "specimen">[], englishTerms: string[] = [], candidates: { code: string; display: string; score?: number }[][] = []) {
   const config = aiConfig();
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const candidateRule = candidates.length ? "Solo puedes devolver un código incluido en candidates para esa fila." : "No inventes códigos.";
   const response = await client.responses.parse({
     model: config.model,
     input: [
-      { role: "system", content: `Homologa analitos de laboratorio a LOINC. El nombre original puede estar en español o abreviado; usa englishSearchTerm como equivalencia inglesa, sin reemplazar el significado del original. ${candidateRule} Elige uno únicamente cuando analito, unidad y muestra permitan una equivalencia suficientemente específica; si muestra, método o significado son ambiguos, usa loincCode vacío y confidence baja. sourceId debe copiarse exactamente.` },
+      { role: "system", content: `Homologa analitos de laboratorio a LOINC. El nombre original puede estar en español, abreviado o contener errores OCR; usa englishSearchTerm sólo como ayuda. ${candidateRule} Evalúa componente, propiedad compatible con la unidad, tiempo, muestra, escala y método. Si el documento no declara un método, prefiere un candidato general sin método antes que inferir uno especializado. El score sólo ordena candidatos y no prueba equivalencia clínica. Si muestra o significado son ambiguos, usa loincCode vacío y confidence baja. sourceId debe copiarse exactamente.` },
       { role: "user", content: JSON.stringify(rows.map((row, index) => ({ sourceId: String(index), analyte: row.analyte, englishSearchTerm: englishTerms[index] ?? "", specimen: row.specimen ?? "", unit: row.unit, valueType: row.valueNum === null ? "text" : "number", candidates: candidates[index] ?? [] }))) },
     ],
     text: { format: zodTextFormat(LabLoincExtractionSchema, "lab_loinc") },

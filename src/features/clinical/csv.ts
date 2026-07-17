@@ -62,7 +62,7 @@ export function loincDesignationImportRow(header: string[], row: string[], filen
   const languageVariant = filename.match(/(es[A-Z]{2})\d*LinguisticVariant/i)?.[1] ?? "es";
   const fields = ["LINGUISTICVARIANTDISPLAYNAME", "LONG_COMMON_NAME", "SHORTNAME", "COMPONENT", "SYSTEM", "TIME_ASPCT", "PROPERTY", "SCALE_TYP", "METHOD_TYP", "RELATEDNAMES2"]
     .map(value).filter(Boolean);
-  const searchText = [...new Set(fields)].join(" ").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const searchText = [...new Set(fields)].join(" ").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
   return { code: value("LOINC_NUM"), languageVariant, display: fields[0] ?? "", searchText };
 }
 
