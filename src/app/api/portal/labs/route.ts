@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { PDFDocument, rgb } from "pdf-lib";
 import { extractTextItems } from "unpdf";
 import { aiConfig } from "@/features/reports/ai-budget.ts";
-import { dedupeLabCandidates, groupLabLayoutPages, labSourceHighlight, loincSearchQueries, normalizeIdentity, prepareLabPdf, structureLabDocument, suggestLabLoinc, suggestLabLoincSearchTerms, type LabCandidate } from "@/features/reports/lab-ai.ts";
+import { dedupeLabCandidates, groupLabLayoutPages, labSourceHighlight, loincSearchQueries, normalizeIdentity, prepareLabPdf, shouldUseAiForScannedPdf, structureLabDocument, suggestLabLoinc, suggestLabLoincSearchTerms, type LabCandidate } from "@/features/reports/lab-ai.ts";
 import { phrSpecimenClass, reusedPhrLoinc, validatePhrLabDraft, vettedPhrLabIdentity } from "@/features/patient-portal/labs.ts";
 import { isAnalyzableLabDocument, labImageMime } from "@/features/patient-portal/documents.ts";
 import { recordPhrEvent } from "@/lib/phr-events";
@@ -167,35 +167,53 @@ export async function POST(request: NextRequest) {
   let prepared: Awaited<ReturnType<typeof prepareLabPdf>>;
   if (imageMime) prepared = { patientName: "", patientIdentifier: "", observedAt: "", observations: [], aiText: "", scanned: true, needsAi: true, pageCount: 1 };
   else {
-    try { prepared = await prepareLabPdf(bytes); }
+    try { prepared = await prepareLabPdf(bytes, true); }
     catch { await recordPhrEvent(auth.db, auth.user.id, "lab_analysis_failed", body.documentId, { method: "local", stage: "parse", duration_ms: Date.now() - startedAt }); return NextResponse.json({ error: "No fue posible interpretar el PDF." }, { status: 422 }); }
   }
 
-  let rows: LabCandidate[] = prepared.observations;
   let aiResult: Awaited<ReturnType<typeof structureLabDocument>> | null = null;
-  if (imageMime) {
+  let usedVisualAi = false;
+  let localFallbackReason = "";
+  const scannedPdfWithManyPages = !imageMime && shouldUseAiForScannedPdf(prepared.scanned, prepared.pageCount);
+  const needsVisualRecognition = !!imageMime || scannedPdfWithManyPages;
+  if (needsVisualRecognition) {
     const config = aiConfig();
-    if (!config.enabled || !process.env.OPENAI_API_KEY) return NextResponse.json({ error: "Este archivo necesita reconocimiento visual y la extracción automática no está habilitada." }, { status: 503 });
-    const start = new Date(); start.setUTCHours(0, 0, 0, 0);
-    const usage = await auth.db.from("phr_lab_imports").select("id", { count: "exact", head: true })
-      .eq("owner_user_id", auth.user.id).in("extraction_method", ["ai_text", "ai_visual"]).gte("created_at", start.toISOString());
-    const limit = Math.max(1, Number(process.env.PHR_AI_MAX_PER_DAY ?? 5));
-    if ((usage.count ?? 0) >= limit) return NextResponse.json({ error: "Alcanzaste el límite diario de análisis automáticos." }, { status: 429 });
-    try {
-      aiResult = await structureLabDocument({
-        procedureName: "Laboratorio personal",
-        imageBytes: bytes, imageMime,
-      });
-      rows = aiResult.observations;
-    } catch { await recordPhrEvent(auth.db, auth.user.id, "lab_analysis_failed", body.documentId, { method: "ai_visual", stage: "recognition", duration_ms: Date.now() - startedAt }); return NextResponse.json({ error: "No fue posible extraer resultados de este archivo." }, { status: 502 }); }
+    let canUseAi = config.enabled && !!process.env.OPENAI_API_KEY;
+    let aiLimitReached = false;
+    if (canUseAi) {
+      const start = new Date(); start.setUTCHours(0, 0, 0, 0);
+      const usage = await auth.db.from("phr_lab_imports").select("id", { count: "exact", head: true })
+        .eq("owner_user_id", auth.user.id).in("extraction_method", ["ai_text", "ai_visual"]).gte("created_at", start.toISOString());
+      const limit = Math.max(1, Number(process.env.PHR_AI_MAX_PER_DAY ?? 5));
+      canUseAi = (usage.count ?? 0) < limit;
+      aiLimitReached = !canUseAi;
+      if (!canUseAi) localFallbackReason = "Se alcanzó el límite diario de reconocimiento visual; se usó OCR local como respaldo.";
+    } else localFallbackReason = "El reconocimiento visual no estaba disponible; se usó OCR local como respaldo.";
+    if (canUseAi) {
+      try {
+        aiResult = await structureLabDocument({ procedureName: "Laboratorio personal", ...(imageMime ? { imageBytes: bytes, imageMime } : { pdfBytes: bytes }) });
+        usedVisualAi = true;
+      } catch {
+        await recordPhrEvent(auth.db, auth.user.id, "lab_analysis_failed", body.documentId, { method: "ai_visual", stage: "recognition", duration_ms: Date.now() - startedAt });
+        if (imageMime) return NextResponse.json({ error: "No fue posible extraer resultados de este archivo." }, { status: 502 });
+        localFallbackReason = "El reconocimiento visual no pudo completar el análisis; se usó OCR local como respaldo.";
+      }
+    } else if (imageMime) return NextResponse.json({ error: localFallbackReason || "Este archivo necesita reconocimiento visual y la extracción automática no está habilitada." }, { status: aiLimitReached ? 429 : 503 });
   }
+  if (prepared.scanned && !usedVisualAi) {
+    try { prepared = await prepareLabPdf(bytes); }
+    catch { return NextResponse.json({ error: "No fue posible leer las páginas escaneadas del PDF." }, { status: 422 }); }
+  }
+  const rows: LabCandidate[] = aiResult?.observations ?? prepared.observations;
 
   const extractedName = prepared.patientName || aiResult?.extraction.patientName || "";
   const extractedIdentifier = prepared.patientIdentifier || aiResult?.extraction.patientIdentifier || "";
   const profileIdentifier = auth.profile.identifier.trim();
   const warnings = [...(aiResult?.extraction.warnings ?? [])];
-  if (prepared.scanned) warnings.push("El PDF era un escaneo sin texto y se leyó con OCR local; revisa cada cifra antes de confirmarla.");
-  if (!imageMime && prepared.needsAi) warnings.push("El PDF se leyó sólo localmente y puede contener filas que requieren corrección manual; no se envió contenido a IA.");
+  if (usedVisualAi && scannedPdfWithManyPages) warnings.push("El PDF contenía varias páginas escaneadas y se procesó con reconocimiento visual; revisa cada cifra antes de confirmarla.");
+  else if (prepared.scanned && !imageMime) warnings.push("El PDF era un escaneo sin texto y se leyó con OCR local; revisa cada cifra antes de confirmarla.");
+  if (localFallbackReason && !imageMime) warnings.push(localFallbackReason);
+  if (!usedVisualAi && !imageMime && prepared.needsAi) warnings.push("El PDF se leyó sólo localmente y puede contener filas que requieren corrección manual; no se envió contenido a IA.");
   if (extractedIdentifier && profileIdentifier) {
     if (normalizeIdentity(extractedIdentifier) !== normalizeIdentity(profileIdentifier)) return NextResponse.json({ error: "La identidad del archivo no coincide con tu perfil. No se guardó ningún resultado." }, { status: 422 });
   } else if (extractedName) {
@@ -208,12 +226,12 @@ export async function POST(request: NextRequest) {
     candidates = candidates.filter((row) => !existingSourceIds.has(row.sourceSentence.split(/\s+\|\s+/)[0]));
     if (!candidates.length) return NextResponse.json({ duplicate: true, created: 0, loincMapped: existingRows.filter((row) => row.loinc_code).length, warnings: ["La relectura no encontró resultados nuevos."] });
   }
-  if (!candidates.length) { await recordPhrEvent(auth.db, auth.user.id, "lab_analysis_failed", body.documentId, { method: imageMime ? "ai_visual" : "local", stage: "no_results", duration_ms: Date.now() - startedAt }); return NextResponse.json({ error: "No se detectaron resultados para revisar." }, { status: 422 }); }
-  const matched = await matchPhrLoinc(auth.db, auth.user.id, candidates, !!imageMime, document.data.source_institution);
+  if (!candidates.length) { await recordPhrEvent(auth.db, auth.user.id, "lab_analysis_failed", body.documentId, { method: usedVisualAi ? "ai_visual" : "local", stage: "no_results", duration_ms: Date.now() - startedAt }); return NextResponse.json({ error: "No se detectaron resultados para revisar." }, { status: 422 }); }
+  const matched = await matchPhrLoinc(auth.db, auth.user.id, candidates, usedVisualAi, document.data.source_institution);
   warnings.push(...matched.warnings);
   const fallbackDate = document.data.document_date ?? document.data.created_at.slice(0, 10);
   if (candidates.some((row) => !row.observedAt)) warnings.push("No se encontró fecha de muestra en todas las filas; se usó la fecha del documento.");
-  const extractionMethod = imageMime ? "ai_visual" : "local";
+  const extractionMethod = usedVisualAi ? "ai_visual" : "local";
   const imported = previousImportId
     ? await auth.db.from("phr_lab_imports").update({ extraction_method: extractionMethod, patient_name: extractedName, patient_identifier: extractedIdentifier, warnings }).eq("id", previousImportId).eq("owner_user_id", auth.user.id).select("id").single()
     : await auth.db.from("phr_lab_imports").insert({ owner_user_id: auth.user.id, document_id: body.documentId, extraction_method: extractionMethod, patient_name: extractedName, patient_identifier: extractedIdentifier, warnings }).select("id").single();

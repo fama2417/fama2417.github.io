@@ -396,9 +396,12 @@ export function parseLabLayoutPages(pages: StructuredTextItem[][]): Omit<Prepare
   };
 }
 
-export async function prepareLabPdf(bytes: Uint8Array): Promise<PreparedLabPdf> {
+export const shouldUseAiForScannedPdf = (scanned: boolean, pageCount: number) => scanned && pageCount >= 4;
+
+export async function prepareLabPdf(bytes: Uint8Array, deferScannedOcr = false): Promise<PreparedLabPdf> {
   const extracted = await extractTextItems(bytes.slice());
   const scanned = extracted.items.every((page) => page.every((item) => !item.str.trim()));
+  if (scanned && deferScannedOcr) return { patientName: "", patientIdentifier: "", observedAt: "", observations: [], aiText: "", scanned, needsAi: true, pageCount: extracted.totalPages };
   const pages = scanned ? await extractScannedPdf(bytes) : extracted;
   const parsed = parseLabLayoutPages(pages.items);
   return { ...parsed, scanned, needsAi: parsed.needsAi, pageCount: pages.totalPages };
@@ -458,8 +461,8 @@ export async function structureLabDocument(input: { text?: string; pdfBytes?: Ui
       ]
     : input.pdfBytes
     ? [
-        { type: "input_file", filename: "resultados.pdf", file_data: `data:application/pdf;base64,${Buffer.from(input.pdfBytes).toString("base64")}` },
-        { type: "input_text", text: instruction },
+        { type: "input_file", filename: "resultados.pdf", file_data: `data:application/pdf;base64,${Buffer.from(input.pdfBytes).toString("base64")}`, detail: "high" },
+        { type: "input_text", text: `${instruction}\nEl PDF contiene páginas escaneadas. Asigna sourceId correlativos page-N-rM e identifica la muestra de cada sección.` },
       ]
     : `${instruction}\n\nFilas compactas (sourceId, analito, resultado, unidad, referencia, método):\n${input.text ?? ""}`;
   const response = await client.responses.parse({

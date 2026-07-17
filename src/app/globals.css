@@ -1004,6 +1004,8 @@ body:has(.report-workstation) .app-shell-main { min-height: 0; overflow: hidden;
 .phr-imaging-plain { background: linear-gradient(135deg, #e7f5f1, #f7f0e8); border: 1px solid #cce7df; border-radius: 14px; padding: 20px; }
 .phr-imaging-plain span, .phr-imaging-card-plain span { color: var(--primary); font-size: .76rem; font-weight: 800; text-transform: uppercase; }
 .phr-imaging-plain p { font-size: 1.05rem; line-height: 1.75; margin: 8px 0 0; white-space: pre-line; }
+.phr-imaging-plain ul { display: grid; gap: 10px; line-height: 1.65; margin: 12px 0 0; padding-left: 22px; }
+.phr-imaging-plain li::marker { color: var(--primary); }
 .phr-imaging-impression { background: #eaf6f2; border: 1px solid #cce7df; border-left: 5px solid var(--primary); border-radius: 12px; padding: 18px; }
 .phr-imaging-impression span { color: var(--primary); font-size: .76rem; font-weight: 800; text-transform: uppercase; }
 .phr-imaging-impression p { font-size: 1.05rem; line-height: 1.65; margin: 7px 0 0; white-space: pre-wrap; }
@@ -1024,7 +1026,7 @@ body:has(.report-workstation) .app-shell-main { min-height: 0; overflow: hidden;
 .phr-imaging-card-plain { background: linear-gradient(135deg, #e7f5f1, #f7f0e8); border-radius: 10px; padding: 16px; }
 .phr-imaging-card-plain p { line-height: 1.65; margin: 6px 0 0; white-space: pre-line; }
 .phr-imaging-card-impression span { color: var(--primary); font-size: .72rem; font-weight: 800; text-transform: uppercase; }
-.phr-imaging-card-impression p { line-height: 1.55; margin: 5px 0 0; }
+.phr-imaging-card-impression p { line-height: 1.55; margin: 5px 0 0; white-space: pre-wrap; }
 .phr-lab-review-card { background: var(--surface-muted); border: 1px solid var(--border); border-radius: 10px; display: grid; gap: 10px; padding: 14px; }
 .phr-lab-review-grid { display: grid; gap: 10px; grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .phr-lab-review-grid label { color: var(--muted); display: grid; font-size: .78rem; gap: 5px; }
