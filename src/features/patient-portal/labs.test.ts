@@ -102,3 +102,10 @@ test("separa nombre original, nombre canónico y confianza de homologación", ()
   assert.deepEqual(phrLoincDecision(.96, .72), { confidence: .9, status: "matched" });
   assert.deepEqual(phrLoincDecision(.72, .5), { confidence: .67, status: "review" });
 });
+
+test("phrLabDisplayName muestra el componente LOINC, no los cinco ejes técnicos", () => {
+  // El nombre completo LOINC trae componente + ejes tras el primer ":"; se muestra solo el componente.
+  assert.equal(phrLabDisplayName({ analyte: "C.H.C.M.", loincCode: "788-4", canonicalAnalyte: "Concentración media de hemoglobina corpuscular en eritrocitos: Eritrocitos. Punto temporal. Concentración de masa. Cuantitativo" }), "Concentración media de hemoglobina corpuscular en eritrocitos");
+  // Sin homologar cae al nombre del informe.
+  assert.equal(phrLabDisplayName({ analyte: "TSH", canonicalAnalyte: "" }), "TSH");
+});

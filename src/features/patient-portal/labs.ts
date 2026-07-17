@@ -200,7 +200,12 @@ export const phrLabTrendKey = (result: Pick<PhrLabResult, "loincCode" | "analyte
   const specimen = result.sourceSentence?.match(/(?:^|\|)\s*Muestra:\s*([^|]+?)(?:\||$)/i)?.[1]?.trim();
   return vettedPhrLabIdentity({ analyte: result.analyte, unit: result.unit, specimen })?.trendKey ?? (result.loincCode.trim() || plain(result.analyte));
 };
-export const phrLabDisplayName = (result: Pick<PhrLabResult, "analyte" | "canonicalAnalyte">) => result.canonicalAnalyte?.trim() || result.analyte;
+// ponytail: overrides curados por código LOINC; agrega solo los que el componente deja poco claro (p.ej. índices del hemograma).
+const LOINC_FRIENDLY_NAME: Record<string, string> = {};
+// El nombre LOINC completo trae 5 ejes ("Componente: Muestra. Tiempo. Propiedad. Escala. Método"); para el paciente basta el componente.
+const loincComponent = (canonical: string) => canonical.split(":")[0].replace(/\s+/g, " ").trim();
+export const phrLabDisplayName = (result: Pick<PhrLabResult, "analyte" | "canonicalAnalyte"> & Partial<Pick<PhrLabResult, "loincCode">>) =>
+  (result.loincCode ? LOINC_FRIENDLY_NAME[result.loincCode] : "") || (result.canonicalAnalyte?.trim() && loincComponent(result.canonicalAnalyte)) || result.analyte;
 export const phrLoincDecision = (semanticConfidence: number, lexicalSimilarity: number) => {
   const confidence = Math.round((semanticConfidence * .75 + lexicalSimilarity * .25) * 100) / 100;
   return { confidence, status: confidence >= .88 ? "matched" : confidence >= .55 ? "review" : "unmapped" } as const;
