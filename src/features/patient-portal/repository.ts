@@ -235,11 +235,12 @@ type PhrLabRow = {
   id: string; document_id: string; loinc_code: string; analyte: string; value_num: number | null; value_text: string;
   unit: string; ref_low: number | null; ref_high: number | null; ref_text: string; flag: PhrLabResult["flag"];
   observed_at: string; source: PhrLabResult["source"]; source_sentence: string; review_status: PhrLabResult["reviewStatus"];
+  canonical_analyte: string; suggested_loinc_code: string; coding_confidence: number | null;
 };
 
 export async function fetchPhrLabResults(ownerUserId?: string): Promise<PhrLabResult[]> {
   let query = supabase.from("phr_lab_results")
-    .select("id, document_id, loinc_code, analyte, value_num, value_text, unit, ref_low, ref_high, ref_text, flag, observed_at, source, source_sentence, review_status")
+    .select("id, document_id, loinc_code, analyte, canonical_analyte, suggested_loinc_code, coding_confidence, value_num, value_text, unit, ref_low, ref_high, ref_text, flag, observed_at, source, source_sentence, review_status")
     .order("observed_at", { ascending: false }).order("analyte");
   if (ownerUserId) query = query.eq("owner_user_id", ownerUserId);
   const { data, error } = await query;
@@ -259,6 +260,7 @@ export async function fetchPhrLabResults(ownerUserId?: string): Promise<PhrLabRe
     valueNum: row.value_num, valueText: row.value_text, unit: row.unit, refLow: row.ref_low,
     refHigh: row.ref_high, refText: row.ref_text, flag: row.flag, observedAt: row.observed_at,
     source: row.source, sourceSentence: row.source_sentence, reviewStatus: row.review_status, loincMetadata: metadataByCode.get(row.loinc_code),
+    canonicalAnalyte: row.canonical_analyte, suggestedLoincCode: row.suggested_loinc_code, codingConfidence: row.coding_confidence,
   }));
 }
 
@@ -278,7 +280,7 @@ export async function analyzePhrLabDocument(documentId: string, rematch = false,
   return await response.json() as { created: number; loincMapped: number; duplicate: boolean; warnings: string[] };
 }
 
-export type PhrLoincSuggestion = { resultId: string; analyte: string; currentCode: string; recommendedCode: string; options: { code: string; display: string }[] };
+export type PhrLoincSuggestion = { resultId: string; analyte: string; currentCode: string; recommendedCode: string; confidence: number | null; options: { code: string; display: string }[] };
 
 export async function fetchPhrLoincSuggestions(documentId: string) {
   const response = await authenticatedFetch("/api/portal/labs", {

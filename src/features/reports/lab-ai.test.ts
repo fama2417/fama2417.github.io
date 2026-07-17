@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { StructuredTextItem } from "unpdf";
-import { labPatientMatches, labSourceHighlight, loincSearchQueries, parseLabLayoutPages, shouldUseAiForScannedPdf, verifiedLabLoinc } from "./lab-ai.ts";
+import { labAnalyteSimilarity, labPatientMatches, labSourceHighlight, labSourcePage, loincSearchQueries, parseLabLayoutPages, shouldUseAiForScannedPdf, verifiedLabLoinc } from "./lab-ai.ts";
 import { ocrImageKey, ocrTargetWidth } from "../../lib/pdf-ocr.ts";
 
 const item = (str: string, x: number, y: number): StructuredTextItem => ({
@@ -94,6 +94,17 @@ test("sólo deriva a reconocimiento visual los PDF escaneados extensos", () => {
   assert.equal(shouldUseAiForScannedPdf(false, 13), false);
   assert.equal(shouldUseAiForScannedPdf(true, 3), false);
   assert.equal(shouldUseAiForScannedPdf(true, 4), true);
+});
+
+test("reconoce páginas fuente tanto del OCR local como de la extracción visual", () => {
+  assert.equal(labSourcePage("p12-r18"), 12);
+  assert.equal(labSourcePage("page-12-r18"), 12);
+  assert.equal(labSourcePage("image-r1"), 0);
+});
+
+test("tolera errores OCR al buscar la fila que debe resaltarse", () => {
+  assert.ok(labAnalyteSimilarity("ERITROCPTO", "ERITROCITOS") > .6);
+  assert.ok(labAnalyteSimilarity("ERITROCPTO", "ERITROCITOS") > labAnalyteSimilarity("ERITROCPTO", "HEMOGLOBINA"));
 });
 
 test("parseLabLayoutPages interpreta columnas OCR y omite el resultado histórico", () => {

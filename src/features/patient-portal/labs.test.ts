@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildPhrLabTrend, phrLabDraftOf, phrLabTrendKey, phrSpecimenLabel, reusedPhrLoinc, validatePhrLabDraft, vettedPhrLabIdentity, type PhrLabResult } from "./labs.ts";
+import { buildPhrLabTrend, phrLabDisplayName, phrLabDraftOf, phrLabTrendKey, phrLoincDecision, phrSpecimenLabel, reusedPhrLoinc, validatePhrLabDraft, vettedPhrLabIdentity, type PhrLabResult } from "./labs.ts";
 
 const row = (id: string, date: string, value: number, unit = "mg/dL", status: PhrLabResult["reviewStatus"] = "confirmed"): PhrLabResult => ({
   id, documentId: id, analyte: "Glucosa", loincCode: "", valueNum: value, valueText: "", unit,
@@ -48,7 +48,15 @@ test("homologa alias frecuentes sin mezclar mediciones relacionadas", () => {
   assert.equal(vettedPhrLabIdentity({ analyte: "SATURACION TRANSFERRINA" })?.trendKey, "iron-saturation");
   assert.equal(vettedPhrLabIdentity({ analyte: "Glicemia Media Estimada" })?.code, "27353-2");
   assert.equal(vettedPhrLabIdentity({ analyte: "Glucosa" }), null);
+  assert.equal(vettedPhrLabIdentity({ analyte: "GLICEMIA", unit: "mg/dL", specimen: "Suero" })?.code, "2345-7");
+  assert.equal(vettedPhrLabIdentity({ analyte: "GLICEMIA", unit: "mg/dL", specimen: "Orina" }), null);
   assert.equal(vettedPhrLabIdentity({ analyte: "Vitamina D Total", specimen: "Orina" }), null);
   assert.equal(phrLabTrendKey({ analyte: "TSH", loincCode: "24348-5" }), "tsh");
   assert.equal(phrLabTrendKey({ analyte: "T4 LIBRE", loincCode: "24348-5" }), "free-t4");
+});
+
+test("separa nombre original, nombre canónico y confianza de homologación", () => {
+  assert.equal(phrLabDisplayName({ analyte: "ERITROCPTO", canonicalAnalyte: "Eritrocitos en sangre" }), "Eritrocitos en sangre");
+  assert.deepEqual(phrLoincDecision(.96, .72), { confidence: .9, status: "matched" });
+  assert.deepEqual(phrLoincDecision(.72, .5), { confidence: .67, status: "review" });
 });

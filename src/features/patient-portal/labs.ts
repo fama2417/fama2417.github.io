@@ -4,6 +4,7 @@ export type PhrLabResult = {
   id: string; documentId: string; analyte: string; loincCode: string; valueNum: number | null; valueText: string;
   unit: string; refLow: number | null; refHigh: number | null; refText: string; flag: LabFlag; observedAt: string;
   source: "ocr" | "ai"; sourceSentence?: string; reviewStatus: "suggested" | "confirmed"; loincMetadata?: LoincMetadata;
+  canonicalAnalyte?: string; suggestedLoincCode?: string; codingConfidence?: number | null;
 };
 
 export type PhrLabDraft = { analyte: string; value: string; unit: string; reference: string; observedAt: string };
@@ -34,7 +35,9 @@ export function phrSpecimenClass(value = "") {
 }
 
 export function vettedPhrLabIdentity(input: { analyte: string; unit?: string; specimen?: string }) {
-  if (phrSpecimenClass(input.specimen) === "urine") return null;
+  const specimen = phrSpecimenClass(input.specimen);
+  if (specimen === "urine") return null;
+  if (specimen === "blood" && /^(?:glicemia|glucosa)$/.test(term(input.analyte)) && /^m?g(?:r)?\/?dl$/.test(term(input.unit ?? "").replace(/\s/g, ""))) return { code: "2345-7", trendKey: "blood-glucose" } as const;
   return vettedLoinc.find((rule) => rule.names.test(term(input.analyte))) ?? null;
 }
 
@@ -56,6 +59,11 @@ export const phrLabDraftOf = (result: PhrLabResult): PhrLabDraft => ({
 });
 
 export const phrLabTrendKey = (result: Pick<PhrLabResult, "loincCode" | "analyte">) => vettedPhrLabIdentity(result)?.trendKey ?? (result.loincCode.trim() || plain(result.analyte));
+export const phrLabDisplayName = (result: Pick<PhrLabResult, "analyte" | "canonicalAnalyte">) => result.canonicalAnalyte?.trim() || result.analyte;
+export const phrLoincDecision = (semanticConfidence: number, lexicalSimilarity: number) => {
+  const confidence = Math.round((semanticConfidence * .75 + lexicalSimilarity * .25) * 100) / 100;
+  return { confidence, status: confidence >= .88 ? "matched" : confidence >= .55 ? "review" : "unmapped" } as const;
+};
 
 export function phrSpecimenLabel(metadata?: LoincMetadata, sourceSentence = "") {
   const sourceSpecimen = sourceSentence.match(/(?:^|\|)\s*Muestra:\s*([^|]+)$/i)?.[1] ?? "";
@@ -89,5 +97,5 @@ export function buildPhrLabTrend(results: PhrLabResult[]) {
     if (value !== null) byDate.set(result.observedAt, { id: result.id, date: result.observedAt, value });
   }
   const points = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date)).slice(-12);
-  return points.length >= 2 ? { analyte: latest.analyte, unit: latest.unit, refLow: latest.refLow, refHigh: latest.refHigh, points } : null;
+  return points.length >= 2 ? { analyte: phrLabDisplayName(latest), unit: latest.unit, refLow: latest.refLow, refHigh: latest.refHigh, points } : null;
 }
