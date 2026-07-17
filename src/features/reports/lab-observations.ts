@@ -104,11 +104,11 @@ export const labCategoryOrder = Object.keys(labCategoryLabels) as LabCategory[];
 const plain = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 
 /** Categoría amigable derivada de metadatos LOINC; el nombre sólo completa catálogos antiguos. */
-export function labCategory(observation: Pick<LabObservation, "analyte" | "loincMetadata">): LabCategory {
+export function labCategory(observation: Pick<LabObservation, "analyte" | "loincMetadata"> & Partial<Pick<LabObservation, "sourceSentence">>): LabCategory {
   const meta = observation.loincMetadata;
   const className = (meta?.className ?? "").toUpperCase();
   const text = plain(`${meta?.component ?? ""} ${observation.analyte}`);
-  const specimen = plain(meta?.specimen ?? "");
+  const specimen = plain(`${meta?.specimen ?? ""} ${observation.sourceSentence?.match(/(?:^|\|)\s*Muestra:\s*([^|]+)/i)?.[1] ?? ""}`);
   if (className === "UA" || className === "PANEL.UA" || /urine|orina/.test(specimen)) return "urine";
   if (/^(PANEL\.)?(HEM\/BC|COAG|BLDBK)/.test(className)) return "hematology";
   if (/^(PANEL\.)?(MICRO|ABXBACT)/.test(className)) return "microbiology";
@@ -121,7 +121,7 @@ export function labCategory(observation: Pick<LabObservation, "analyte" | "loinc
   if (/thyro|tiroid|tsh|triiodothyronine|\bt3\b|\bt4\b|cortisol|testosterone|estradiol|progesterone|prolactin|gonadotropin|luteinizing|follicle.stimulating|parathyroid|hormona/.test(text) || /FERT/.test(className)) return "hormones";
   if (/ferritin|transferrin|ferremia|fijacion (?:de )?(?:fe|fierro|hierro)|saturacion (?:de )?transferrin|\biron\b|hierro|folate|folato|vitamin|vitamina|cobalamin|calcium|calcio|magnesium|magnesio|phosphorus|fosforo/.test(text)) return "nutrition";
   if (/c.reactive|reactive protein|proteina c|immunoglobulin|anticuer|antibody|complement|rheumatoid|reumato|sedimentation|eritrosediment/.test(text) || /SERO|ALLERGY|CELLMARK|HLA/.test(className)) return "immunology";
-  return /CHEM|CHAL/.test(className) || /proteinas? totales|desh.*lactica|\bldh\b|troponina/.test(text) ? "chemistry" : "other";
+  return /CHEM|CHAL/.test(className) || /proteinas? totales|desh.*lactica|\bldh\b|troponina|electrofores|\balfa[- ]?[12]\b|\bbeta[- ]?[12]\b|ratio a\/g|\bgamma\b/.test(text) ? "chemistry" : "other";
 }
 
 const unitKey = (unit: string) => plain(unit).replace(/μ|µ/g, "u").replace(/\s+/g, "").replace(/litro|litre/g, "l");

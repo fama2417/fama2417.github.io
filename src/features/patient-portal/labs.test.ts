@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildPhrLabTrend, phrLabDisplayName, phrLabDraftOf, phrLabTrendKey, phrLoincDecision, phrSpecimenLabel, reusedPhrLoinc, validatePhrLabDraft, vettedPhrLabIdentity, type PhrLabResult } from "./labs.ts";
+import { buildPhrLabTrend, phrLabDisplayName, phrLabDraftOf, phrLabTrendKey, phrLoincDecision, phrSpecimenLabel, reusedPhrLoinc, reviewPhrLabIdentity, validatePhrLabDraft, vettedPhrLabIdentity, type PhrLabResult } from "./labs.ts";
 
 const row = (id: string, date: string, value: number, unit = "mg/dL", status: PhrLabResult["reviewStatus"] = "confirmed"): PhrLabResult => ({
   id, documentId: id, analyte: "Glucosa", loincCode: "", valueNum: value, valueText: "", unit,
@@ -44,15 +44,57 @@ test("presenta la muestra LOINC sin inventarla cuando falta", () => {
 });
 
 test("homologa alias frecuentes sin mezclar mediciones relacionadas", () => {
-  assert.equal(vettedPhrLabIdentity({ analyte: "% Saturación de Transferrin" })?.code, "2502-3");
-  assert.equal(vettedPhrLabIdentity({ analyte: "SATURACION TRANSFERRINA" })?.trendKey, "iron-saturation");
-  assert.equal(vettedPhrLabIdentity({ analyte: "Glicemia Media Estimada" })?.code, "27353-2");
+  assert.equal(vettedPhrLabIdentity({ analyte: "% Saturación de Transferrin", unit: "%" })?.code, "2502-3");
+  assert.equal(vettedPhrLabIdentity({ analyte: "SATURACION TRANSFERRINA", unit: "%" })?.trendKey, "iron-saturation");
+  assert.equal(vettedPhrLabIdentity({ analyte: "Glicemia Media Estimada", unit: "mg/dL" })?.code, "27353-2");
   assert.equal(vettedPhrLabIdentity({ analyte: "Glucosa" }), null);
   assert.equal(vettedPhrLabIdentity({ analyte: "GLICEMIA", unit: "mg/dL", specimen: "Suero" })?.code, "2345-7");
   assert.equal(vettedPhrLabIdentity({ analyte: "GLICEMIA", unit: "mg/dL", specimen: "Orina" }), null);
-  assert.equal(vettedPhrLabIdentity({ analyte: "Vitamina D Total", specimen: "Orina" }), null);
-  assert.equal(phrLabTrendKey({ analyte: "TSH", loincCode: "24348-5" }), "tsh");
-  assert.equal(phrLabTrendKey({ analyte: "T4 LIBRE", loincCode: "24348-5" }), "free-t4");
+  assert.equal(vettedPhrLabIdentity({ analyte: "Vitamina D Total", unit: "ng/mL", specimen: "Orina" }), null);
+  assert.equal(phrLabTrendKey({ analyte: "TSH", loincCode: "3016-3", unit: "mIU/L" }), "tsh");
+  assert.equal(phrLabTrendKey({ analyte: "T4 LIBRE", loincCode: "3024-7", unit: "ng/dL" }), "free-t4");
+});
+
+test("corrige alias OCR y evita códigos de otra propiedad o muestra", () => {
+  const cases = [
+    ["ERIMROCITOS", "x 10^6/uL", "789-8"], ["C.H.C.M.", "gr/dL", "786-4"],
+    ["CREATININEMIA", "mg/dL", "2160-0"], ["URENIA", "mg/dL", "3091-6"],
+    ["N UREICO", "mg/dL", "3094-0"], ["TSH Ultrasensible", "miIU/L", "3016-3"],
+    ["INSULINA", "uU/mL", "20448-7"], ["PROTEINAS TOTALES", "gr/dL", "2885-2"],
+    ["Colesterol LDL", "mg/dL", "2089-1"], ["Ind.Col.total/Col.HDL", "", "9830-1"],
+    ["R.D.W.", "%", "30385-9"], ["BACILIFORMES NEUT", "%", "26508-2"],
+    ["VHS", "mm/hr", "30341-2"], ["TROPONINA I", "ug/L", "10839-9"],
+    ["TESTOSTERONA TOTAL", "nmol/L", "14913-8"], ["CORTISOL", "nmol/L", "14675-3"],
+  ] as const;
+  cases.forEach(([analyte, unit, code]) => assert.equal(vettedPhrLabIdentity({ analyte, unit })?.code, code, analyte));
+  assert.equal(vettedPhrLabIdentity({ analyte: "LDH", unit: "U/L" }), null);
+  assert.equal(vettedPhrLabIdentity({ analyte: "Glucosa", unit: "mg/dL", specimen: "Orina" }), null);
+  assert.equal(vettedPhrLabIdentity({ analyte: "Glucosa", unit: "", specimen: "Orina", valueText: "Negativo" })?.code, "2349-9");
+  assert.equal(vettedPhrLabIdentity({ analyte: "Cetonas", unit: "", specimen: "Orina", valueText: "Indicio" })?.code, "33903-6");
+  assert.equal(vettedPhrLabIdentity({ analyte: "pH", specimen: "Orina" })?.code, "2756-5");
+  assert.equal(vettedPhrLabIdentity({ analyte: "Aspecto", specimen: "Orina", valueText: "Muy turbio" })?.code, "5767-9");
+  assert.equal(vettedPhrLabIdentity({ analyte: "Leucocitos", unit: "", specimen: "Orina", valueText: "0 - 2." }), null);
+  assert.equal(vettedPhrLabIdentity({ analyte: "GLOBULOS ROJOS", specimen: "Sangre total", valueText: "Normales." })?.code, "6742-1");
+  assert.equal(vettedPhrLabIdentity({ analyte: "PLAQUETAS", specimen: "Sangre total", valueText: "Normales." })?.code, "11125-2");
+});
+
+test("usa el contexto del panel para no confundir fracciones de electroforesis", () => {
+  const context = "p16-r21 | Alfa-1 | 0.30 | g/dL | Muestra: Suero | Panel: Electroforesis de proteínas";
+  assert.equal(vettedPhrLabIdentity({ analyte: "Alfa-1", unit: "g/dL", specimen: "Suero", sourceSentence: context })?.code, "2865-4");
+  assert.equal(vettedPhrLabIdentity({ analyte: "Gamma", unit: "g/dL", specimen: "Suero", sourceSentence: context })?.code, "2874-6");
+  assert.equal(vettedPhrLabIdentity({ analyte: "Alfa-1", unit: "g/dL", specimen: "Suero" }), null);
+  assert.equal(vettedPhrLabIdentity({ analyte: "VFG CKD-EPI RAZA BLANCA", specimen: "Suero" })?.code, "88294-4");
+  assert.equal(vettedPhrLabIdentity({ analyte: "VFG MDRD-IDMS RAZA NEGRA", specimen: "Suero" })?.code, "48643-1");
+});
+
+test("deja amarillas las equivalencias con unidad o alias implícito", () => {
+  const context = "p33-r21 | Leucocitos | 0 - 2. | Muestra: Orina | Panel: Sedimento urinario";
+  assert.equal(reviewPhrLabIdentity({ analyte: "Leucocitos", specimen: "Orina", valueText: "0 - 2.", sourceSentence: context })?.code, "105104-4");
+  assert.equal(reviewPhrLabIdentity({ analyte: "Glob.rojos", specimen: "Orina", valueText: "0 - 2.", sourceSentence: context })?.code, "105107-7");
+  assert.equal(reviewPhrLabIdentity({ analyte: "JUVENILES NEUT", unit: "%", specimen: "Sangre total" })?.code, "28541-1");
+  assert.equal(reviewPhrLabIdentity({ analyte: "Desh.Láctica Total(LDH)", unit: "U/L" })?.code, "32324-6");
+  assert.equal(reviewPhrLabIdentity({ analyte: "LDH", unit: "U/L", specimen: "Suero" })?.code, "32324-6");
+  assert.equal(reviewPhrLabIdentity({ analyte: "Desh.Láctica Total(LDH)", unit: "U/L", specimen: "Orina" }), null);
 });
 
 test("separa nombre original, nombre canónico y confianza de homologación", () => {

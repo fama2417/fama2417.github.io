@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { PDFDocument, rgb } from "pdf-lib";
 import { extractTextItems } from "unpdf";
 import { aiConfig } from "@/features/reports/ai-budget.ts";
-import { dedupeLabCandidates, groupLabLayoutPages, labAnalyteSimilarity, labSourceHighlight, labSourcePage, loincSearchQueries, normalizeIdentity, prepareLabPdf, shouldUseAiForScannedPdf, structureLabDocument, suggestLabLoinc, suggestLabLoincSearchTerms, type LabCandidate } from "@/features/reports/lab-ai.ts";
-import { phrLoincDecision, phrSpecimenClass, reusedPhrLoinc, validatePhrLabDraft, vettedPhrLabIdentity } from "@/features/patient-portal/labs.ts";
+import { dedupeLabCandidates, groupLabLayoutPages, labAnalyteSimilarity, labSourceHighlight, labSourcePage, loincSearchQueries, normalizeIdentity, prepareLabPdf, structureLabDocument, suggestLabLoinc, suggestLabLoincSearchTerms, type LabCandidate } from "@/features/reports/lab-ai.ts";
+import { phrLoincDecision, phrSpecimenClass, reusedPhrLoinc, reviewPhrLabIdentity, validatePhrLabDraft, vettedPhrLabIdentity } from "@/features/patient-portal/labs.ts";
 import { isAnalyzableLabDocument, labImageMime } from "@/features/patient-portal/documents.ts";
 import { recordPhrEvent } from "@/lib/phr-events";
 import { extractScannedPdfPage } from "@/lib/pdf-ocr";
@@ -18,13 +18,36 @@ type LoincOption = {
   specimen?: string; scaleType?: string; methodType?: string; className?: string; exampleUcumUnits?: string;
 };
 
-const specimenOf = (row: { specimen?: string; source_sentence?: string; sourceSentence?: string }) => row.specimen ?? (row.source_sentence ?? row.sourceSentence ?? "").match(/(?:^|\|)\s*Muestra:\s*([^|]+)$/i)?.[1]?.trim() ?? "";
+const specimenOf = (row: { specimen?: string; source_sentence?: string; sourceSentence?: string }) => row.specimen ?? (row.source_sentence ?? row.sourceSentence ?? "").match(/(?:^|\|)\s*Muestra:\s*([^|]+?)(?:\||$)/i)?.[1]?.trim() ?? "";
 const mappingKey = (row: { analyte: string; unit: string; specimen?: string; source_sentence?: string; sourceSentence?: string }) => `${normalizeIdentity(row.analyte)}|${normalizeIdentity(row.unit)}|${phrSpecimenClass(specimenOf(row))}`;
 const individualOption = (row: LabCandidate, option: LoincOption) => {
   if (/\bpanel\b/i.test(option.display) || option.className?.startsWith("PANEL.")) return false;
+  if (/\b(?:study\^max|24\s*(?:hour|h))\b/i.test(option.display)) return false;
   if (row.valueNum !== null && !!row.unit && (/\[(?:presence|arbitrary)/i.test(option.display) || /^(?:Ord|Nom)$/.test(option.scaleType ?? ""))) return false;
+  if (row.valueNum === null && row.valueText && !/\d/.test(row.valueText) && !/^(?:Ord|Nom|SemiQn)$/.test(option.scaleType ?? "") && !/\[(?:Presence|Arbitrary)/i.test(option.display)) return false;
+  const unit = row.unit.toLowerCase().replace(/[µμ]/g, "u").replace(/\bgr\b/g, "g").replace(/\s+/g, "");
+  const property = option.property ?? "";
+  if (/^(?:mg|g|ug|ng|pg)\/(?:dl|ml|l)$/.test(unit) && !/^(?:MCnc|EntMCnc)$/.test(property)) return false;
+  if (/^(?:u|ui|iu)\/l$/.test(unit) && property !== "CCnc") return false;
+  if (unit === "%" && !/^(?:MFr|NFr|VFr|RatFr|RelTime)$/.test(property)) return false;
+  if (/^(?:s|seg\.?)$/.test(unit) && !/^(?:Time|RelTime)$/.test(property)) return false;
+  if (unit === "fl" && !/^(?:EntVol|EntMeanVol)$/.test(property)) return false;
+  if (unit === "pg" && property !== "EntMass") return false;
+  if (/^(?:[mk]\/ul|x?10(?:\^|\*)?\d+\/(?:ul|mm3))$/.test(unit) && property !== "NCnc") return false;
+  const analyte = normalizeIdentity(row.analyte), component = normalizeIdentity(`${option.component ?? ""} ${option.display}`);
+  if (analyte.includes("colesterolldl") && !component.includes("ldl")) return false;
+  if (analyte.includes("troponinai") && !component.includes("troponini")) return false;
+  if (/^globulos(?:rojos|blancos)$/.test(analyte) && /(?:donath|antibod|control|ab$)/i.test(`${option.component} ${option.display}`)) return false;
+  if (analyte === "blastos" && /cd\d/i.test(`${option.component} ${option.display}`)) return false;
+  if (/^(?:alfa1|alfa2|beta1|beta2|gamma)$/.test(analyte) && !/globulin/i.test(`${option.component} ${option.display}`)) return false;
+  if (analyte === "cilindros") return false;
   const wanted = phrSpecimenClass(specimenOf(row)), actual = phrSpecimenClass(option.specimen);
   return !wanted || !actual || wanted === actual;
+};
+const candidateNeedsReview = (row: LabCandidate, option: LoincOption) => {
+  if (!phrSpecimenClass(specimenOf(row)) && phrSpecimenClass(option.specimen)) return true;
+  if (option.methodType && !/(?:mdrd|ckd|direct|calcul|automat|westergren|coagul|electro)/i.test(`${row.analyte} ${row.sourceSentence}`)) return true;
+  return false;
 };
 
 async function preferredLoincDisplays(db: any, codes: string[]) {
@@ -53,7 +76,7 @@ async function matchPhrLoinc(db: any, ownerUserId: string, rows: LabCandidate[],
   const catalog = await db.from("terminology_codes").select("code", { count: "exact", head: true }).eq("system", "LOINC");
   if (catalog.error || !catalog.count) { warnings.push(catalog.error ? "No fue posible consultar el catálogo LOINC." : "El catálogo LOINC está vacío; debe cargarse para homologar resultados."); return finish(); }
 
-  const vetted = rows.map((row, index) => ({ index, identity: vettedPhrLabIdentity({ analyte: row.analyte, unit: row.unit, specimen: specimenOf(row) }) })).filter((row) => row.identity);
+  const vetted = rows.map((row, index) => ({ index, identity: vettedPhrLabIdentity({ analyte: row.analyte, unit: row.unit, specimen: specimenOf(row), valueText: row.valueText, sourceSentence: row.sourceSentence }) })).filter((row) => row.identity);
   if (vetted.length) {
     const codes = [...new Set(vetted.map((row) => row.identity!.code))];
     const known = await db.from("terminology_codes").select("code").eq("system", "LOINC").in("code", codes);
@@ -69,7 +92,16 @@ async function matchPhrLoinc(db: any, ownerUserId: string, rows: LabCandidate[],
     .eq("owner_user_id", ownerUserId).eq("review_status", "confirmed").neq("loinc_code", "");
   for (const [index, code] of reusedPhrLoinc(rows.map((row) => ({ ...row, specimen: specimenOf(row) })), (prior.data ?? []).map((row: { analyte: string; unit: string; loinc_code: string; source_sentence: string }) => ({ analyte: row.analyte, unit: row.unit, loincCode: row.loinc_code, specimen: specimenOf(row) })))) if (!loincByIndex.has(index)) { loincByIndex.set(index, code); confidenceByIndex.set(index, 1); }
 
-  const unresolved = rows.map((row, index) => ({ row, index })).filter(({ index }) => !loincByIndex.has(index));
+  const reviewable = rows.map((row, index) => ({ index, identity: reviewPhrLabIdentity({ analyte: row.analyte, unit: row.unit, specimen: specimenOf(row), valueText: row.valueText, sourceSentence: row.sourceSentence }) }))
+    .filter((row) => !loincByIndex.has(row.index) && row.identity);
+  if (reviewable.length) {
+    const codes = [...new Set(reviewable.map((row) => row.identity!.code))];
+    const known = await db.from("terminology_codes").select("code").eq("system", "LOINC").in("code", codes);
+    const existing = new Set((known.data ?? []).map((row: { code: string }) => row.code));
+    reviewable.forEach((row) => { if (existing.has(row.identity!.code)) { suggestedByIndex.set(row.index, row.identity!.code); confidenceByIndex.set(row.index, .82); } });
+  }
+
+  const unresolved = rows.map((row, index) => ({ row, index })).filter(({ index }) => !loincByIndex.has(index) && !suggestedByIndex.has(index));
   const config = aiConfig();
   if (!unresolved.length || !useAi) return finish();
   try {
@@ -127,10 +159,11 @@ async function matchPhrLoinc(db: any, ownerUserId: string, rows: LabCandidate[],
       if (ranked.length) optionsByIndex.set(unresolved[index].index, ranked.slice(0, 3));
       const selected = code ? options.find((option) => option.code === code) : undefined;
       if (!selected || !proposal) return;
-      const decision = phrLoincDecision(proposal.confidence, selected.score), confidence = decision.confidence;
+      const decision = phrLoincDecision(proposal.confidence, selected.score), reviewOnly = candidateNeedsReview(unresolved[index].row, selected);
+      const confidence = reviewOnly ? Math.min(decision.confidence, .87) : decision.confidence;
       confidenceByIndex.set(unresolved[index].index, confidence);
-      if (decision.status === "matched") loincByIndex.set(unresolved[index].index, selected.code);
-      else if (decision.status === "review") suggestedByIndex.set(unresolved[index].index, selected.code);
+      if (decision.status === "matched" && !reviewOnly) loincByIndex.set(unresolved[index].index, selected.code);
+      else if (decision.status !== "unmapped") suggestedByIndex.set(unresolved[index].index, selected.code);
     });
     warnings.push(`${loincByIndex.size} de ${rows.length} analitos quedaron homologados automáticamente; ${suggestedByIndex.size} requieren revisión por confianza intermedia.`);
   } catch { warnings.push("No fue posible completar la homologación LOINC; los resultados siguen disponibles para revisión."); }
@@ -199,9 +232,9 @@ export async function POST(request: NextRequest) {
     const existing = await auth.db.from("phr_lab_results").select("id, analyte, canonical_analyte, suggested_loinc_code, coding_confidence, value_num, value_text, unit, ref_low, ref_high, ref_text, flag, observed_at, source, source_sentence, loinc_code, review_status").eq("import_id", previous.data.id).order("analyte");
     existingRows = existing.data ?? [];
     if (body.suggestLoinc) {
-      const pending = existingRows.filter((row) => !row.loinc_code || (vettedPhrLabIdentity({ analyte: row.analyte, unit: row.unit, specimen: specimenOf(row) })?.code ?? row.loinc_code) !== row.loinc_code);
+      const pending = existingRows.filter((row) => !row.loinc_code || (vettedPhrLabIdentity({ analyte: row.analyte, unit: row.unit, specimen: specimenOf(row), valueText: row.value_text, sourceSentence: row.source_sentence })?.code ?? row.loinc_code) !== row.loinc_code);
       if (!pending.length) return NextResponse.json({ suggestions: [], warnings: ["No se detectaron homologaciones pendientes o incompatibles."] });
-      const rows = pending.map((row) => ({ analyte: row.analyte, valueNum: row.value_num, valueText: row.value_text, unit: row.unit, refLow: row.ref_low, refHigh: row.ref_high, refText: row.ref_text, flag: row.flag, observedAt: row.observed_at, source: row.source, sourceSentence: row.source_sentence, specimen: row.source_sentence.match(/(?:^|\|)\s*Muestra:\s*([^|]+)$/i)?.[1]?.trim() })) as LabCandidate[];
+      const rows = pending.map((row) => ({ analyte: row.analyte, valueNum: row.value_num, valueText: row.value_text, unit: row.unit, refLow: row.ref_low, refHigh: row.ref_high, refText: row.ref_text, flag: row.flag, observedAt: row.observed_at, source: row.source, sourceSentence: row.source_sentence, specimen: specimenOf(row) })) as LabCandidate[];
       const matched = await matchPhrLoinc(auth.db, auth.user.id, rows, true, document.data.source_institution);
       const suggestions = pending.map((row, index) => {
         const recommendedCode = matched.loincByIndex.get(index) ?? matched.suggestedByIndex.get(index) ?? row.suggested_loinc_code ?? "";
@@ -215,9 +248,9 @@ export async function POST(request: NextRequest) {
     }
     if (body.rescan && existingRows.length) previousImportId = previous.data.id;
     if (existing.data?.length && body.rematch && !body.rescan) {
-      const pending = existing.data.map((row, originalIndex) => ({ row, originalIndex })).filter(({ row }) => !row.loinc_code || (vettedPhrLabIdentity({ analyte: row.analyte, unit: row.unit, specimen: specimenOf(row) })?.code ?? row.loinc_code) !== row.loinc_code);
+      const pending = existing.data.map((row, originalIndex) => ({ row, originalIndex })).filter(({ row }) => !row.loinc_code || (vettedPhrLabIdentity({ analyte: row.analyte, unit: row.unit, specimen: specimenOf(row), valueText: row.value_text, sourceSentence: row.source_sentence })?.code ?? row.loinc_code) !== row.loinc_code);
       if (!pending.length) return NextResponse.json({ duplicate: true, created: existing.data.length, loincMapped: existing.data.length, warnings: ["Todos los resultados ya tienen agrupación LOINC."] });
-      const rows = pending.map(({ row }) => ({ analyte: row.analyte, valueNum: row.value_num, valueText: row.value_text, unit: row.unit, refLow: row.ref_low, refHigh: row.ref_high, refText: row.ref_text, flag: row.flag, observedAt: row.observed_at, source: row.source, sourceSentence: row.source_sentence, specimen: row.source_sentence.match(/(?:^|\|)\s*Muestra:\s*([^|]+)$/i)?.[1]?.trim() })) as LabCandidate[];
+      const rows = pending.map(({ row }) => ({ analyte: row.analyte, valueNum: row.value_num, valueText: row.value_text, unit: row.unit, refLow: row.ref_low, refHigh: row.ref_high, refText: row.ref_text, flag: row.flag, observedAt: row.observed_at, source: row.source, sourceSentence: row.source_sentence, specimen: specimenOf(row) })) as LabCandidate[];
       const matched = await matchPhrLoinc(auth.db, auth.user.id, rows, true, document.data.source_institution);
       const updates = await Promise.all(pending.map(({ row }, index) => auth.db.from("phr_lab_results").update({
         loinc_code: matched.loincByIndex.get(index) ?? "",
@@ -248,9 +281,7 @@ export async function POST(request: NextRequest) {
   let aiResult: Awaited<ReturnType<typeof structureLabDocument>> | null = null;
   let usedVisualAi = false;
   let localFallbackReason = "";
-  const scannedPdfWithManyPages = !imageMime && shouldUseAiForScannedPdf(prepared.scanned, prepared.pageCount);
-  const needsVisualRecognition = !!imageMime || scannedPdfWithManyPages;
-  if (needsVisualRecognition) {
+  if (imageMime) {
     const config = aiConfig();
     let canUseAi = config.enabled && !!process.env.OPENAI_API_KEY;
     let aiLimitReached = false;
@@ -265,14 +296,13 @@ export async function POST(request: NextRequest) {
     } else localFallbackReason = "El reconocimiento visual no estaba disponible; se usó OCR local como respaldo.";
     if (canUseAi) {
       try {
-        aiResult = await structureLabDocument({ procedureName: "Laboratorio personal", ...(imageMime ? { imageBytes: bytes, imageMime } : { pdfBytes: bytes }) });
+        aiResult = await structureLabDocument({ procedureName: "Laboratorio personal", imageBytes: bytes, imageMime });
         usedVisualAi = true;
       } catch {
         await recordPhrEvent(auth.db, auth.user.id, "lab_analysis_failed", body.documentId, { method: "ai_visual", stage: "recognition", duration_ms: Date.now() - startedAt });
-        if (imageMime) return NextResponse.json({ error: "No fue posible extraer resultados de este archivo." }, { status: 502 });
-        localFallbackReason = "El reconocimiento visual no pudo completar el análisis; se usó OCR local como respaldo.";
+        return NextResponse.json({ error: "No fue posible extraer resultados de esta imagen." }, { status: 502 });
       }
-    } else if (imageMime) return NextResponse.json({ error: localFallbackReason || "Este archivo necesita reconocimiento visual y la extracción automática no está habilitada." }, { status: aiLimitReached ? 429 : 503 });
+    } else return NextResponse.json({ error: localFallbackReason || "Esta imagen necesita reconocimiento visual y la extracción automática no está habilitada." }, { status: aiLimitReached ? 429 : 503 });
   }
   if (prepared.scanned && !usedVisualAi) {
     try { prepared = await prepareLabPdf(bytes); }
@@ -284,8 +314,7 @@ export async function POST(request: NextRequest) {
   const extractedIdentifier = prepared.patientIdentifier || aiResult?.extraction.patientIdentifier || "";
   const profileIdentifier = auth.profile.identifier.trim();
   const warnings = [...(aiResult?.extraction.warnings ?? [])];
-  if (usedVisualAi && scannedPdfWithManyPages) warnings.push("El PDF contenía varias páginas escaneadas y se procesó con reconocimiento visual; revisa cada cifra antes de confirmarla.");
-  else if (prepared.scanned && !imageMime) warnings.push("El PDF era un escaneo sin texto y se leyó con OCR local; revisa cada cifra antes de confirmarla.");
+  if (prepared.scanned && !imageMime) warnings.push("El PDF era un escaneo sin texto y se leyó con OCR local; revisa cada cifra antes de confirmarla.");
   if (localFallbackReason && !imageMime) warnings.push(localFallbackReason);
   if (!usedVisualAi && !imageMime && prepared.needsAi) warnings.push("El PDF se leyó sólo localmente y puede contener filas que requieren corrección manual; no se envió contenido a IA.");
   if (extractedIdentifier && profileIdentifier) {

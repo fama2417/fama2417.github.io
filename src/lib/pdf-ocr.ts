@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
 import { createHash } from "node:crypto";
+import path from "node:path";
 import sharp from "sharp";
 import { createWorker } from "tesseract.js";
 import { extractImages, getDocumentProxy, type StructuredTextItem } from "unpdf";
@@ -7,10 +8,13 @@ import { extractImages, getDocumentProxy, type StructuredTextItem } from "unpdf"
 type TesseractLanguage = { code: string; gzip: boolean; langPath: string };
 type Word = { block: number; paragraph: number; line: number; left: number; top: number; width: number; height: number; text: string };
 
-const spanish = createRequire(import.meta.url)("@tesseract.js-data/spa") as TesseractLanguage;
+const require = createRequire(import.meta.url);
+const spanish = require("@tesseract.js-data/spa") as TesseractLanguage;
+const workerPath = path.join(process.cwd(), "node_modules", "tesseract.js", "src", "worker-script", "node", "index.js");
+const langPath = path.join(process.cwd(), "node_modules", "@tesseract.js-data", "spa", path.basename(spanish.langPath));
 const MAX_PAGES = 30;
 
-export const ocrTargetWidth = (width: number) => Math.min(2500, Math.max(width, width < 1000 ? width * 3 : 2500));
+export const ocrTargetWidth = (width: number) => Math.min(2500, Math.max(width, width < 1000 ? Math.ceil(width * 3.1) : 2500));
 export const ocrImageKey = (data: Uint8Array | Uint8ClampedArray, width: number, height: number, channels: number) => createHash("sha1").update(new Uint8Array(data.buffer, data.byteOffset, data.byteLength)).update(`${width}x${height}x${channels}`).digest("base64url");
 
 function layoutFromTsv(tsv: string, sourceWidth: number, sourceHeight: number, scale: number): StructuredTextItem[] {
@@ -39,22 +43,27 @@ async function extractScannedPages(bytes: Uint8Array, requestedPages?: number[])
   if (pdf.numPages > MAX_PAGES) throw new Error(`El PDF escaneado supera el límite de ${MAX_PAGES} páginas.`);
   const pageNumbers = requestedPages ?? Array.from({ length: pdf.numPages }, (_, index) => index + 1);
   if (pageNumbers.some((page) => !Number.isInteger(page) || page < 1 || page > pdf.numPages)) throw new Error("Página PDF inválida.");
-  const worker = await createWorker(spanish.code, 1, { langPath: spanish.langPath, gzip: spanish.gzip, cacheMethod: "readOnly" });
-  const items: StructuredTextItem[][] = [], text: string[] = [], cache = new Map<string, { items: StructuredTextItem[]; text: string }>();
+  const workers = await Promise.all(Array.from({ length: Math.min(2, pageNumbers.length) }, () => createWorker(spanish.code, 1, { workerPath, langPath, gzip: spanish.gzip, cacheMethod: "readOnly" })));
+  const items: StructuredTextItem[][] = Array.from({ length: pageNumbers.length }, () => []), text: string[] = Array(pageNumbers.length).fill("");
+  const cache = new Map<string, { items: StructuredTextItem[]; text: string }>();
   try {
-    await worker.setParameters({ preserve_interword_spaces: "1", user_defined_dpi: "210" });
-    for (const pageNumber of pageNumbers) {
-      const images = await extractImages(pdf, pageNumber), source = images.sort((a, b) => b.width * b.height - a.width * a.height)[0];
-      if (!source) { items.push([]); text.push(""); continue; }
-      const key = ocrImageKey(source.data, source.width, source.height, source.channels), cached = cache.get(key);
-      if (cached) { items.push(cached.items); text.push(cached.text); continue; }
-      const targetWidth = ocrTargetWidth(source.width), scale = targetWidth / source.width;
-      const image = await sharp(source.data, { raw: { width: source.width, height: source.height, channels: source.channels } }).resize({ width: targetWidth }).grayscale().normalize().sharpen().png().toBuffer();
-      const recognized = await worker.recognize(image, {}, { text: true, tsv: true });
-      const result = { items: layoutFromTsv(recognized.data.tsv ?? "", source.width, source.height, scale), text: recognized.data.text.trim() };
-      cache.set(key, result); items.push(result.items); text.push(result.text);
+    await Promise.all(workers.map((worker) => worker.setParameters({ preserve_interword_spaces: "1", user_defined_dpi: "300" })));
+    for (let offset = 0; offset < pageNumbers.length; offset += workers.length) {
+      await Promise.all(workers.map(async (worker, workerIndex) => {
+        const index = offset + workerIndex, pageNumber = pageNumbers[index];
+        if (!pageNumber) return;
+        const images = await extractImages(pdf, pageNumber), source = images.sort((a, b) => b.width * b.height - a.width * a.height)[0];
+        if (!source) return;
+        const key = ocrImageKey(source.data, source.width, source.height, source.channels), cached = cache.get(key);
+        if (cached) { items[index] = cached.items; text[index] = cached.text; return; }
+        const targetWidth = ocrTargetWidth(source.width), scale = targetWidth / source.width;
+        const image = await sharp(source.data, { raw: { width: source.width, height: source.height, channels: source.channels } }).resize({ width: targetWidth }).grayscale().normalize().sharpen().png().toBuffer();
+        const recognized = await worker.recognize(image, {}, { text: true, tsv: true });
+        const result = { items: layoutFromTsv(recognized.data.tsv ?? "", source.width, source.height, scale), text: recognized.data.text.trim() };
+        cache.set(key, result); items[index] = result.items; text[index] = result.text;
+      }));
     }
-  } finally { await worker.terminate(); }
+  } finally { await Promise.all(workers.map((worker) => worker.terminate())); }
   return { items, text, totalPages: pdf.numPages };
 }
 
