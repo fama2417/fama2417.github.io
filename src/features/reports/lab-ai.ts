@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
 import { z } from "zod";
 import { extractTextItems, type StructuredTextItem } from "unpdf";
-import { extractScannedPdf } from "../../lib/pdf-ocr.ts";
+import { extractScannedPdf, imageBearingPages } from "../../lib/pdf-ocr.ts";
 import { aiConfig } from "./ai-budget.ts";
 import { labFlag, parseLabNumber, parseLabReference, type LabFlag } from "./lab-observations.ts";
 
@@ -53,6 +53,17 @@ export type LabCandidate = {
 export type LabSourceBox = { x: number; y: number; width: number; height: number };
 export const labSourcePage = (sourceId: string) => Number(sourceId.match(/^(?:p|page-)(\d+)-r\d+$/)?.[1] ?? 0);
 
+/** Reasigna el índice de página del sub-PDF enviado a IA (page-1, page-2…) al número de página real del documento. */
+export function remapVisualPages(rows: LabCandidate[], pages: number[]) {
+  for (const row of rows) {
+    row.sourceSentence = row.sourceSentence.replace(/^(page-)(\d+)(-r\d+)/, (whole, prefix, index, rest) => {
+      const original = pages[Number(index) - 1];
+      return original ? `${prefix}${original}${rest}` : whole;
+    });
+  }
+  return rows;
+}
+
 export type PreparedLabPdf = {
   patientName: string;
   patientIdentifier: string;
@@ -62,6 +73,7 @@ export type PreparedLabPdf = {
   scanned: boolean;
   needsAi: boolean;
   pageCount: number;
+  imageOnlyPages: number[];
 };
 
 export const LAB_EXTRACTION_SYSTEM_PROMPT = `Extrae resultados discretos de laboratorio en español.
@@ -367,7 +379,7 @@ function parseLooseColumnRows(rows: LayoutRow[], observedAt: string, defaultSpec
   return observations;
 }
 
-export function parseLabLayoutPages(pages: StructuredTextItem[][]): Omit<PreparedLabPdf, "scanned" | "pageCount"> {
+export function parseLabLayoutPages(pages: StructuredTextItem[][]): Omit<PreparedLabPdf, "scanned" | "pageCount" | "imageOnlyPages"> {
   const layout = groupLabLayoutPages(pages);
   const documentMetadata = metadata(layout);
   const observations: LabCandidate[] = [];
@@ -444,11 +456,13 @@ export function parseLabLayoutPages(pages: StructuredTextItem[][]): Omit<Prepare
 
 export async function prepareLabPdf(bytes: Uint8Array, deferScannedOcr = false): Promise<PreparedLabPdf> {
   const extracted = await extractTextItems(bytes.slice());
-  const scanned = extracted.items.every((page) => page.every((item) => !item.str.trim()));
-  if (scanned && deferScannedOcr) return { patientName: "", patientIdentifier: "", observedAt: "", observations: [], aiText: "", scanned, needsAi: true, pageCount: extracted.totalPages };
+  const emptyPages = extracted.items.map((page, index) => ({ page: index + 1, empty: page.every((item) => !item.str.trim()) })).filter((row) => row.empty).map((row) => row.page);
+  const scanned = extracted.totalPages > 0 && emptyPages.length === extracted.totalPages;
+  const imageOnlyPages = emptyPages.length ? await imageBearingPages(bytes, emptyPages) : [];
+  if (scanned && deferScannedOcr) return { patientName: "", patientIdentifier: "", observedAt: "", observations: [], aiText: "", scanned, needsAi: true, pageCount: extracted.totalPages, imageOnlyPages };
   const pages = scanned ? await extractScannedPdf(bytes) : extracted;
   const parsed = parseLabLayoutPages(pages.items);
-  return { ...parsed, scanned, needsAi: parsed.needsAi, pageCount: pages.totalPages };
+  return { ...parsed, scanned, needsAi: parsed.needsAi, pageCount: pages.totalPages, imageOnlyPages };
 }
 
 export function normalizeIdentity(value: string) {

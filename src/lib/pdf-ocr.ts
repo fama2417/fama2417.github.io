@@ -67,6 +67,22 @@ async function extractScannedPages(bytes: Uint8Array, requestedPages?: number[])
   return { items, text, totalPages: pdf.numPages };
 }
 
+// ponytail: ~400x400px descarta logos y firmas; sube el umbral si aparecen sellos grandes que no son escaneos.
+const MIN_VISUAL_IMAGE_AREA = 160_000;
+
+/** De las páginas sin texto, cuáles contienen una imagen real (escaneo) y no una hoja en blanco o un logo. */
+export async function imageBearingPages(bytes: Uint8Array, pages: number[]) {
+  if (!pages.length) return [];
+  const pdf = await getDocumentProxy(bytes.slice());
+  const bearing: number[] = [];
+  for (const page of pages) {
+    if (!Number.isInteger(page) || page < 1 || page > pdf.numPages) continue;
+    const images = await extractImages(pdf, page).catch(() => []);
+    if (images.some((image) => image.width * image.height >= MIN_VISUAL_IMAGE_AREA)) bearing.push(page);
+  }
+  return bearing;
+}
+
 /** OCR local para PDF escaneados: no transmite el archivo ni su texto a servicios externos. */
 export const extractScannedPdf = (bytes: Uint8Array) => extractScannedPages(bytes);
 export const extractScannedPdfPage = async (bytes: Uint8Array, pageNumber: number) => (await extractScannedPages(bytes, [pageNumber])).items[0] ?? [];

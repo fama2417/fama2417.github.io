@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { PDFDocument, rgb } from "pdf-lib";
 import { extractTextItems } from "unpdf";
 import { aiConfig } from "@/features/reports/ai-budget.ts";
-import { dedupeLabCandidates, groupLabLayoutPages, labAnalyteSimilarity, labSourceHighlight, labSourcePage, loincSearchQueries, normalizeIdentity, prepareLabPdf, structureLabDocument, suggestLabLoinc, suggestLabLoincSearchTerms, type LabCandidate } from "@/features/reports/lab-ai.ts";
+import { dedupeLabCandidates, groupLabLayoutPages, labAnalyteSimilarity, labSourceHighlight, labSourcePage, loincSearchQueries, normalizeIdentity, prepareLabPdf, remapVisualPages, structureLabDocument, suggestLabLoinc, suggestLabLoincSearchTerms, type LabCandidate } from "@/features/reports/lab-ai.ts";
 import { phrLoincDecision, phrSpecimenClass, reusedPhrLoinc, reviewPhrLabIdentity, validatePhrLabDraft, vettedPhrLabIdentity } from "@/features/patient-portal/labs.ts";
 import { isAnalyzableLabDocument, labImageMime } from "@/features/patient-portal/documents.ts";
 import { recordPhrEvent } from "@/lib/phr-events";
@@ -11,6 +11,16 @@ import { requirePhrApi } from "@/lib/server-auth";
 
 const MAX_BYTES = 10 * 1024 * 1024;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/** Arma un PDF solo con las páginas escaneadas para enviar a IA; el documento completo si ya lo son todas. */
+async function subsetPdf(bytes: Uint8Array, pages: number[]): Promise<Uint8Array> {
+  const source = await PDFDocument.load(bytes);
+  if (pages.length >= source.getPageCount()) return bytes;
+  const output = await PDFDocument.create();
+  const copied = await output.copyPages(source, pages.map((page) => page - 1));
+  copied.forEach((page) => output.addPage(page));
+  return output.save();
+}
 const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
 const dateOr = (value: string, fallback: string) => validDate(value) ? value : fallback;
 type LoincOption = {
@@ -272,16 +282,20 @@ export async function POST(request: NextRequest) {
   const bytes = new Uint8Array(await downloaded.data.arrayBuffer());
   const imageMime = labImageMime(document.data.mime_type);
   let prepared: Awaited<ReturnType<typeof prepareLabPdf>>;
-  if (imageMime) prepared = { patientName: "", patientIdentifier: "", observedAt: "", observations: [], aiText: "", scanned: true, needsAi: true, pageCount: 1 };
+  if (imageMime) prepared = { patientName: "", patientIdentifier: "", observedAt: "", observations: [], aiText: "", scanned: true, needsAi: true, pageCount: 1, imageOnlyPages: [] };
   else {
     try { prepared = await prepareLabPdf(bytes, true); }
     catch { await recordPhrEvent(auth.db, auth.user.id, "lab_analysis_failed", body.documentId, { method: "local", stage: "parse", duration_ms: Date.now() - startedAt }); return NextResponse.json({ error: "No fue posible interpretar el PDF." }, { status: 422 }); }
   }
 
+  // Páginas que necesitan visión: la imagen completa, todo el PDF escaneado, o solo las páginas-imagen de un PDF híbrido.
+  const visualPages = imageMime ? [] : prepared.scanned ? Array.from({ length: prepared.pageCount }, (_, index) => index + 1) : prepared.imageOnlyPages;
+  const wantsVisual = !!imageMime || visualPages.length > 0;
+
   let aiResult: Awaited<ReturnType<typeof structureLabDocument>> | null = null;
   let usedVisualAi = false;
   let localFallbackReason = "";
-  if (imageMime) {
+  if (wantsVisual) {
     const config = aiConfig();
     let canUseAi = config.enabled && !!process.env.OPENAI_API_KEY;
     let aiLimitReached = false;
@@ -296,25 +310,32 @@ export async function POST(request: NextRequest) {
     } else localFallbackReason = "El reconocimiento visual no estaba disponible; se usó OCR local como respaldo.";
     if (canUseAi) {
       try {
-        aiResult = await structureLabDocument({ procedureName: "Laboratorio personal", imageBytes: bytes, imageMime });
+        if (imageMime) aiResult = await structureLabDocument({ procedureName: "Laboratorio personal", imageBytes: bytes, imageMime });
+        else {
+          aiResult = await structureLabDocument({ procedureName: "Laboratorio personal", pdfBytes: await subsetPdf(bytes, visualPages) });
+          remapVisualPages(aiResult.observations, visualPages);
+        }
         usedVisualAi = true;
       } catch {
         await recordPhrEvent(auth.db, auth.user.id, "lab_analysis_failed", body.documentId, { method: "ai_visual", stage: "recognition", duration_ms: Date.now() - startedAt });
-        return NextResponse.json({ error: "No fue posible extraer resultados de esta imagen." }, { status: 502 });
+        if (imageMime) return NextResponse.json({ error: "No fue posible extraer resultados de esta imagen." }, { status: 502 });
+        localFallbackReason = "El reconocimiento visual falló; se usó únicamente el texto disponible del PDF.";
       }
-    } else return NextResponse.json({ error: localFallbackReason || "Esta imagen necesita reconocimiento visual y la extracción automática no está habilitada." }, { status: aiLimitReached ? 429 : 503 });
+    } else if (imageMime) return NextResponse.json({ error: localFallbackReason || "Esta imagen necesita reconocimiento visual y la extracción automática no está habilitada." }, { status: aiLimitReached ? 429 : 503 });
   }
-  if (prepared.scanned && !usedVisualAi) {
+  // Respaldo OCR local solo si el PDF completo estaba escaneado y la IA no leyó nada.
+  if (prepared.scanned && !usedVisualAi && !imageMime) {
     try { prepared = await prepareLabPdf(bytes); }
     catch { return NextResponse.json({ error: "No fue posible leer las páginas escaneadas del PDF." }, { status: 422 }); }
   }
-  const rows: LabCandidate[] = aiResult?.observations ?? prepared.observations;
+  const rows: LabCandidate[] = [...prepared.observations, ...(aiResult?.observations ?? [])];
 
   const extractedName = prepared.patientName || aiResult?.extraction.patientName || "";
   const extractedIdentifier = prepared.patientIdentifier || aiResult?.extraction.patientIdentifier || "";
   const profileIdentifier = auth.profile.identifier.trim();
   const warnings = [...(aiResult?.extraction.warnings ?? [])];
-  if (prepared.scanned && !imageMime) warnings.push("El PDF era un escaneo sin texto y se leyó con OCR local; revisa cada cifra antes de confirmarla.");
+  if (prepared.scanned && !usedVisualAi && !imageMime) warnings.push("El PDF era un escaneo sin texto y se leyó con OCR local; revisa cada cifra antes de confirmarla.");
+  if (usedVisualAi && !imageMime && !prepared.scanned) warnings.push("Algunas páginas del PDF estaban escaneadas y se leyeron con reconocimiento visual; revisa esas cifras antes de confirmarlas.");
   if (localFallbackReason && !imageMime) warnings.push(localFallbackReason);
   if (!usedVisualAi && !imageMime && prepared.needsAi) warnings.push("El PDF se leyó sólo localmente y puede contener filas que requieren corrección manual; no se envió contenido a IA.");
   if (extractedIdentifier && profileIdentifier) {
