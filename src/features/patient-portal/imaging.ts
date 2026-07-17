@@ -19,6 +19,11 @@ const headings: [ImagingSection, string[]][] = [
 
 export const cleanPhrImagingSection = (value: string) => value.split(/\s+(?=(?:atentamente\b|p[aá]g(?:ina)?\s+\d+\s+de\s+\d+|paciente\s*:|informe validado por\s*:|firmado por\s*:))/i)[0].trim();
 
+export function phrImagingPlainLanguagePoints(value: string) {
+  const explicit = value.replace(/\r/g, "").split(/\n+|(?:^|\s)[•▪◦-]\s+|(?:^|\s)\d+[.)]\s+/).map((part) => part.trim()).filter(Boolean);
+  return explicit.length > 1 ? explicit : value.trim().split(/(?<=[.!?])\s+(?=[A-ZÁÉÍÓÚÑ])/).map((part) => part.trim()).filter(Boolean);
+}
+
 export function structurePhrImagingText(value: string): PhrImagingText {
   const separated = value.replace(/\s+(?=(?:indicaci[oó]n cl[ií]nica|indicaci[oó]n|antecedentes cl[ií]nicos|antecedentes|motivo del examen|t[eé]cnica|m[eé]todo|hallazgos|resultado|resultados|descripci[oó]n|impresi[oó]n|conclusi[oó]n|conclusiones|diagn[oó]stico)\s*:)/gi, "\n");
   const result = empty(), lines = separated.split(/\r?\n/).map((line) => line.replace(/\s+/g, " ").trim()).filter(Boolean);

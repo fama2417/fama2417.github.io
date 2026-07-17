@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { StructuredTextItem } from "unpdf";
-import { labPatientMatches, labSourceHighlight, loincSearchQueries, parseLabLayoutPages, verifiedLabLoinc } from "./lab-ai.ts";
+import { labPatientMatches, labSourceHighlight, loincSearchQueries, parseLabLayoutPages, shouldUseAiForScannedPdf, verifiedLabLoinc } from "./lab-ai.ts";
+import { ocrImageKey, ocrTargetWidth } from "../../lib/pdf-ocr.ts";
 
 const item = (str: string, x: number, y: number): StructuredTextItem => ({
   str, x, y, width: str.length * 5, height: 10, fontSize: 10, fontFamily: "sans", dir: "ltr", hasEOL: false,
@@ -79,6 +80,20 @@ test("verifiedLabLoinc acepta sólo sugerencias confiables presentes en el catá
 
 test("loincSearchQueries relaja calificadores sin cambiar el analito", () => {
   assert.deepEqual(loincSearchQueries("Chloride serum plasma"), ["Chloride serum plasma", "Chloride serum", "Chloride"]);
+});
+
+test("OCR reutiliza páginas rasterizadas repetidas y limita el reescalado", () => {
+  const page = new Uint8Array([1, 2, 3]);
+  assert.equal(ocrImageKey(page, 831, 998, 3), ocrImageKey(page, 831, 998, 3));
+  assert.notEqual(ocrImageKey(page, 831, 998, 3), ocrImageKey(page, 832, 998, 3));
+  assert.equal(ocrTargetWidth(831), 2493);
+  assert.equal(ocrTargetWidth(2400), 2500);
+});
+
+test("sólo deriva a reconocimiento visual los PDF escaneados extensos", () => {
+  assert.equal(shouldUseAiForScannedPdf(false, 13), false);
+  assert.equal(shouldUseAiForScannedPdf(true, 3), false);
+  assert.equal(shouldUseAiForScannedPdf(true, 4), true);
 });
 
 test("parseLabLayoutPages interpreta columnas OCR y omite el resultado histórico", () => {

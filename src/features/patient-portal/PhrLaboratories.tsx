@@ -63,6 +63,7 @@ export function PhrLaboratories({ documents, ownerUserId, readOnly, onUpload, hi
   const [favorites, setFavorites] = useState<PhrFavorite[]>([]), [filter, setFilter] = useState<LabCategory | "all">("all");
   const [query, setQuery] = useState(""), [onlyOutside, setOnlyOutside] = useState(false);
   const [error, setError] = useState(""), [notice, setNotice] = useState("");
+  const [processing, setProcessing] = useState<{ title: string; detail: string }>();
   const [source, setSource] = useState<{ resultId: string; url: string; contentType: string; highlighted: boolean; page: number }>();
   const [loincDialog, setLoincDialog] = useState<{ documentId: string; suggestions: PhrLoincSuggestion[]; warnings: string[] }>();
   const [loincSelections, setLoincSelections] = useState<Record<string, string>>({});
@@ -75,11 +76,12 @@ export function PhrLaboratories({ documents, ownerUserId, readOnly, onUpload, hi
 
   async function analyze(document: PortalDocument, rematch = false, rescan = false) {
     setBusyId(document.id); setError(""); setNotice("");
+    setProcessing({ title: rematch ? "Revisando la homologación LOINC" : rescan ? "Volviendo a leer el laboratorio" : "Procesando el laboratorio", detail: rematch ? "Buscamos equivalencias verificadas sin modificar los valores confirmados." : "Revisamos el tipo de archivo, leemos sus páginas y ordenamos los resultados. Los escaneos extensos usan reconocimiento visual y los demás documentos se procesan localmente." });
     try {
       const response = await analyzePhrLabDocument(document.id, rematch, rescan); await reload();
       setNotice(`${rescan ? `Relectura completada: ${response.created} resultado(s) nuevo(s).` : rematch ? `Agrupación actualizada: ${response.loincMapped} resultado(s) con LOINC.` : response.duplicate ? "Este archivo ya estaba analizado." : `${response.created} resultado(s) listos para revisión.`}${response.warnings.length ? ` ${response.warnings.join(" ")}` : ""}`);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "No fue posible analizar el laboratorio."); }
-    finally { setBusyId(""); }
+    finally { setBusyId(""); setProcessing(undefined); }
   }
   async function changed(message: string) { setBusyId("refresh"); await reload(); setBusyId(""); setNotice(message); setError(""); }
   async function openLoinc(document: PortalDocument) {
@@ -136,8 +138,9 @@ export function PhrLaboratories({ documents, ownerUserId, readOnly, onUpload, hi
 
   return <div className="phr-labs-stack">
     {error && <p className="notice danger-text" role="alert">{error}</p>}{notice && <p className="form-notice" role="status">{notice}</p>}
-    <section className="card portal-card"><div className="card-heading"><div><p className="eyebrow">Extracción segura</p><h2>Laboratorios por procesar</h2><p>Los PDF con texto o escaneados se leen localmente. Las fotos JPG/PNG usan reconocimiento visual. Nada cuenta como resultado hasta que lo confirmas.</p></div>{!hideHeading && !readOnly && <button className="button primary" type="button" onClick={onUpload}>Subir laboratorio</button>}</div>
+    <section className="card portal-card"><div className="card-heading"><div><p className="eyebrow">Extracción segura</p><h2>Laboratorios por procesar</h2><p>Los PDF con texto y los escaneos breves se leen localmente. Los escaneos extensos y las fotos JPG/PNG usan reconocimiento visual. Nada cuenta como resultado hasta que lo confirmas.</p></div>{!hideHeading && !readOnly && <button className="button primary" type="button" onClick={onUpload}>Subir laboratorio</button>}</div>
       {!labs.length ? <p className="empty-state">Todavía no tienes laboratorios.</p> : pendingLabs.length ? <ul className="portal-list">{pendingLabs.map((document) => <li key={document.id}><div className="portal-document-detail"><strong title={document.filename}>{friendlyDocumentName(document.documentType)}</strong><span>{document.sourceInstitution} · {shownDate(document.documentDate ?? document.createdAt)} · {document.filename}</span></div><div className="portal-document-actions"><a className="button secondary" href={document.url} target="_blank" rel="noreferrer">Abrir archivo</a>{!isAnalyzableLabDocument(document.mimeType) ? <span>Análisis disponible para PDF, JPG o PNG</span> : !readOnly && <button className="button primary" disabled={!!busyId} type="button" onClick={() => void analyze(document)}>{busyId === document.id ? "Analizando…" : "Analizar resultados"}</button>}</div></li>)}</ul> : <p className="phr-processed-summary">✓ Todos tus archivos están procesados. Revisa abajo sólo si necesitas abrirlos o volver a analizarlos.</p>}
+      {processing && <div className="ai-operation-status" role="status" aria-live="polite"><strong>{processing.title}</strong><span>{processing.detail}</span><div className="ai-operation-progress" role="progressbar" aria-label="Procesamiento del laboratorio en curso"><span /></div></div>}
       {!!processedLabs.length && <details className="phr-processed-documents"><summary><span>Archivos procesados</span><span>{processedLabs.length}</span></summary><ul className="portal-list">{processedLabs.map((document) => <li key={document.id}><div className="portal-document-detail"><strong title={document.filename}>{friendlyDocumentName(document.documentType)}</strong><span>{document.sourceInstitution} · {shownDate(document.documentDate ?? document.createdAt)}</span></div><div className="portal-document-actions"><a className="button secondary" href={document.url} target="_blank" rel="noreferrer">Abrir original</a>{!readOnly && <button className="text-button" disabled={!!busyId} type="button" onClick={() => void analyze(document, false, true)}>{busyId === document.id ? "Releyendo…" : "Volver a procesar"}</button>}{!readOnly && <button className="text-button" disabled={!!busyId} type="button" onClick={() => void openLoinc(document)}>{busyId === document.id ? "Buscando…" : "Revisar LOINC"}</button>}</div></li>)}</ul></details>}
     </section>
 
