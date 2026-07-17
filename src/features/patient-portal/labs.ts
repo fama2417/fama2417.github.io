@@ -201,7 +201,11 @@ export const phrLabTrendKey = (result: Pick<PhrLabResult, "loincCode" | "analyte
   return vettedPhrLabIdentity({ analyte: result.analyte, unit: result.unit, specimen })?.trendKey ?? (result.loincCode.trim() || plain(result.analyte));
 };
 // ponytail: overrides curados por código LOINC; agrega solo los que el componente deja poco claro (p.ej. índices del hemograma).
-const LOINC_FRIENDLY_NAME: Record<string, string> = {};
+const LOINC_FRIENDLY_NAME: Record<string, string> = {
+  "785-6": "Hemoglobina corpuscular media (HCM)",
+  "786-4": "Concentración de hemoglobina corpuscular media (CHCM)",
+  "787-2": "Volumen corpuscular medio (VCM)",
+};
 // El nombre LOINC completo trae 5 ejes ("Componente: Muestra. Tiempo. Propiedad. Escala. Método"); para el paciente basta el componente.
 const loincComponent = (canonical: string) => canonical.split(":")[0].replace(/\s+/g, " ").trim();
 export const phrLabDisplayName = (result: Pick<PhrLabResult, "analyte" | "canonicalAnalyte"> & Partial<Pick<PhrLabResult, "loincCode">>) =>

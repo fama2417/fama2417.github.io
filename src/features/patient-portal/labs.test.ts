@@ -108,4 +108,6 @@ test("phrLabDisplayName muestra el componente LOINC, no los cinco ejes técnicos
   assert.equal(phrLabDisplayName({ analyte: "C.H.C.M.", loincCode: "788-4", canonicalAnalyte: "Concentración media de hemoglobina corpuscular en eritrocitos: Eritrocitos. Punto temporal. Concentración de masa. Cuantitativo" }), "Concentración media de hemoglobina corpuscular en eritrocitos");
   // Sin homologar cae al nombre del informe.
   assert.equal(phrLabDisplayName({ analyte: "TSH", canonicalAnalyte: "" }), "TSH");
+  // Override curado por código LOINC gana sobre el componente para los índices del hemograma.
+  assert.equal(phrLabDisplayName({ analyte: "C.H.C.M.", loincCode: "786-4", canonicalAnalyte: "Concentración media de hemoglobina corpuscular en eritrocitos: Eritrocitos. Cuantitativo" }), "Concentración de hemoglobina corpuscular media (CHCM)");
 });
