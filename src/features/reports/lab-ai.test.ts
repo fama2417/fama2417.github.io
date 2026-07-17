@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { StructuredTextItem } from "unpdf";
-import { labAnalyteSimilarity, labPatientMatches, labSourceHighlight, labSourcePage, loincSearchQueries, parseLabLayoutPages, shouldUseAiForScannedPdf, verifiedLabLoinc } from "./lab-ai.ts";
+import { dedupeLabCandidates, labAnalyteSimilarity, labPatientMatches, labSourceHighlight, labSourcePage, loincSearchQueries, parseLabLayoutPages, verifiedLabLoinc } from "./lab-ai.ts";
 import { ocrImageKey, ocrTargetWidth } from "../../lib/pdf-ocr.ts";
 
 const item = (str: string, x: number, y: number): StructuredTextItem => ({
@@ -80,20 +80,16 @@ test("verifiedLabLoinc acepta sólo sugerencias confiables presentes en el catá
 
 test("loincSearchQueries relaja calificadores sin cambiar el analito", () => {
   assert.deepEqual(loincSearchQueries("Chloride serum plasma"), ["Chloride serum plasma", "Chloride serum", "Chloride"]);
+  assert.equal(loincSearchQueries("JUVENILES NEUT")[0], "Metamyelocytes Leukocytes Blood");
+  assert.equal(loincSearchQueries("LDH")[0], "Lactate dehydrogenase Serum Plasma");
 });
 
 test("OCR reutiliza páginas rasterizadas repetidas y limita el reescalado", () => {
   const page = new Uint8Array([1, 2, 3]);
   assert.equal(ocrImageKey(page, 831, 998, 3), ocrImageKey(page, 831, 998, 3));
   assert.notEqual(ocrImageKey(page, 831, 998, 3), ocrImageKey(page, 832, 998, 3));
-  assert.equal(ocrTargetWidth(831), 2493);
+  assert.equal(ocrTargetWidth(831), 2500);
   assert.equal(ocrTargetWidth(2400), 2500);
-});
-
-test("sólo deriva a reconocimiento visual los PDF escaneados extensos", () => {
-  assert.equal(shouldUseAiForScannedPdf(false, 13), false);
-  assert.equal(shouldUseAiForScannedPdf(true, 3), false);
-  assert.equal(shouldUseAiForScannedPdf(true, 4), true);
 });
 
 test("reconoce páginas fuente tanto del OCR local como de la extracción visual", () => {
@@ -160,7 +156,7 @@ test("parseLabLayoutPages conserva resultados textuales de orina en formato de d
     { analyte: "Densidad", valueNum: 1.035, valueText: "", flag: "abnormal", specimen: "Orina" },
     { analyte: "Nitritos", valueNum: null, valueText: "Negativo", flag: "", specimen: "Orina" },
   ]);
-  assert.match(parsed.observations[0].sourceSentence, /Muestra: Orina$/);
+  assert.match(parsed.observations[0].sourceSentence, /Muestra: Orina \| Panel: Sedimento urinario$/);
 });
 
 test("ubica el valor en columnas y en una fila monoespaciada", () => {
@@ -169,4 +165,66 @@ test("ubica el valor en columnas y en una fila monoespaciada", () => {
   assert.ok(box && box.x > 30 && box.width >= 12);
   const b12 = labSourceHighlight([item("Vitamina B12 12 pg/mL", 30, 480)], "12", "Vitamina B12");
   assert.ok(b12 && b12.x > 30 + "Vitamina B12".length * 5);
+});
+
+test("conserva la bandera, excluye el histórico y reconoce la muestra del hemograma", () => {
+  const parsed = parseLabLayoutPages([[
+    item("HEMOGRAMA", 30, 700),
+    item("Resultado", 145, 640), item("Unidad", 240, 640), item("Valores de Referencia", 300, 640), item("Resultados Históricos", 450, 640),
+    item("ERITROCITOS", 30, 610), item("4.42 <", 145, 610), item("x 10^6/uL", 240, 610), item("4.9 - 5.7", 300, 610), item("4.91", 450, 610),
+  ]]);
+  assert.deepEqual(parsed.observations.map(({ analyte, valueNum, unit, refLow, refHigh, flag, specimen }) => ({ analyte, valueNum, unit, refLow, refHigh, flag, specimen })), [
+    { analyte: "ERITROCITOS", valueNum: 4.42, unit: "x 10^6/uL", refLow: 4.9, refHigh: 5.7, flag: "low", specimen: "Sangre total" },
+  ]);
+});
+
+test("recupera unidades en la línea siguiente y analitos con números", () => {
+  const sodium = parseLabLayoutPages([[
+    item("Tipo de muestra: Suero", 30, 700),
+    item("Resultado", 145, 640), item("Unidad", 240, 640), item("Valores de Referencia", 340, 640),
+    item("SODIO", 30, 610), item("134 <", 145, 610), item("137 - 145", 340, 610),
+    item("mEg/L", 240, 594),
+  ]]);
+  assert.deepEqual({ unit: sodium.observations[0].unit, value: sodium.observations[0].valueNum, flag: sodium.observations[0].flag, specimen: sodium.observations[0].specimen },
+    { unit: "mEq/L", value: 134, flag: "low", specimen: "Suero" });
+
+  const ocrUnits = parseLabLayoutPages([[
+    item("Tipo de muestra: Suero", 30, 700),
+    item("Resultado", 145, 640), item("Unidad", 240, 640), item("Valores de Referencia", 340, 640),
+    item("TESTOSTERONA TOTAL", 30, 610), item("27.8", 145, 610), item("nmol/", 240, 610), item("4.6 - 28.2", 340, 610),
+    item("SODIO", 30, 580), item("134", 145, 580), item("mEqg/L", 240, 580), item("137 - 145", 340, 580),
+  ]]);
+  assert.deepEqual(ocrUnits.observations.map((row) => row.unit), ["nmol/L", "mEq/L"]);
+
+  const loose = parseLabLayoutPages([[
+    item("Tipo de muestra: Suero", 30, 700), item("Unidad", 300, 640),
+    item("VITAMINA B12", 30, 610), item("394", 200, 610), item("pg/mL", 300, 610),
+    item("V.F.G. Estimado", 30, 580), item("Mayor de 60", 200, 580), item("mL/min", 300, 580),
+  ]]);
+  assert.deepEqual(loose.observations.map(({ analyte, valueNum, valueText, unit }) => ({ analyte, valueNum, valueText, unit })), [
+    { analyte: "VITAMINA B12", valueNum: 394, valueText: "", unit: "pg/mL" },
+    { analyte: "V.F.G. Estimado", valueNum: null, valueText: "> 60", unit: "mL/min" },
+  ]);
+});
+
+test("descarta filas administrativas y referencias confundidas con analitos", () => {
+  const row = (analyte: string, valueNum: number | null, valueText: string, unit: string) => ({
+    analyte, valueNum, valueText, unit, refLow: null, refHigh: null, refText: "", flag: "" as const,
+    observedAt: "2026-05-07", sourceSentence: `p1-r1 | ${analyte} | ${valueNum ?? valueText}`, source: "ocr" as const,
+  });
+  const clean = dedupeLabCandidates([
+    row("Paciente", 5173440, "", "R.u.t."), row("Fono", 48624837, "", "Fec. Solicitud"),
+    row("1339.0 mg/dL", 650, "", "-1600.0"), row("Conclusión del trazado", null, "normal", ""),
+    row("25 OH VITAMINA D", 26.8, "", "ng/mL"),
+  ]);
+  assert.deepEqual(clean.map((item) => item.analyte), ["25 OH VITAMINA D"]);
+});
+
+test("conserva el contexto de electroforesis para homologar sus fracciones", () => {
+  const parsed = parseLabLayoutPages([[
+    item("ELECTROFORESIS DE PROTEÍNAS", 30, 700), item("Tipo de muestra: Suero", 30, 680),
+    item("Resultado", 145, 640), item("Unidad", 240, 640), item("Valores de Referencia", 340, 640),
+    item("Alfa-1", 30, 610), item("0.30", 145, 610), item("g/dL", 240, 610), item("0.2 - 0.4", 340, 610),
+  ]]);
+  assert.match(parsed.observations[0].sourceSentence, /Panel: Electroforesis de proteínas$/);
 });

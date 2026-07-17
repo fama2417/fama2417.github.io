@@ -139,7 +139,7 @@ function findHeader(rows: LayoutRow[]): Header | null {
     const unit = labels.find(({ text }) => /^unidad(?:es)?$/.test(text));
     const reference = labels.find(({ text }) => /valor(?:es)? de referencia/.test(text));
     if (!result || !unit || !reference) continue;
-    const method = labels.find(({ text }) => text === "metodo");
+    const method = labels.find(({ text }) => text === "metodo" || /resultados? historicos?/.test(text));
     const skip = labels.find(({ item, text }) => item.x > unit.item.x && item.x < reference.item.x && /^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$/.test(text));
     return { y: row.y, exam: exam?.item.x ?? 0, result: result.item.x, unit: unit.item.x, reference: reference.item.x, skip: skip?.item.x ?? Number.POSITIVE_INFINITY, method: method?.item.x ?? Number.POSITIVE_INFINITY };
   }
@@ -164,8 +164,30 @@ const cleanExtractedUnit = (value: string) => value
   .trim()
   .replace(/^\((.*)\)$/, "$1")
   .replace(/^[<>]\s*/, "")
-  .replace(/mEg\/L/gi, "mEq/L");
+  .replace(/mEg\/L/gi, "mEq/L")
+  .replace(/^mEqg\/L$/i, "mEq/L")
+  .replace(/^nmol\/$/i, "nmol/L");
 const ignored = (value: string) => /^(?:_{4,}|tipo de muestra|examen procesado|fecha de recepcion|metodo analitico|el resultado de este examen)/i.test(plain(value));
+const specimenFromRows = (rows: LayoutRow[]) => {
+  const pageText = plain(rows.map(rowText).join(" "));
+  const explicit = pageText.match(/(?:tipo(?: de)? muestra|muestra)\s*:\s*(sangre total|suero|plasma|orina)\b/)?.[1];
+  if (explicit) return explicit.replace(/\b\w/g, (letter) => letter.toUpperCase());
+  if (/tipo(?: de)? muestra/.test(pageText)) {
+    const nearby = pageText.match(/\b(sangre total|suero|plasma|orina)\b/)?.[1];
+    if (nearby) return nearby.replace(/\b\w/g, (letter) => letter.toUpperCase());
+  }
+  if (/orina completa|uroanalisis/.test(pageText)) return "Orina";
+  if (/hemograma/.test(pageText)) return "Sangre total";
+  if (/coagulacion|tromboplastina|protrombina/.test(pageText)) return "Plasma";
+  return "";
+};
+
+const panelFromRows = (rows: LayoutRow[]) => {
+  const text = plain(rows.map(rowText).join(" "));
+  if (/electroforesis (?:de )?proteinas|proteinograma/.test(text)) return "Electroforesis de proteínas";
+  if (/analisis microscopico|sedimento urinario/.test(text)) return "Sedimento urinario";
+  return "";
+};
 const dateOnly = (value: string) => {
   const iso = value.match(/\b(20\d{2})-(\d{2})-(\d{2})\b/);
   if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
@@ -195,7 +217,7 @@ function metadata(rows: LayoutRow[][]) {
   };
 }
 
-function normalizedCandidate(row: z.infer<typeof CompactLabRowSchema>, observedAt: string, source: "ocr" | "ai", specimen = ""): LabCandidate | null {
+function normalizedCandidate(row: z.infer<typeof CompactLabRowSchema>, observedAt: string, source: "ocr" | "ai", specimen = "", panel = ""): LabCandidate | null {
   const analyte = row.analyte.trim();
   const rawValue = row.value.trim();
   if (!analyte || !rawValue) return null;
@@ -211,13 +233,13 @@ function normalizedCandidate(row: z.infer<typeof CompactLabRowSchema>, observedA
     ...reference,
     flag: (explicit || derived) as LabFlag,
     observedAt: dateOnly(observedAt),
-    sourceSentence: [row.sourceId, analyte, rawValue, row.unit, row.reference, specimen ? `Muestra: ${specimen}` : ""].filter(Boolean).join(" | "),
+    sourceSentence: [row.sourceId, analyte, rawValue, row.unit, row.reference, specimen ? `Muestra: ${specimen}` : "", panel ? `Panel: ${panel}` : ""].filter(Boolean).join(" | "),
     source,
     ...(specimen ? { specimen } : {}),
   };
 }
 
-function parseTwoColumnLabRows(rows: LayoutRow[], observedAt: string) {
+function parseTwoColumnLabRows(rows: LayoutRow[], observedAt: string, defaultSpecimen = "", panel = "") {
   const observations: LabCandidate[] = [];
   const header = rows.find((row) => /^examen\s+resultado$/.test(plain(rowText(row))));
   if (!header) return { foundHeader: false, observations, aiLines: [] as string[] };
@@ -227,7 +249,7 @@ function parseTwoColumnLabRows(rows: LayoutRow[], observedAt: string) {
 
   const cut = result.x - 15;
   const aiLines: string[] = [];
-  let specimen = "";
+  let specimen = defaultSpecimen;
   for (const row of rows.filter((candidate) => candidate.y < header.y - 2)) {
     const text = rowText(row), normalized = plain(text);
     if (/^(?:examen validado|la interpretacion|unidad de medida|valor de referencia|nota\s*:)/.test(normalized)) break;
@@ -246,7 +268,7 @@ function parseTwoColumnLabRows(rows: LayoutRow[], observedAt: string) {
       reference: range ? `${range[4]} - ${range[5]}` : "",
       reportedFlag: range?.[2] || row.items.some((item) => item.str.trim() === "*") ? "abnormal" as const : "" as const,
     };
-    const parsed = normalizedCandidate({ ...compact, specimen }, observedAt, "ocr", specimen);
+    const parsed = normalizedCandidate({ ...compact, specimen }, observedAt, "ocr", specimen, panel);
     if (!parsed) continue;
     observations.push(parsed);
     aiLines.push([row.id, analyte, compact.value, compact.unit, compact.reference, specimen].join("\t"));
@@ -254,14 +276,12 @@ function parseTwoColumnLabRows(rows: LayoutRow[], observedAt: string) {
   return { foundHeader: true, observations, aiLines };
 }
 
-function parseMonospacedLabRows(rows: LayoutRow[], observedAt: string) {
+function parseMonospacedLabRows(rows: LayoutRow[], observedAt: string, defaultSpecimen = "", panel = "") {
   const observations: LabCandidate[] = [];
   const aiLines: string[] = [];
   let foundHeader = false;
   let insideTable = false;
-  const specimens = rows.map(rowText).map((text) => text.match(/^(?:tipo(?: de)?\s+)?muestra\s*:\s*(.+)$/i)?.[1]?.trim()).filter((value): value is string => !!value);
-  const rawSpecimen = specimens.at(-1) ?? "";
-  const specimen = /orina|urin/i.test(rawSpecimen) ? "Orina" : /sangre total/i.test(rawSpecimen) ? "Sangre total" : /suero/i.test(rawSpecimen) ? "Suero" : rawSpecimen;
+  const specimen = defaultSpecimen;
 
   for (const row of rows) {
     const text = rowText(row);
@@ -318,7 +338,7 @@ function parseMonospacedLabRows(rows: LayoutRow[], observedAt: string) {
     }
 
     if (!compact) continue;
-    const parsed = normalizedCandidate({ ...compact, specimen }, observedAt, "ocr", specimen);
+    const parsed = normalizedCandidate({ ...compact, specimen }, observedAt, "ocr", specimen, panel);
     if (!parsed) continue;
     observations.push(parsed);
     aiLines.push([row.id, compact.analyte, compact.value, compact.unit, compact.reference].join("\t"));
@@ -327,21 +347,21 @@ function parseMonospacedLabRows(rows: LayoutRow[], observedAt: string) {
   return { foundHeader, observations, aiLines };
 }
 
-function parseLooseColumnRows(rows: LayoutRow[], observedAt: string) {
+function parseLooseColumnRows(rows: LayoutRow[], observedAt: string, defaultSpecimen = "", panel = "") {
   const observations: LabCandidate[] = [];
-  const specimenLine = rows.map(rowText).find((text) => /tipo de muestra\s*:/i.test(text)) ?? "";
-  const specimen = specimenLine.match(/tipo de muestra\s*:\s*(.+?)(?=\s+servicio\s*:|$)/i)?.[1]?.trim() ?? "";
+  const specimen = defaultSpecimen;
   const historyHeader = rows.flatMap((row) => row.items).find((item) => /resultados? historicos?/i.test(plain(item.str)));
   for (const row of rows) {
     const cells = row.items.filter((item) => item.str.trim()).sort((a, b) => a.x - b.x), analyteCell = cells[0];
-    if (!analyteCell || analyteCell.x > 150 || /\d|:|resultado|unidad|valor|referencia|intervalo|adulto|niñ|embaraz|procesado|autorizado|tecnolog|metod|nota|tipo de muestra|fecha|rut|edad|profesional|servicio|informe|laboratorio/i.test(analyteCell.str)) continue;
-    const valueCell = cells.find((item) => item.x > analyteCell.x && /^\s*[<>]?\s*-?\d+(?:[.,]\d+)?\s*[<>]?\s*$/.test(item.str));
+    if (!analyteCell || analyteCell.x > 150 || /:|resultado|unidad|valor|referencia|intervalo|adulto|niñ|embaraz|procesado|autorizado|tecnolog|metod|nota|tipo de muestra|fecha|rut|edad|profesional|servicio|informe|laboratorio/i.test(analyteCell.str)) continue;
+    const valueCell = cells.find((item) => item.x > analyteCell.x && /^(?:\s*[<>]?\s*-?\d+(?:[.,]\d+)?\s*[<>]?\s*|\s*mayor\s+(?:de|a)\s+\d+(?:[.,]\d+)?\s*)$/i.test(item.str));
     if (!valueCell) continue;
     const unitCell = cells.find((item) => item.x > valueCell.x && /[%a-zµμ]/i.test(item.str) && item.str.length <= 30);
     if (!unitCell) continue;
     const reference = cells.filter((item) => item.x > unitCell.x && (!historyHeader || item.x < historyHeader.x)).map((item) => item.str).join(" ");
-    const compact = { sourceId: row.id, analyte: analyteCell.str, value: valueCell.str.replace(/[<>]/g, "").trim(), unit: unitCell.str, reference, specimen, reportedFlag: /[<>]/.test(valueCell.str) ? "abnormal" as const : "" as const };
-    const parsed = normalizedCandidate(compact, observedAt, "ocr", specimen);
+    const value = valueCell.str.replace(/^mayor\s+(?:de|a)\s+/i, "> ").trim();
+    const compact = { sourceId: row.id, analyte: analyteCell.str, value, unit: unitCell.str, reference, specimen, reportedFlag: /[<>]/.test(valueCell.str) ? "abnormal" as const : "" as const };
+    const parsed = normalizedCandidate(compact, observedAt, "ocr", specimen, panel);
     if (parsed) observations.push(parsed);
   }
   return observations;
@@ -355,23 +375,25 @@ export function parseLabLayoutPages(pages: StructuredTextItem[][]): Omit<Prepare
   let candidateRows = 0;
 
   for (const rows of layout) {
+    const pageSpecimen = specimenFromRows(rows);
+    const pagePanel = panelFromRows(rows);
     const header = findHeader(rows);
     if (!header) {
-      const twoColumn = parseTwoColumnLabRows(rows, documentMetadata.observedAt);
+      const twoColumn = parseTwoColumnLabRows(rows, documentMetadata.observedAt, pageSpecimen, pagePanel);
       if (twoColumn.foundHeader) {
         observations.push(...twoColumn.observations);
         candidateRows += twoColumn.observations.length;
         aiLines.push(...twoColumn.aiLines);
         continue;
       }
-      const monospaced = parseMonospacedLabRows(rows, documentMetadata.observedAt);
+      const monospaced = parseMonospacedLabRows(rows, documentMetadata.observedAt, pageSpecimen, pagePanel);
       if (monospaced.foundHeader) {
         observations.push(...monospaced.observations);
         candidateRows += monospaced.observations.length;
         aiLines.push(...monospaced.aiLines);
         continue;
       }
-      const loose = parseLooseColumnRows(rows, documentMetadata.observedAt);
+      const loose = parseLooseColumnRows(rows, documentMetadata.observedAt, pageSpecimen, pagePanel);
       if (loose.length) { observations.push(...loose); candidateRows += loose.length; continue; }
       for (const row of rows.filter((candidate) => !ignored(rowText(candidate)))) aiLines.push(`${row.id}\t${rowText(row)}`);
       continue;
@@ -383,24 +405,31 @@ export function parseLabLayoutPages(pages: StructuredTextItem[][]): Omit<Prepare
       const text = rowText(row);
       if (/^(?:a partir|procesado por|autorizado por|tecnologia|metodo|el resultado de este examen|laboratorio adscrito|survey del college|informe emitido)/.test(plain(text))) break;
       if (ignored(text)) continue;
-      if (values[0] && resultValue(values[1])) {
+      const result = values[1].replace(/\s+(?:<|>|\*)$/, "").trim();
+      if (values[0] && resultValue(result)) {
         candidateRows += 1;
-        const compact = { sourceId: row.id, analyte: values[0], value: values[1], unit: values[2], reference: values[3], specimen: "", reportedFlag: /\[\s*\*\s*\]/.test(values[3]) ? "abnormal" as const : "" as const };
-        const parsed = normalizedCandidate(compact, documentMetadata.observedAt, "ocr");
+        const reportedFlag = /\s<$/.test(values[1]) ? "low" as const : /\s>$/.test(values[1]) ? "high" as const : /\*$|\[\s*\*\s*\]/.test(`${values[1]} ${values[3]}`) ? "abnormal" as const : "" as const;
+        const compact = { sourceId: row.id, analyte: values[0], value: result, unit: values[2], reference: values[3], specimen: pageSpecimen, reportedFlag };
+        const parsed = normalizedCandidate(compact, documentMetadata.observedAt, "ocr", pageSpecimen, pagePanel);
         if (parsed) {
           observations.push(parsed);
           last = parsed;
-          aiLines.push([row.id, ...values].join("\t"));
+          aiLines.push([row.id, values[0], result, values[2], values[3], pageSpecimen].join("\t"));
         }
         continue;
       }
-      if (last && !values[0] && !values[1] && !values[2] && values[3]) {
+      if (last && !values[0] && !values[1] && values[2] && !last.unit) {
+        last.unit = cleanExtractedUnit(values[2]);
+        const parts = last.sourceSentence.split(" | ");
+        parts[3] = last.unit;
+        last.sourceSentence = parts.join(" | ");
+      } else if (last && !values[0] && !values[1] && !values[2] && values[3]) {
         last.refText = [last.refText, values[3]].filter(Boolean).join("; ");
         aiLines.push(`${row.id}\t\t\t\t${values[3]}`);
       } else if (values[0] && !ignored(values[0])) aiLines.push(`${row.id}\t${values[0]}`);
     }
     if (observations.length === before) {
-      const loose = parseLooseColumnRows(rows, documentMetadata.observedAt);
+      const loose = parseLooseColumnRows(rows, documentMetadata.observedAt, pageSpecimen, pagePanel);
       observations.push(...loose); candidateRows += loose.length;
     }
   }
@@ -412,8 +441,6 @@ export function parseLabLayoutPages(pages: StructuredTextItem[][]): Omit<Prepare
     needsAi: observations.length === 0 || candidateRows > observations.length,
   };
 }
-
-export const shouldUseAiForScannedPdf = (scanned: boolean, pageCount: number) => scanned && pageCount >= 4;
 
 export async function prepareLabPdf(bytes: Uint8Array, deferScannedOcr = false): Promise<PreparedLabPdf> {
   const extracted = await extractTextItems(bytes.slice());
@@ -437,6 +464,8 @@ export function labPatientMatches(extracted: { patientName: string; patientIdent
 export function dedupeLabCandidates(rows: LabCandidate[]) {
   const seen = new Set<string>();
   return rows.filter((row) => {
+    const analyte = plain(row.analyte).replace(/\s+/g, " ").trim();
+    if (/^(?:paciente|fono|rut|r u t|conclusion\b)/.test(analyte) || /^\d+(?:[.,]\d+)?\s*(?:mg|g|ug|ng|pg|u)\//.test(analyte)) return false;
     const value = row.valueNum === null ? normalizeIdentity(row.valueText) : String(row.valueNum);
     const key = [normalizeIdentity(row.analyte), value, normalizeIdentity(row.unit), row.observedAt].join("|");
     if (seen.has(key)) return false;
@@ -455,7 +484,12 @@ export function verifiedLabLoinc(suggestions: LabLoincSuggestion[], knownCodes: 
 
 export const loincSearchQueries = (term: string) => {
   const words = term.trim().split(/\s+/).filter(Boolean);
-  return words.map((_, index) => words.slice(0, words.length - index).join(" "));
+  const aliases: Record<string, string[]> = {
+    juvenilesneut: ["Metamyelocytes Leukocytes Blood"],
+    deshlacticatotalldh: ["Lactate dehydrogenase Serum Plasma"],
+    ldh: ["Lactate dehydrogenase Serum Plasma"],
+  };
+  return [...(aliases[normalizeIdentity(term)] ?? []), ...words.map((_, index) => words.slice(0, words.length - index).join(" "))];
 };
 
 const structuredPayload = (response: unknown) => {

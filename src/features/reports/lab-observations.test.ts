@@ -40,6 +40,7 @@ test("clasifica nombres habituales aunque LOINC todavía esté pendiente", () =>
   assert.equal(labCategory({ analyte: "Capacidad fijación fierro" }), "nutrition");
   assert.equal(labCategory({ analyte: "CAPACIDAD FIJACION DE Fe" }), "nutrition");
   assert.equal(labCategory({ analyte: "TROPONINA I" }), "chemistry");
+  assert.equal(labCategory({ analyte: "Aspecto", sourceSentence: "p33-r27 | Aspecto | Muy Turb | Muestra: Orina" }), "urine");
 });
 
 test("convierte unidades UCUM compatibles sin mezclar masa y cantidad molar", () => {
