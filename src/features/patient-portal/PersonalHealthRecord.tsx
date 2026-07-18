@@ -10,7 +10,7 @@ import type { PhrHealthItem } from "./health-summary";
 import { PhrCaregivers } from "./PhrCaregivers";
 import { PhrDashboard, PhrTimeline } from "./PhrLongitudinal";
 import { PhrHealthSummary } from "./PhrHealthSummary";
-import { inspectPatientPhoto, isPhrClinicalArea, PHR_CLINICAL_AREAS, PHR_CLINICAL_AREA_LABELS, documentTypeForSelection, suggestedPatientDocumentName } from "./documents";
+import { inspectPatientPhoto, isOrganizableClinicalDocument, isPhrClinicalArea, PHR_CLINICAL_AREAS, PHR_CLINICAL_AREA_LABELS, documentTypeForSelection, suggestedPatientDocumentName } from "./documents";
 import { PhrImagingTextDialog } from "./PhrImagingTextDialog";
 import type { PhrImagingText } from "./imaging";
 import { PhrResults } from "./PhrResults";
@@ -70,13 +70,13 @@ export function PersonalHealthRecord() {
       const selection = String(data.get("clinicalArea")), documentType = documentTypeForSelection(selection) as PortalDocument["documentType"];
       const uploaded = await uploadPatientDocument({ file, displayName: String(data.get("displayName")), documentDate: String(data.get("documentDate")), documentType, clinicalArea: isPhrClinicalArea(selection) ? selection : "other", sourceInstitution: String(data.get("sourceInstitution")) });
       let extractedText: PhrImagingText | undefined;
-      if (documentType === "imaging" && ["application/pdf", "image/jpeg", "image/png"].includes(file.type)) try {
+      if (isOrganizableClinicalDocument(documentType) && ["application/pdf", "image/jpeg", "image/png"].includes(file.type)) try {
         extractedText = await extractPhrImagingText(uploaded.documentId);
-      } catch { /* El documento queda guardado y puede reintentarse desde Imagenología. */ }
+      } catch { /* El documento queda guardado y puede reintentarse desde Resultados. */ }
       const nextDocuments = await fetchPatientDocuments(ownerUserId); setDocuments(nextDocuments); form.reset();
       const saved = nextDocuments.find((document) => document.id === uploaded.documentId);
       if (extractedText && saved) { setImagingDraft(extractedText); setImagingDocument(saved); }
-      setNotice(extractedText ? "Texto extraído automáticamente. Revísalo antes de guardarlo." : documentType === "imaging" ? "Documento guardado. No pudimos organizarlo automáticamente; puedes reintentar en Imagenología." : "Documento guardado en tu registro personal.");
+      setNotice(extractedText ? "Texto extraído automáticamente. Revísalo antes de guardarlo." : isOrganizableClinicalDocument(documentType) ? "Documento guardado. No pudimos organizarlo automáticamente; puedes reintentar desde Resultados." : "Documento guardado en tu registro personal.");
     }
     catch (cause) { setError(cause instanceof Error ? cause.message : "No fue posible guardar el documento."); } finally { setBusy(false); }
   }
@@ -94,7 +94,7 @@ export function PersonalHealthRecord() {
   const availableTabs = visiblePhrTabs(readOnly);
   const mainTabs = availableTabs.filter(([id]) => id !== "perfil");
   const navigate = (next: Tab) => { setTab(next); setNotice(""); setError(""); setAccountOpen(false); setMoreOpen(false); };
-  const documentList = (items: PortalDocument[]) => items.length ? <ul className="portal-list">{items.map((document) => <li key={document.id}><div className="portal-document-detail"><strong title={document.filename}>{document.filename}</strong><span>{document.documentType === "prescription" ? documentLabels.prescription : PHR_CLINICAL_AREA_LABELS[document.clinicalArea]} · {document.sourceInstitution} · {fileSize(document.sizeBytes)}</span><span>{shownDate(document.documentDate ?? document.createdAt)} · {friendlyDocumentName(document.documentType)}</span></div><div className="portal-document-actions"><a className="button secondary" href={document.url} target="_blank" rel="noreferrer" aria-label={`Abrir ${document.filename}`}>Abrir</a>{!readOnly && document.documentType === "imaging" && ["application/pdf", "image/jpeg", "image/png"].includes(document.mimeType) && <button className="button secondary" disabled={busy} type="button" onClick={() => setImagingDocument(document)}>{document.extractedText ? "Revisar informe organizado" : "Extraer texto"}</button>}{!readOnly && <button className="text-button danger-text" disabled={busy} type="button" onClick={() => void remove(document)}>Eliminar</button>}</div></li>)}</ul> : <p className="empty-state">Todavía no tienes documentos.</p>;
+  const documentList = (items: PortalDocument[]) => items.length ? <ul className="portal-list">{items.map((document) => <li key={document.id}><div className="portal-document-detail"><strong title={document.filename}>{document.filename}</strong><span>{document.documentType === "prescription" ? documentLabels.prescription : PHR_CLINICAL_AREA_LABELS[document.clinicalArea]} · {document.sourceInstitution} · {fileSize(document.sizeBytes)}</span><span>{shownDate(document.documentDate ?? document.createdAt)} · {friendlyDocumentName(document.documentType)}</span></div><div className="portal-document-actions"><a className="button secondary" href={document.url} target="_blank" rel="noreferrer" aria-label={`Abrir ${document.filename}`}>Abrir</a>{!readOnly && isOrganizableClinicalDocument(document.documentType) && ["application/pdf", "image/jpeg", "image/png"].includes(document.mimeType) && <button className="button secondary" disabled={busy} type="button" onClick={() => setImagingDocument(document)}>{document.extractedText ? "Revisar informe organizado" : "Organizar contenido"}</button>}{!readOnly && <button className="text-button danger-text" disabled={busy} type="button" onClick={() => void remove(document)}>Eliminar</button>}</div></li>)}</ul> : <p className="empty-state">Todavía no tienes documentos.</p>;
 
   return <main className="phr-app"><div className="phr-shell">
     <header className="phr-app-header">

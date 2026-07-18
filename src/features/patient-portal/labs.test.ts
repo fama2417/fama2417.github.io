@@ -70,6 +70,10 @@ test("corrige alias OCR y evita códigos de otra propiedad o muestra", () => {
     ["R.D.W.", "%", "30385-9"], ["BACILIFORMES NEUT", "%", "26508-2"],
     ["VHS", "mm/hr", "30341-2"], ["TROPONINA I", "ug/L", "10839-9"],
     ["TESTOSTERONA TOTAL", "nmol/L", "14913-8"], ["CORTISOL", "nmol/L", "14675-3"],
+    ["Fosf. Alcalinas", "U/L", "6768-6"], ["SGOT", "U/L", "1920-8"],
+    ["Tiroxina Libre (FT4)", "ng/dL", "3024-7"], ["VPM", "fL", "28542-9"],
+    ["R.A. Eosinófilos", "x10^3/uL", "26449-9"], ["R.A. Linfocitos", "x10^3/uL", "26474-7"],
+    ["R.A. Neutrófilos", "x10^3/uL", "26499-4"],
   ] as const;
   cases.forEach(([analyte, unit, code]) => assert.equal(vettedPhrLabIdentity({ analyte, unit })?.code, code, analyte));
   assert.equal(vettedPhrLabIdentity({ analyte: "LDH", unit: "U/L" }), null);
@@ -102,8 +106,8 @@ test("deja amarillas las equivalencias con unidad o alias implícito", () => {
   assert.equal(reviewPhrLabIdentity({ analyte: "Desh.Láctica Total(LDH)", unit: "U/L", specimen: "Orina" }), null);
 });
 
-test("separa nombre original, nombre canónico y confianza de homologación", () => {
-  assert.equal(phrLabDisplayName({ analyte: "ERITROCPTO", canonicalAnalyte: "Eritrocitos en sangre" }), "Eritrocitos en sangre");
+test("no presenta una sugerencia canónica como homologación confirmada", () => {
+  assert.equal(phrLabDisplayName({ analyte: "PCR", canonicalAnalyte: "C reactive protein [Mass/volume] in Serum" }), "PCR");
   assert.deepEqual(phrLoincDecision(.96, .72), { confidence: .9, status: "matched" });
   assert.deepEqual(phrLoincDecision(.72, .5), { confidence: .67, status: "review" });
 });

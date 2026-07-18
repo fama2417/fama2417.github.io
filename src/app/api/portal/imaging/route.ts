@@ -3,6 +3,7 @@ import OpenAI from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
 import { extractText } from "unpdf";
 import { z } from "zod";
+import { isOrganizableClinicalDocument, isPhrClinicalArea, PHR_CLINICAL_AREA_LABELS } from "@/features/patient-portal/documents.ts";
 import { structurePhrImagingText, type PhrImagingText } from "@/features/patient-portal/imaging.ts";
 import { aiConfig } from "@/features/reports/ai-budget.ts";
 import { sanitizeTextForAi } from "@/features/reports/ai-sanitizer.ts";
@@ -16,14 +17,14 @@ const ImagingTextSchema = z.object({ clinicalIndication: z.string(), technique: 
 
 const parsedText = (response: any) => ImagingTextSchema.parse(response.output_parsed ?? response.output?.flatMap((item: any) => item.content ?? []).find((content: any) => content?.parsed)?.parsed ?? JSON.parse(response.output_text));
 
-async function organizeImagingText(fullText: string, patientName: string) {
+async function organizeClinicalText(fullText: string, patientName: string, clinicalArea: string) {
   const config = aiConfig(), client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const name = patientName.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const safeText = sanitizeTextForAi(fullText).replace(name ? new RegExp(name, "gi") : /$a/, "[PACIENTE]");
   const response = await client.responses.parse({
     model: config.model,
     input: [
-      { role: "system", content: "Organiza un informe radiológico ya transcrito. Conserva indicación, técnica, hallazgos e impresión sin agregar datos y excluye nombres, identificadores, firmas, páginas y textos administrativos. En plainLanguage explica en español simple, con 2 a 5 puntos breves, únicamente lo que el informe dice; aclara términos técnicos entre paréntesis, sin diagnosticar, inferir causas, recomendar tratamientos ni reemplazar al profesional. fullText debe quedar vacío." },
+      { role: "system", content: `Organiza un informe clínico ya transcrito del área ${clinicalArea}. Conserva motivo o indicación, técnica o procedimiento, hallazgos o resultados y la conclusión, interpretación o diagnóstico tal como fueron informados. Si una sección no existe, déjala vacía. No agregues ni infieras datos y excluye nombres, identificadores, firmas, páginas y textos administrativos. En plainLanguage explica en español simple, con 2 a 5 puntos breves, únicamente lo que el informe dice; aclara términos técnicos entre paréntesis, sin crear diagnósticos, inferir causas, recomendar tratamientos ni reemplazar al profesional. fullText debe quedar vacío.` },
       { role: "user", content: safeText },
     ],
     text: { format: zodTextFormat(ImagingTextSchema, "phr_imaging_text") }, max_output_tokens: Math.min(config.maxOutputTokens, 4000), store: false,
@@ -32,13 +33,13 @@ async function organizeImagingText(fullText: string, patientName: string) {
   return { text: { ...parsedText(response), fullText }, inputTokens: usage.input_tokens ?? null, outputTokens: usage.output_tokens ?? null };
 }
 
-async function extractImagingPhoto(bytes: Uint8Array, mimeType: string) {
+async function extractClinicalPhoto(bytes: Uint8Array, mimeType: string, clinicalArea: string) {
   const config = aiConfig(), client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const response = await client.responses.parse({
     model: config.model,
     input: [
-      { role: "system", content: "Transcribe un informe radiológico fotografiado. No agregues datos. Conserva el texto original en fullText, separa las secciones clínicas y excluye firmas o datos administrativos. En plainLanguage explica con 2 a 5 puntos breves únicamente lo que dice el informe, aclarando términos técnicos sin diagnosticar ni recomendar tratamientos." },
-      { role: "user", content: [{ type: "input_image", image_url: `data:${mimeType};base64,${Buffer.from(bytes).toString("base64")}`, detail: "high" }, { type: "input_text", text: "Extrae indicación clínica, técnica, hallazgos, conclusión o impresión, explicación simple y transcripción completa." }] },
+      { role: "system", content: `Transcribe un informe clínico fotografiado del área ${clinicalArea}. No agregues datos. Conserva el texto original en fullText, separa las secciones clínicas y excluye firmas o datos administrativos. Si una sección no existe, déjala vacía. En plainLanguage explica con 2 a 5 puntos breves únicamente lo que dice el informe, aclarando términos técnicos sin crear diagnósticos ni recomendar tratamientos.` },
+      { role: "user", content: [{ type: "input_image", image_url: `data:${mimeType};base64,${Buffer.from(bytes).toString("base64")}`, detail: "high" }, { type: "input_text", text: "Extrae motivo o indicación, técnica o procedimiento, hallazgos o resultados, conclusión o interpretación, explicación simple y transcripción completa." }] },
     ],
     text: { format: zodTextFormat(ImagingTextSchema, "phr_imaging_text") }, max_output_tokens: Math.min(config.maxOutputTokens, 4000), store: false,
   } as any, { timeout: config.timeoutMs });
@@ -52,13 +53,14 @@ export async function POST(request: NextRequest) {
   if (auth instanceof NextResponse) return auth;
   const { documentId } = await request.json().catch(() => ({})) as { documentId?: string };
   if (!documentId || !uuid.test(documentId)) return NextResponse.json({ error: "Documento inválido." }, { status: 400 });
-  const document = await auth.db.from("patient_documents").select("storage_path, mime_type, size_bytes").eq("id", documentId).eq("owner_user_id", auth.user.id).eq("document_type", "imaging").maybeSingle();
-  if (!document.data) return NextResponse.json({ error: "Informe de radiología inexistente." }, { status: 404 });
+  const document = await auth.db.from("patient_documents").select("storage_path, mime_type, size_bytes, document_type, clinical_area").eq("id", documentId).eq("owner_user_id", auth.user.id).maybeSingle();
+  if (!document.data || !isOrganizableClinicalDocument(document.data.document_type)) return NextResponse.json({ error: "Informe clínico inexistente." }, { status: 404 });
   if (document.data.mime_type !== "application/pdf" && !imageTypes.has(document.data.mime_type)) return NextResponse.json({ error: "La extracción acepta PDF, JPG o PNG." }, { status: 415 });
   if (document.data.size_bytes > 10 * 1024 * 1024) return NextResponse.json({ error: "El archivo supera los 10 MB permitidos para extracción." }, { status: 413 });
   const downloaded = await auth.db.storage.from("patient-documents").download(document.data.storage_path);
   if (downloaded.error) return NextResponse.json({ error: "No fue posible leer el PDF." }, { status: 502 });
   const startedAt = Date.now(), bytes = new Uint8Array(await downloaded.data.arrayBuffer()), config = aiConfig();
+  const clinicalArea = isPhrClinicalArea(document.data.clinical_area) ? PHR_CLINICAL_AREA_LABELS[document.data.clinical_area] : "otra especialidad";
   const start = new Date(); start.setUTCHours(0, 0, 0, 0);
   const attempts = config.enabled && process.env.OPENAI_API_KEY ? await auth.db.from("phr_product_events").select("id", { count: "exact", head: true }).eq("owner_user_id", auth.user.id).eq("event_name", "imaging_ai_attempted").gte("created_at", start.toISOString()) : { count: 0 };
   const aiAvailable = config.enabled && !!process.env.OPENAI_API_KEY && (attempts.count ?? 0) < Math.max(1, Number(process.env.PHR_AI_MAX_PER_DAY ?? 5));
@@ -70,7 +72,7 @@ export async function POST(request: NextRequest) {
     if (!aiAvailable) return NextResponse.json({ text: fallback, method });
     await recordPhrEvent(auth.db, auth.user.id, "imaging_ai_attempted", documentId, { mime_type: document.data.mime_type, size_bytes: document.data.size_bytes });
     try {
-      const result = await organizeImagingText(fullText, auth.profile.full_name);
+      const result = await organizeClinicalText(fullText, auth.profile.full_name, clinicalArea);
       await recordPhrEvent(auth.db, auth.user.id, "imaging_extraction_completed", documentId, { method: `${method}_ai`, duration_ms: Date.now() - startedAt, input_tokens: result.inputTokens, output_tokens: result.outputTokens });
       return NextResponse.json({ text: result.text, method: `${method}_ai` });
     } catch { return NextResponse.json({ text: fallback, method }); }
@@ -82,7 +84,7 @@ export async function POST(request: NextRequest) {
   if (!aiAvailable) return NextResponse.json({ error: config.enabled && process.env.OPENAI_API_KEY ? "Alcanzaste el límite diario de análisis automáticos." : "La extracción visual no está habilitada." }, { status: config.enabled && process.env.OPENAI_API_KEY ? 429 : 503 });
   await recordPhrEvent(auth.db, auth.user.id, "imaging_ai_attempted", documentId, { mime_type: document.data.mime_type, size_bytes: document.data.size_bytes });
   try {
-    const result = await extractImagingPhoto(bytes, document.data.mime_type);
+    const result = await extractClinicalPhoto(bytes, document.data.mime_type, clinicalArea);
     if (result.text.fullText.trim().length < 20) throw new Error("empty");
     await recordPhrEvent(auth.db, auth.user.id, "imaging_extraction_completed", documentId, { method: "ai_visual", duration_ms: Date.now() - startedAt, input_tokens: result.inputTokens, output_tokens: result.outputTokens });
     return NextResponse.json({ text: result.text, method: "ai_visual" });
@@ -99,7 +101,7 @@ export async function PATCH(request: NextRequest) {
   if (!body.documentId || !uuid.test(body.documentId) || !body.text) return NextResponse.json({ error: "Solicitud inválida." }, { status: 400 });
   const fields: (keyof PhrImagingText)[] = ["clinicalIndication", "technique", "findings", "impression", "plainLanguage", "fullText"];
   if (fields.some((field) => typeof body.text?.[field] !== "string") || fields.reduce((sum, field) => sum + body.text![field].length, 0) > 150000) return NextResponse.json({ error: "El texto extraído es inválido o demasiado extenso." }, { status: 400 });
-  const saved = await auth.db.from("patient_documents").update({ extracted_text: body.text, text_extracted_at: new Date().toISOString() }).eq("id", body.documentId).eq("owner_user_id", auth.user.id).eq("document_type", "imaging").select("mime_type").maybeSingle();
+  const saved = await auth.db.from("patient_documents").update({ extracted_text: body.text, text_extracted_at: new Date().toISOString() }).eq("id", body.documentId).eq("owner_user_id", auth.user.id).in("document_type", ["imaging", "other"]).select("mime_type").maybeSingle();
   if (saved.error || !saved.data) return NextResponse.json({ error: "No fue posible guardar las correcciones." }, { status: 502 });
   await recordPhrEvent(auth.db, auth.user.id, "imaging_text_confirmed", body.documentId, { method: saved.data.mime_type === "application/pdf" ? "local" : "ai_visual" });
   return NextResponse.json({ ok: true });

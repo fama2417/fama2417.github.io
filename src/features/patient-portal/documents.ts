@@ -23,6 +23,7 @@ export const PHR_CLINICAL_AREAS = Object.keys(PHR_CLINICAL_AREA_LABELS) as PhrCl
 export const isPhrClinicalArea = (value: string): value is PhrClinicalArea => PHR_CLINICAL_AREAS.includes(value as PhrClinicalArea);
 export const clinicalAreaForDocumentType = (type: string): PhrClinicalArea => type === "laboratory" || type === "imaging" ? type : "other";
 export const documentTypeForSelection = (value: string) => value === "laboratory" || value === "imaging" || value === "prescription" ? value : "other";
+export const isOrganizableClinicalDocument = (type: string) => type === "imaging" || type === "other";
 
 export const suggestedPatientDocumentName = (filename: string) => filename.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
 
