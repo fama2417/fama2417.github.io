@@ -52,6 +52,10 @@ test("homologa alias frecuentes sin mezclar mediciones relacionadas", () => {
   assert.equal(vettedPhrLabIdentity({ analyte: "% Saturación de Transferrin", unit: "%" })?.code, "2502-3");
   assert.equal(vettedPhrLabIdentity({ analyte: "SATURACION TRANSFERRINA", unit: "%" })?.trendKey, "iron-saturation");
   assert.equal(vettedPhrLabIdentity({ analyte: "Glicemia Media Estimada", unit: "mg/dL" })?.code, "27353-2");
+  assert.equal(vettedPhrLabIdentity({ analyte: "Glucosa basal", unit: "mg/dL", specimen: "Suero" })?.code, "1558-6");
+  assert.equal(vettedPhrLabIdentity({ analyte: "Glucosa 60 min", unit: "mg/dL", specimen: "Suero" })?.code, "20438-8");
+  assert.equal(vettedPhrLabIdentity({ analyte: "Glucosa 120 min", unit: "mg/dL", specimen: "Suero" })?.code, "20436-2");
+  assert.equal(vettedPhrLabIdentity({ analyte: "Prot. C Reactiva", unit: "mg/dL", specimen: "Sangre" })?.code, "1988-5");
   assert.equal(vettedPhrLabIdentity({ analyte: "Glucosa" }), null);
   assert.equal(vettedPhrLabIdentity({ analyte: "GLICEMIA", unit: "mg/dL", specimen: "Suero" })?.code, "2345-7");
   assert.equal(vettedPhrLabIdentity({ analyte: "GLICEMIA", unit: "mg/dL", specimen: "Orina" }), null);
@@ -64,7 +68,8 @@ test("corrige alias OCR y evita códigos de otra propiedad o muestra", () => {
   const cases = [
     ["ERIMROCITOS", "x 10^6/uL", "789-8"], ["C.H.C.M.", "gr/dL", "786-4"],
     ["CREATININEMIA", "mg/dL", "2160-0"], ["URENIA", "mg/dL", "3091-6"],
-    ["N UREICO", "mg/dL", "3094-0"], ["TSH Ultrasensible", "miIU/L", "3016-3"],
+    ["N UREICO", "mg/dL", "3094-0"], ["Urea", "g/L", "3091-6"],
+    ["TSH Ultrasensible", "miIU/L", "3016-3"], ["Hormona Estimulante de la Tiroides (TSH)", "uUI/mL", "3016-3"],
     ["INSULINA", "uU/mL", "20448-7"], ["PROTEINAS TOTALES", "gr/dL", "2885-2"],
     ["Colesterol LDL", "mg/dL", "2089-1"], ["Ind.Col.total/Col.HDL", "", "9830-1"],
     ["R.D.W.", "%", "30385-9"], ["BACILIFORMES NEUT", "%", "26508-2"],
@@ -73,7 +78,8 @@ test("corrige alias OCR y evita códigos de otra propiedad o muestra", () => {
     ["Fosf. Alcalinas", "U/L", "6768-6"], ["SGOT", "U/L", "1920-8"],
     ["Tiroxina Libre (FT4)", "ng/dL", "3024-7"], ["VPM", "fL", "28542-9"],
     ["R.A. Eosinófilos", "x10^3/uL", "26449-9"], ["R.A. Linfocitos", "x10^3/uL", "26474-7"],
-    ["R.A. Neutrófilos", "x10^3/uL", "26499-4"],
+    ["R.A. Neutrófilos", "x10^3/uL", "26499-4"], ["R.A.N.", "x10^3/mm^3", "751-8"],
+    ["Neutrófilos (Segmentados)", "%", "770-8"], ["BILURRUBINA TOTAL", "mg/dL", "1975-2"],
   ] as const;
   cases.forEach(([analyte, unit, code]) => assert.equal(vettedPhrLabIdentity({ analyte, unit })?.code, code, analyte));
   assert.equal(vettedPhrLabIdentity({ analyte: "LDH", unit: "U/L" }), null);
@@ -119,6 +125,8 @@ test("phrLabDisplayName muestra el componente LOINC, no los cinco ejes técnicos
   assert.equal(phrLabDisplayName({ analyte: "TSH", canonicalAnalyte: "" }), "TSH");
   // Override curado por código LOINC gana sobre el componente para los índices del hemograma.
   assert.equal(phrLabDisplayName({ analyte: "C.H.C.M.", loincCode: "786-4", canonicalAnalyte: "Concentración media de hemoglobina corpuscular en eritrocitos: Eritrocitos. Cuantitativo" }), "Concentración de hemoglobina corpuscular media (CHCM)");
+  assert.equal(phrLabDisplayName({ analyte: "TIROXINA LIBRE (T4L)", loincCode: "3024-7", canonicalAnalyte: "Thyroxine.libre" }), "Tiroxina libre (T4 libre)");
+  assert.equal(phrLabDisplayName({ analyte: "Glucosa 60 min", loincCode: "20438-8", canonicalAnalyte: "Glucose" }), "Glicemia a los 60 minutos");
 });
 
 test("prefiere la designación LOINC chilena y omite nombres ingleses", () => {
