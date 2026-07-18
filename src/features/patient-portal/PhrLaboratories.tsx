@@ -131,16 +131,22 @@ export function PhrLaboratories({ documents, ownerUserId, readOnly, onUpload, on
   const suggestedCategories = labCategoryOrder.map((key) => ({ key, items: suggested.filter((result) => resultCategory(result) === key) })).filter((group) => group.items.length);
   const visibleConfirmed = confirmed.filter((result) => (!query.trim() || `${phrLabDisplayName(result)} ${result.analyte}`.toLocaleLowerCase("es-CL").includes(query.trim().toLocaleLowerCase("es-CL"))) && (!onlyOutside || outsideRange(result)));
   const categories = labCategoryOrder.map((key) => ({ key, items: visibleConfirmed.filter((result) => resultCategory(result) === key && (filter === "all" || filter === key)) })).filter((group) => group.items.length);
+  const favoriteTrendKeys = new Set(favorites.map((favorite) => favorite.trendKey));
   const profiles = categories.map((group) => {
     const byMarker = new Map<string, PhrLabResult[]>();
     group.items.forEach((result) => byMarker.set(phrLabTrendKey(result), [...(byMarker.get(phrLabTrendKey(result)) ?? []), result]));
-    return { ...group, markers: [...byMarker.values()].map((items) => items.sort((a, b) => b.observedAt.localeCompare(a.observedAt))) };
+    const markers = [...byMarker.values()].map((items) => items.sort((a, b) => b.observedAt.localeCompare(a.observedAt))).sort((a, b) => {
+      const favorite = Number(favoriteTrendKeys.has(phrLabTrendKey(b[0]))) - Number(favoriteTrendKeys.has(phrLabTrendKey(a[0])));
+      if (favorite) return favorite;
+      const alert = Number(outsideRange(b[0])) - Number(outsideRange(a[0]));
+      return alert || phrLabDisplayName(a[0]).localeCompare(phrLabDisplayName(b[0]), "es-CL");
+    });
+    return { ...group, markers };
   });
   const trends = useMemo(() => {
     const seen = new Set<string>();
     return confirmed.filter((result) => { const key = phrLabTrendKey(result); if (seen.has(key)) return false; seen.add(key); return !!buildPhrLabTrend(confirmed.filter((item) => phrLabTrendKey(item) === key)); });
   }, [confirmed]);
-  const favoriteTrendKeys = new Set(favorites.map((favorite) => favorite.trendKey));
   const favoriteTrends = trends.filter((result) => favoriteTrendKeys.has(phrLabTrendKey(result)));
 
   return <div className="phr-labs-stack">
@@ -148,7 +154,7 @@ export function PhrLaboratories({ documents, ownerUserId, readOnly, onUpload, on
     <section className="card portal-card"><div className="card-heading"><div><p className="eyebrow">Extracción segura</p><h2>Laboratorios por procesar</h2><p>Todos los PDF se leen localmente, incluso si son escaneados. Sólo las fotos JPG/PNG usan reconocimiento visual asistido. Nada cuenta como resultado hasta que lo confirmas.</p></div>{!hideHeading && !readOnly && <button className="button primary" type="button" onClick={onUpload}>Subir laboratorio</button>}</div>
       {!labs.length ? <p className="empty-state">Todavía no tienes laboratorios.</p> : pendingLabs.length ? <ul className="portal-list">{pendingLabs.map((document) => <li key={document.id}><div className="portal-document-detail"><strong title={document.filename}>{friendlyDocumentName(document.documentType)}</strong><span>{document.sourceInstitution} · {shownDate(document.documentDate ?? document.createdAt)} · {document.filename}</span></div><div className="portal-document-actions"><a className="button secondary" href={document.url} target="_blank" rel="noreferrer">Abrir archivo</a>{!isAnalyzableLabDocument(document.mimeType) ? <span>Análisis disponible para PDF, JPG o PNG</span> : !readOnly && <button className="button primary" disabled={!!busyId} type="button" onClick={() => void analyze(document)}>{busyId === document.id ? "Analizando…" : "Analizar resultados"}</button>}</div></li>)}</ul> : <p className="phr-processed-summary">✓ Todos tus archivos están procesados. Revisa abajo sólo si necesitas abrirlos o volver a analizarlos.</p>}
       {processing && <div className="ai-operation-status" role="status" aria-live="polite"><strong>{processing.title} · {elapsed} s</strong><span>{processing.detail}</span></div>}
-      {!!processedLabs.length && <details className="phr-processed-documents"><summary><span>Archivos procesados</span><span>{processedLabs.length}</span></summary><ul className="portal-list">{processedLabs.map((document) => <li key={document.id}><div className="portal-document-detail"><strong title={document.filename}>{friendlyDocumentName(document.documentType)}</strong><span>{document.sourceInstitution} · {shownDate(document.documentDate ?? document.createdAt)}</span></div><div className="portal-document-actions"><a className="button secondary" href={document.url} target="_blank" rel="noreferrer">Abrir original</a>{!readOnly && <button className="text-button" disabled={!!busyId} type="button" onClick={() => void analyze(document, false, true)}>{busyId === document.id ? "Releyendo…" : "Volver a procesar"}</button>}{!readOnly && <button className="text-button" disabled={!!busyId} type="button" onClick={() => void openLoinc(document)}>{busyId === document.id ? "Buscando…" : "Revisar LOINC"}</button>}</div></li>)}</ul></details>}
+      {!!processedLabs.length && <details className="phr-processed-documents"><summary><span>Archivos procesados</span><span>{processedLabs.length}</span></summary><ul className="portal-list">{processedLabs.map((document) => <li key={document.id}><div className="portal-document-detail"><strong title={document.filename}>{friendlyDocumentName(document.documentType)}</strong><span>{document.filename} · {document.sourceInstitution} · {shownDate(document.documentDate ?? document.createdAt)}</span></div><div className="portal-document-actions"><a className="button secondary" href={document.url} target="_blank" rel="noreferrer">Abrir original</a>{!readOnly && <button className="text-button" disabled={!!busyId} type="button" onClick={() => void analyze(document, false, true)}>{busyId === document.id ? "Releyendo…" : "Volver a procesar"}</button>}{!readOnly && <button className="text-button" disabled={!!busyId} type="button" onClick={() => void openLoinc(document)}>{busyId === document.id ? "Buscando…" : "Revisar LOINC"}</button>}</div></li>)}</ul></details>}
     </section>
 
     {!readOnly && suggested.length > 0 && <section className="card portal-card">

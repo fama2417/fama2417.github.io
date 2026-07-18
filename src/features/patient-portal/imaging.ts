@@ -11,10 +11,10 @@ type ImagingSection = "clinicalIndication" | "technique" | "findings" | "impress
 const empty = (): PhrImagingText => ({ clinicalIndication: "", technique: "", findings: "", impression: "", plainLanguage: "", fullText: "" });
 const plain = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z ]/g, " ").replace(/\s+/g, " ").trim();
 const headings: [ImagingSection, string[]][] = [
-  ["clinicalIndication", ["indicacion clinica", "indicacion", "antecedentes clinicos", "antecedentes", "motivo del examen"]],
-  ["technique", ["tecnica", "metodo"]],
-  ["findings", ["hallazgos", "resultado", "resultados", "descripcion"]],
-  ["impression", ["impresion", "conclusion", "conclusiones", "diagnostico"]],
+  ["clinicalIndication", ["indicacion clinica", "indicacion", "antecedentes clinicos", "antecedentes", "motivo del examen", "motivo de consulta"]],
+  ["technique", ["tecnica", "metodo", "procedimiento", "examen realizado"]],
+  ["findings", ["hallazgos", "resultado", "resultados", "descripcion", "observaciones"]],
+  ["impression", ["impresion", "conclusion", "conclusiones", "diagnostico", "diagnostico final", "interpretacion"]],
 ];
 
 export const cleanPhrImagingSection = (value: string) => value.split(/\s+(?=(?:atentamente\b|p[aá]g(?:ina)?\s+\d+\s+de\s+\d+|paciente\s*:|informe validado por\s*:|firmado por\s*:))/i)[0].trim();
@@ -25,7 +25,7 @@ export function phrImagingPlainLanguagePoints(value: string) {
 }
 
 export function structurePhrImagingText(value: string): PhrImagingText {
-  const separated = value.replace(/\s+(?=(?:indicaci[oó]n cl[ií]nica|indicaci[oó]n|antecedentes cl[ií]nicos|antecedentes|motivo del examen|t[eé]cnica|m[eé]todo|hallazgos|resultado|resultados|descripci[oó]n|impresi[oó]n|conclusi[oó]n|conclusiones|diagn[oó]stico)\s*:)/gi, "\n");
+  const separated = value.replace(/\s+(?=(?:indicaci[oó]n cl[ií]nica|indicaci[oó]n|antecedentes cl[ií]nicos|antecedentes|motivo del examen|motivo de consulta|t[eé]cnica|m[eé]todo|procedimiento|examen realizado|hallazgos|resultado|resultados|descripci[oó]n|observaciones|impresi[oó]n|conclusi[oó]n|conclusiones|diagn[oó]stico|diagn[oó]stico final|interpretaci[oó]n)\s*:)/gi, "\n");
   const result = empty(), lines = separated.split(/\r?\n/).map((line) => line.replace(/\s+/g, " ").trim()).filter(Boolean);
   result.fullText = lines.join("\n");
   let current: ImagingSection | "" = "";

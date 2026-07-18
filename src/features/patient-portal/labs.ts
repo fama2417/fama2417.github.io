@@ -39,8 +39,8 @@ const vettedLoinc: ReadonlyArray<{ names: RegExp; units?: RegExp; code: string; 
   { names: /^(?:urea|uremia|urenia)$/, units: /^mg\/dl$/, code: "3091-6", trendKey: "urea" },
   { names: /^(?:proteinas totales|total proteinas)$/, units: /^g\/dl$/, code: "2885-2", trendKey: "total-protein" },
   { names: /^albumina$/, units: /^g\/dl$/, code: "1751-7", trendKey: "albumin" },
-  { names: /^(?:fosfatasa alcalina|f alcalinas)$/, units: /^u\/l$/, code: "6768-6", trendKey: "alkaline-phosphatase" },
-  { names: /^(?:transaminasa got|got|ast)$/, units: /^u\/l$/, code: "1920-8", trendKey: "ast" },
+  { names: /^(?:fosfatasa alcalina|fosf alcalinas|f alcalinas)$/, units: /^u\/l$/, code: "6768-6", trendKey: "alkaline-phosphatase" },
+  { names: /^(?:transaminasa got|sgot|got|ast)$/, units: /^u\/l$/, code: "1920-8", trendKey: "ast" },
   { names: /^(?:transaminasa gpt|gpt|alt)$/, units: /^u\/l$/, code: "1742-6", trendKey: "alt" },
   { names: /^(?:gamma gt|ggt)$/, units: /^u\/l$/, code: "2324-2", trendKey: "ggt" },
   { names: /^(?:creatinina|creatininemia)$/, units: /^mg\/dl$/, code: "2160-0", trendKey: "creatinine" },
@@ -57,6 +57,7 @@ const vettedLoinc: ReadonlyArray<{ names: RegExp; units?: RegExp; code: string; 
   { names: /^(?:r d w|rdw)$/, units: /^%$/, code: "30385-9", trendKey: "rdw" },
   { names: /^leucocitos$/, units: /^(?:k\/ul|x?10(?:\^|\*)?3\/?ul)$/, code: "6690-2", trendKey: "leukocytes" },
   { names: /^(?:rcto de plaquetas|plaquetas)$/, units: /^(?:k\/ul|x?10(?:\^|\*)?3\/?ul)$/, code: "777-3", trendKey: "platelets" },
+  { names: /^(?:v p m|vpm|volumen plaquetario medio)$/, units: /^fl$/, code: "28542-9", trendKey: "mean-platelet-volume" },
   { names: /^(?:segmentados|segmentados neut|neutrofilos)$/, units: /^%$/, code: "770-8", trendKey: "neutrophils-percent" },
   { names: /^linfocitos$/, units: /^%$/, code: "736-9", trendKey: "lymphocytes-percent" },
   { names: /^monocitos$/, units: /^%$/, code: "5905-5", trendKey: "monocytes-percent" },
@@ -69,6 +70,9 @@ const vettedLoinc: ReadonlyArray<{ names: RegExp; units?: RegExp; code: string; 
   { names: /^vhs$/, units: /^mm\/?h(?:r)?$/, code: "30341-2", trendKey: "erythrocyte-sedimentation-rate" },
   { names: /^(?:r a n|r a n rcto absoluto de neu)$/, units: /^(?:ul|x?10(?:\^|\*)?3\/(?:ul|mm3))$/, code: "751-8", trendKey: "absolute-neutrophils" },
   { names: /^rcto absoluto de eosinofilo$/, units: /^(?:ul|x?10(?:\^|\*)?3\/(?:ul|mm3))$/, code: "711-2", trendKey: "absolute-eosinophils" },
+  { names: /^r a eosinofilos?$/, units: /^(?:ul|x?10(?:\^|\*)?3\/(?:ul|mm3))$/, code: "26449-9", trendKey: "absolute-eosinophils" },
+  { names: /^r a linfocitos?$/, units: /^(?:ul|x?10(?:\^|\*)?3\/(?:ul|mm3))$/, code: "26474-7", trendKey: "absolute-lymphocytes" },
+  { names: /^r a neutrofilos?$/, units: /^(?:ul|x?10(?:\^|\*)?3\/(?:ul|mm3))$/, code: "26499-4", trendKey: "absolute-neutrophils" },
   { names: /^(?:t de tromboplastina parcial|tiempo de tromboplastina parcial|ptt|ttpa)$/, units: /^(?:s|seg|seg\.)$/, code: "14979-9", trendKey: "aptt" },
   { names: /^tiempo protrombina$/, units: /^(?:s|seg|seg\.)$/, code: "5902-2", trendKey: "prothrombin-time" },
   { names: /^inr$/, units: /^$/, code: "6301-6", trendKey: "inr" },
@@ -78,7 +82,7 @@ const vettedLoinc: ReadonlyArray<{ names: RegExp; units?: RegExp; code: string; 
   { names: /^(?:hemoglobina glicosilada|hemoglobina glicada|hba1c)$/, units: /^%$/, code: "4548-4", trendKey: "hba1c" },
   { names: /^(?:glicemia|glucosa) media estimada$/, units: /^mg\/dl$/, code: "27353-2", trendKey: "estimated-average-glucose" },
   { names: /^(?:tsh|tsh ultrasensible)$/, units: /^(?:miu\/l|miiu\/l|uiu\/ml|uui\/ml)$/, code: "3016-3", trendKey: "tsh" },
-  { names: /^(?:t4 libre|tiroxina libre t4l)$/, units: /^ng\/dl$/, code: "3024-7", trendKey: "free-t4" },
+  { names: /^(?:t4 libre|tiroxina libre(?: t4l| ft4)?)$/, units: /^ng\/dl$/, code: "3024-7", trendKey: "free-t4" },
   { names: /^insulina$/, units: /^(?:uiu\/ml|uu\/ml)$/, code: "20448-7", trendKey: "insulin" },
   { names: /^prolactina$/, units: /^ng\/ml$/, code: "2842-3", trendKey: "prolactin" },
   { names: /^ferritina$/, units: /^ng\/ml$/, code: "2276-4", trendKey: "ferritin" },
@@ -210,7 +214,7 @@ const LOINC_FRIENDLY_NAME: Record<string, string> = {
 // El nombre LOINC completo trae 5 ejes ("Componente: Muestra. Tiempo. Propiedad. Escala. Método"); para el paciente basta el componente.
 const loincComponent = (canonical: string) => canonical.split(":")[0].replace(/\s+/g, " ").trim();
 export const phrLabDisplayName = (result: Pick<PhrLabResult, "analyte" | "canonicalAnalyte"> & Partial<Pick<PhrLabResult, "loincCode">>) =>
-  (result.loincCode ? LOINC_FRIENDLY_NAME[result.loincCode] : "") || (result.canonicalAnalyte?.trim() && loincComponent(result.canonicalAnalyte)) || result.analyte;
+  (result.loincCode ? LOINC_FRIENDLY_NAME[result.loincCode] || (result.canonicalAnalyte?.trim() && loincComponent(result.canonicalAnalyte)) : "") || result.analyte;
 
 export function preferredSpanishLoincNames(rows: { code: string; display: string; languageVariant: string }[]) {
   const rank = (language: string) => ["esCL", "esES", "esMX", "esAR"].indexOf(language);
