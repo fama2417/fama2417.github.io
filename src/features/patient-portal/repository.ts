@@ -2,7 +2,7 @@ import { authenticatedFetch, supabase } from "@/lib/supabase-client";
 import { clinicalAreaForDocumentType, validatePatientDocument, type PhrClinicalArea } from "./documents";
 import type { PhrHealthItem, PhrHealthItemDraft } from "./health-summary";
 import { cleanPhrImagingSection, structurePhrImagingText, type PhrImagingText } from "./imaging";
-import type { PhrLabDraft, PhrLabResult } from "./labs";
+import { preferredSpanishLoincNames, type PhrLabDraft, type PhrLabResult } from "./labs";
 
 export type PhrProfile = {
   userId: string; fullName: string; birthDate: string; identifier: string; createdAt: string;
@@ -213,12 +213,13 @@ export async function deletePhrHealthItem(id: string) {
   await authenticatedFetch(`/api/portal/health-items?id=${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
-export async function uploadPatientDocument(input: { file: File; documentDate: string; documentType: PortalDocument["documentType"]; clinicalArea?: PhrClinicalArea; sourceInstitution: string }) {
+export async function uploadPatientDocument(input: { file: File; displayName?: string; documentDate: string; documentType: PortalDocument["documentType"]; clinicalArea?: PhrClinicalArea; sourceInstitution: string }) {
   const validation = validatePatientDocument(input.file);
   if (validation) throw new Error(validation);
   const form = new FormData();
-  form.set("file", input.file); form.set("documentDate", input.documentDate); form.set("documentType", input.documentType); form.set("clinicalArea", input.clinicalArea ?? clinicalAreaForDocumentType(input.documentType)); form.set("sourceInstitution", input.sourceInstitution);
-  await authenticatedFetch("/api/portal/documents", { method: "POST", body: form });
+  form.set("file", input.file); form.set("displayName", input.displayName ?? ""); form.set("documentDate", input.documentDate); form.set("documentType", input.documentType); form.set("clinicalArea", input.clinicalArea ?? clinicalAreaForDocumentType(input.documentType)); form.set("sourceInstitution", input.sourceInstitution);
+  const response = await authenticatedFetch("/api/portal/documents", { method: "POST", body: form });
+  return await response.json() as { documentId: string };
 }
 
 export async function setPatientDocumentShare(documentId: string, patientId: string, shared: boolean) {
@@ -247,20 +248,23 @@ export async function fetchPhrLabResults(ownerUserId?: string): Promise<PhrLabRe
   if (error) throw error;
   const rows = (data ?? []) as PhrLabRow[];
   const codes = [...new Set(rows.map((row) => row.loinc_code).filter(Boolean))];
-  const metadata = codes.length ? await supabase.from("loinc_metadata")
-    .select("code, component, property, time_aspect, specimen, scale_type, method_type, class_name, status, example_ucum_units").in("code", codes) : { data: [], error: null };
-  if (metadata.error) throw metadata.error;
+  const [metadata, designations] = codes.length ? await Promise.all([
+    supabase.from("loinc_metadata").select("code, component, property, time_aspect, specimen, scale_type, method_type, class_name, status, example_ucum_units").in("code", codes),
+    supabase.from("terminology_designations").select("code, display, language_variant").eq("system", "LOINC").in("code", codes),
+  ]) : [{ data: [], error: null }, { data: [], error: null }];
+  if (metadata.error || designations.error) throw metadata.error ?? designations.error;
   const metadataByCode = new Map((metadata.data ?? []).map((item) => [item.code as string, {
     component: item.component as string, property: item.property as string, timeAspect: item.time_aspect as string,
     specimen: item.specimen as string, scaleType: item.scale_type as string, methodType: item.method_type as string,
     className: item.class_name as string, status: item.status as string, exampleUcumUnits: item.example_ucum_units as string,
   }]));
+  const spanishNames = preferredSpanishLoincNames((designations.data ?? []).map((item) => ({ code: item.code as string, display: item.display as string, languageVariant: item.language_variant as string })));
   return rows.map((row) => ({
     id: row.id, documentId: row.document_id, loincCode: row.loinc_code, analyte: row.analyte,
     valueNum: row.value_num, valueText: row.value_text, unit: row.unit, refLow: row.ref_low,
     refHigh: row.ref_high, refText: row.ref_text, flag: row.flag, observedAt: row.observed_at,
     source: row.source, sourceSentence: row.source_sentence, reviewStatus: row.review_status, loincMetadata: metadataByCode.get(row.loinc_code),
-    canonicalAnalyte: row.canonical_analyte, suggestedLoincCode: row.suggested_loinc_code, codingConfidence: row.coding_confidence,
+    canonicalAnalyte: spanishNames.get(row.loinc_code) ?? row.canonical_analyte, suggestedLoincCode: row.suggested_loinc_code, codingConfidence: row.coding_confidence,
   }));
 }
 

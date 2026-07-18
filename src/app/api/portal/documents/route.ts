@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { clinicalAreaForDocumentType, hasValidPatientDocumentSignature, isPhrClinicalArea, validatePatientDocument } from "@/features/patient-portal/documents";
+import { clinicalAreaForDocumentType, hasValidPatientDocumentSignature, isPhrClinicalArea, patientDocumentFilename, validatePatientDocument } from "@/features/patient-portal/documents";
 import { recordPhrEvent } from "@/lib/phr-events";
 import { requirePatientApi, requirePhrApi } from "@/lib/server-auth";
 
@@ -14,12 +14,15 @@ export async function POST(request: NextRequest) {
   try { form = await request.formData(); }
   catch { return NextResponse.json({ error: "Solicitud de archivo inválida." }, { status: 400 }); }
   const file = form.get("file");
+  const displayName = String(form.get("displayName") ?? "");
   const documentDate = String(form.get("documentDate") ?? "");
   const documentType = String(form.get("documentType") ?? "other");
   const requestedArea = String(form.get("clinicalArea") ?? "");
   const clinicalArea = requestedArea || clinicalAreaForDocumentType(documentType);
   const sourceInstitution = String(form.get("sourceInstitution") ?? "").trim();
   if (!(file instanceof File) || !file.name || file.name.length > 255) return NextResponse.json({ error: "Archivo inválido." }, { status: 400 });
+  const filename = patientDocumentFilename(file.name, displayName);
+  if (!filename || filename.length > 255) return NextResponse.json({ error: "Nombre de documento inválido." }, { status: 400 });
   const validation = validatePatientDocument(file);
   if (validation) return NextResponse.json({ error: validation }, { status: 400 });
   if (!documentTypes.includes(documentType as (typeof documentTypes)[number])) return NextResponse.json({ error: "Tipo de documento inválido." }, { status: 400 });
@@ -42,7 +45,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "No fue posible guardar el archivo." }, { status: 500 });
   }
   const inserted = await db.from("patient_documents").insert({
-    owner_user_id: user.id, original_filename: file.name, storage_path: path, mime_type: file.type,
+    owner_user_id: user.id, original_filename: filename, storage_path: path, mime_type: file.type,
     size_bytes: file.size, document_date: documentDate || null, document_type: documentType, clinical_area: clinicalArea, source_institution: sourceInstitution,
   }).select("id").single();
   if (inserted.error) {
@@ -51,7 +54,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "No fue posible registrar el documento." }, { status: 500 });
   }
   await recordPhrEvent(db, user.id, "document_uploaded", inserted.data.id, { mime_type: file.type, size_bytes: file.size, document_type: documentType, clinical_area: clinicalArea, repeat_upload: (prior.count ?? 0) > 0 });
-  return NextResponse.json({ ok: true }, { status: 201 });
+  return NextResponse.json({ ok: true, documentId: inserted.data.id }, { status: 201 });
 }
 
 export async function PATCH(request: NextRequest) {

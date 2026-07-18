@@ -24,6 +24,22 @@ export const isPhrClinicalArea = (value: string): value is PhrClinicalArea => PH
 export const clinicalAreaForDocumentType = (type: string): PhrClinicalArea => type === "laboratory" || type === "imaging" ? type : "other";
 export const documentTypeForSelection = (value: string) => value === "laboratory" || value === "imaging" || value === "prescription" ? value : "other";
 
+export const suggestedPatientDocumentName = (filename: string) => filename.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+
+export function patientDocumentFilename(original: string, requested: string) {
+  const name = requested.trim().replace(/[\u0000-\u001f\u007f\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ");
+  if (!name) return original;
+  const extension = original.match(/\.[a-z0-9]+$/i)?.[0] ?? "";
+  return extension && !name.toLocaleLowerCase().endsWith(extension.toLocaleLowerCase()) ? `${name}${extension}` : name;
+}
+
+export function suggestedPatientDocumentDate(lastModified: number) {
+  if (!Number.isFinite(lastModified) || lastModified <= 0) return "";
+  const date = new Date(lastModified);
+  const year = date.getFullYear(), month = String(date.getMonth() + 1).padStart(2, "0"), day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 export const isAnalyzableLabDocument = (mimeType: string) => ANALYZABLE_LAB_TYPES.has(mimeType);
 export const labImageMime = (mimeType: string): "image/jpeg" | "image/png" | "" => mimeType === "image/jpeg" || mimeType === "image/png" ? mimeType : "";
 
