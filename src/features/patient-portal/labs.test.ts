@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildPhrLabTrend, phrLabDisplayName, phrLabDraftOf, phrLabTrendKey, phrLoincDecision, phrSpecimenLabel, preferredSpanishLoincNames, reusedPhrLoinc, reviewPhrLabIdentity, validatePhrLabDraft, vettedPhrLabIdentity, type PhrLabResult } from "./labs.ts";
+import { buildPhrLabTrend, firstValidPhrLabDate, phrLabDisplayName, phrLabDraftOf, phrLabTrendKey, phrLoincDecision, phrSpecimenLabel, preferredSpanishLoincNames, reusedPhrLoinc, reviewPhrLabIdentity, validatePhrLabDraft, vettedPhrLabIdentity, type PhrLabResult } from "./labs.ts";
 
 const row = (id: string, date: string, value: number, unit = "mg/dL", status: PhrLabResult["reviewStatus"] = "confirmed"): PhrLabResult => ({
   id, documentId: id, analyte: "Glucosa", loincCode: "", valueNum: value, valueText: "", unit,
   refLow: 70, refHigh: 99, refText: "", flag: "normal", observedAt: date, source: "ocr", reviewStatus: status,
+});
+
+test("usa la primera fecha válida detectada al analizar un laboratorio", () => {
+  assert.equal(firstValidPhrLabDate(["", "18/07/2026", "2026-07-18", "2026-07-19"]), "2026-07-18");
+  assert.equal(firstValidPhrLabDate(["", "sin fecha"]), "");
 });
 
 test("valida una corrección de laboratorio y deriva su bandera", () => {

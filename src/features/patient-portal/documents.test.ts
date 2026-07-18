@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { clinicalAreaForDocumentType, documentTypeForSelection, hasValidPatientDocumentSignature, isAnalyzableLabDocument, labImageMime, patientDocumentFilename, patientPhotoQuality, PATIENT_DOCUMENT_MAX_BYTES, suggestedPatientDocumentDate, suggestedPatientDocumentName, validatePatientDocument } from "./documents.ts";
+import { clinicalAreaForDocumentType, documentTypeForSelection, hasValidPatientDocumentSignature, isAnalyzableLabDocument, labImageMime, patientDocumentFilename, patientPhotoQuality, PATIENT_DOCUMENT_MAX_BYTES, suggestedPatientDocumentName, validatePatientDocument } from "./documents.ts";
 
 test("acepta PDF, imágenes y DICOM de hasta 20 MB", () => {
   assert.equal(validatePatientDocument({ type: "application/pdf", size: 1 }), "");
@@ -41,10 +41,8 @@ test("clasifica documentos clínicos y advierte fotos difíciles de leer", () =>
   assert.equal(patientPhotoQuality({ width: 1200, height: 1800, size: 200_000, edgeScore: 12 }), "");
 });
 
-test("propone nombre y fecha legibles sin perder la extensión", () => {
+test("propone un nombre legible sin perder la extensión", () => {
   assert.equal(suggestedPatientDocumentName("informe_renal-2026.pdf"), "informe renal 2026");
   assert.equal(patientDocumentFilename("document.pdf", "Control renal"), "Control renal.pdf");
   assert.equal(patientDocumentFilename("document.pdf", "Control: renal.pdf"), "Control renal.pdf");
-  assert.equal(suggestedPatientDocumentDate(new Date(2026, 6, 18).getTime()), "2026-07-18");
-  assert.equal(suggestedPatientDocumentDate(0), "");
 });

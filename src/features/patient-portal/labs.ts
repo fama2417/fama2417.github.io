@@ -12,6 +12,7 @@ export type PhrLabDraft = { analyte: string; value: string; unit: string; refere
 const plain = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
 const term = (value: string) => plain(value).replace(/[^a-z0-9]+/g, " ").trim();
 const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
+export const firstValidPhrLabDate = (values: string[]) => values.find(validDate) ?? "";
 
 const unitKey = (value = "") => plain(value)
   .replace(/[µμ]/g, "u")

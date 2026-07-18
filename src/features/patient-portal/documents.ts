@@ -33,13 +33,6 @@ export function patientDocumentFilename(original: string, requested: string) {
   return extension && !name.toLocaleLowerCase().endsWith(extension.toLocaleLowerCase()) ? `${name}${extension}` : name;
 }
 
-export function suggestedPatientDocumentDate(lastModified: number) {
-  if (!Number.isFinite(lastModified) || lastModified <= 0) return "";
-  const date = new Date(lastModified);
-  const year = date.getFullYear(), month = String(date.getMonth() + 1).padStart(2, "0"), day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
 export const isAnalyzableLabDocument = (mimeType: string) => ANALYZABLE_LAB_TYPES.has(mimeType);
 export const labImageMime = (mimeType: string): "image/jpeg" | "image/png" | "" => mimeType === "image/jpeg" || mimeType === "image/png" ? mimeType : "";
 

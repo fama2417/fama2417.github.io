@@ -3,7 +3,7 @@ import { PDFDocument, rgb } from "pdf-lib";
 import { extractTextItems } from "unpdf";
 import { aiConfig } from "@/features/reports/ai-budget.ts";
 import { dedupeLabCandidates, groupLabLayoutPages, labAnalyteSimilarity, labSourceHighlight, labSourcePage, loincSearchQueries, normalizeIdentity, prepareLabPdf, remapVisualPages, structureLabDocument, suggestLabLoinc, suggestLabLoincSearchTerms, type LabCandidate } from "@/features/reports/lab-ai.ts";
-import { phrLoincDecision, phrSpecimenClass, reusedPhrLoinc, reviewPhrLabIdentity, validatePhrLabDraft, vettedPhrLabIdentity } from "@/features/patient-portal/labs.ts";
+import { firstValidPhrLabDate, phrLoincDecision, phrSpecimenClass, reusedPhrLoinc, reviewPhrLabIdentity, validatePhrLabDraft, vettedPhrLabIdentity } from "@/features/patient-portal/labs.ts";
 import { isAnalyzableLabDocument, labImageMime } from "@/features/patient-portal/documents.ts";
 import { recordPhrEvent } from "@/lib/phr-events";
 import { extractScannedPdfPage } from "@/lib/pdf-ocr";
@@ -332,17 +332,12 @@ export async function POST(request: NextRequest) {
 
   const extractedName = prepared.patientName || aiResult?.extraction.patientName || "";
   const extractedIdentifier = prepared.patientIdentifier || aiResult?.extraction.patientIdentifier || "";
-  const profileIdentifier = auth.profile.identifier.trim();
   const warnings = [...(aiResult?.extraction.warnings ?? [])];
   if (prepared.scanned && !usedVisualAi && !imageMime) warnings.push("El PDF era un escaneo sin texto y se leyó con OCR local; revisa cada cifra antes de confirmarla.");
   if (usedVisualAi && !imageMime && !prepared.scanned) warnings.push("Algunas páginas del PDF estaban escaneadas y se leyeron con reconocimiento visual; revisa esas cifras antes de confirmarlas.");
   if (localFallbackReason && !imageMime) warnings.push(localFallbackReason);
   if (!usedVisualAi && !imageMime && prepared.needsAi) warnings.push("El PDF se leyó sólo localmente y puede contener filas que requieren corrección manual; no se envió contenido a IA.");
-  if (extractedIdentifier && profileIdentifier) {
-    if (normalizeIdentity(extractedIdentifier) !== normalizeIdentity(profileIdentifier)) return NextResponse.json({ error: "La identidad del archivo no coincide con tu perfil. No se guardó ningún resultado." }, { status: 422 });
-  } else if (extractedName) {
-    if (normalizeIdentity(extractedName) !== normalizeIdentity(auth.profile.full_name)) return NextResponse.json({ error: "El nombre del archivo no coincide con tu perfil. No se guardó ningún resultado." }, { status: 422 });
-  } else warnings.push("No se encontró identidad en el archivo; revisa cuidadosamente cada resultado antes de confirmarlo.");
+  if (!extractedIdentifier && !extractedName) warnings.push("No se encontró identidad en el archivo; revisa cuidadosamente cada resultado antes de confirmarlo.");
 
   let candidates = dedupeLabCandidates(rows).filter((row) => row.analyte && (row.valueNum !== null || row.valueText));
   if (previousImportId) {
@@ -353,7 +348,14 @@ export async function POST(request: NextRequest) {
   if (!candidates.length) { await recordPhrEvent(auth.db, auth.user.id, "lab_analysis_failed", body.documentId, { method: usedVisualAi ? "ai_visual" : "local", stage: "no_results", duration_ms: Date.now() - startedAt }); return NextResponse.json({ error: "No se detectaron resultados para revisar." }, { status: 422 }); }
   const matched = await matchPhrLoinc(auth.db, auth.user.id, candidates, true, document.data.source_institution);
   warnings.push(...matched.warnings);
-  const fallbackDate = document.data.document_date ?? document.data.created_at.slice(0, 10);
+  const detectedDate = firstValidPhrLabDate([prepared.observedAt, aiResult?.extraction.observedAt ?? "", ...candidates.map((row) => row.observedAt)]);
+  let documentDate = document.data.document_date ?? "";
+  if (!documentDate && detectedDate) {
+    const dated = await auth.db.from("patient_documents").update({ document_date: detectedDate }).eq("id", body.documentId).eq("owner_user_id", auth.user.id);
+    if (dated.error) warnings.push("Se detectó la fecha del examen, pero no fue posible guardarla en el documento.");
+    else documentDate = detectedDate;
+  }
+  const fallbackDate = documentDate || detectedDate || document.data.created_at.slice(0, 10);
   if (candidates.some((row) => !row.observedAt)) warnings.push("No se encontró fecha de muestra en todas las filas; se usó la fecha del documento.");
   const extractionMethod = usedVisualAi ? "ai_visual" : "local";
   const imported = previousImportId
@@ -375,7 +377,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "No fue posible guardar las sugerencias." }, { status: 502 });
   }
   await recordPhrEvent(auth.db, auth.user.id, "lab_analysis_completed", body.documentId, { method: extractionMethod, duration_ms: Date.now() - startedAt, result_count: inserted.data?.length ?? 0, loinc_mapped: matched.loincByIndex.size, warning_count: warnings.length });
-  return NextResponse.json({ created: inserted.data?.length ?? 0, loincMapped: matched.loincByIndex.size, duplicate: !!previousImportId, warnings });
+  return NextResponse.json({ created: inserted.data?.length ?? 0, loincMapped: matched.loincByIndex.size, duplicate: !!previousImportId, warnings, documentDate: documentDate || undefined });
 }
 
 export async function PATCH(request: NextRequest) {

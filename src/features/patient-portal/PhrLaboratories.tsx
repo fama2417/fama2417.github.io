@@ -60,7 +60,7 @@ function TrendChart({ result, all }: { result: PhrLabResult; all: PhrLabResult[]
   </article>;
 }
 
-export function PhrLaboratories({ documents, ownerUserId, readOnly, onUpload, hideHeading = false }: { documents: PortalDocument[]; ownerUserId: string; readOnly: boolean; onUpload: () => void; hideHeading?: boolean }) {
+export function PhrLaboratories({ documents, ownerUserId, readOnly, onUpload, onDocumentDate, hideHeading = false }: { documents: PortalDocument[]; ownerUserId: string; readOnly: boolean; onUpload: () => void; onDocumentDate?: (documentId: string, date: string) => void; hideHeading?: boolean }) {
   const [results, setResults] = useState<PhrLabResult[]>([]), [loading, setLoading] = useState(true), [busyId, setBusyId] = useState("");
   const [favorites, setFavorites] = useState<PhrFavorite[]>([]), [filter, setFilter] = useState<LabCategory | "all">("all");
   const [query, setQuery] = useState(""), [onlyOutside, setOnlyOutside] = useState(false);
@@ -82,6 +82,7 @@ export function PhrLaboratories({ documents, ownerUserId, readOnly, onUpload, hi
     setProcessing({ title: rematch ? "Revisando la homologación LOINC" : rescan ? "Volviendo a leer el laboratorio" : "Procesando el laboratorio", detail: rematch ? "Buscamos candidatos en español e inglés y validamos nombre, unidad y muestra." : "Leemos el documento, estructuramos los resultados y después los homologamos con LOINC.", startedAt: Date.now() });
     try {
       const response = await analyzePhrLabDocument(document.id, rematch, rescan); await reload();
+      if (response.documentDate) onDocumentDate?.(document.id, response.documentDate);
       setNotice(rescan ? `Relectura completada: ${response.created} resultado(s) nuevo(s).` : rematch ? `Agrupación actualizada: ${response.loincMapped} resultado(s) con LOINC.` : response.duplicate ? "Este archivo ya estaba analizado." : `${response.created} resultado(s) listos para revisión. Confirma abajo los que quieras guardar.`);
       setWarnings(response.warnings);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "No fue posible analizar el laboratorio."); }
