@@ -281,7 +281,7 @@ export async function analyzePhrLabDocument(documentId: string, rematch = false,
   const response = await authenticatedFetch("/api/portal/labs", {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ documentId, rematch, rescan }),
   });
-  return await response.json() as { created: number; loincMapped: number; duplicate: boolean; warnings: string[] };
+  return await response.json() as { created: number; loincMapped: number; duplicate: boolean; warnings: string[]; documentDate?: string };
 }
 
 export type PhrLoincSuggestion = { resultId: string; analyte: string; currentCode: string; recommendedCode: string; confidence: number | null; options: { code: string; display: string }[] };

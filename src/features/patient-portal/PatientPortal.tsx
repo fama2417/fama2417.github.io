@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { supabase } from "@/lib/supabase-client";
 import { identifierTypeLabels, sexLabels, type Patient } from "@/features/patients/types";
+import { suggestedPatientDocumentName } from "./documents";
 import {
   deletePatientDocument, downloadFhirBundle, fetchCurrentPatients, fetchPatientAppointments, fetchPatientDocumentRequests, fetchPatientDocuments, fetchReleasedAddenda, fetchReleasedKeyImages, fetchReleasedReports,
   respondToDocumentRequest, setPatientDocumentShare, uploadPatientDocument,
@@ -91,7 +92,7 @@ export function PatientPortal() {
     setDocumentBusy(true); setError(""); setDocumentNotice("");
     try {
       await uploadPatientDocument({
-        file, documentDate: String(fields.get("documentDate") ?? ""),
+        file, displayName: String(fields.get("displayName") ?? ""), documentDate: String(fields.get("documentDate") ?? ""),
         documentType: String(fields.get("documentType") ?? "other") as PortalDocument["documentType"],
         sourceInstitution: String(fields.get("sourceInstitution") ?? ""),
       });
@@ -287,10 +288,11 @@ export function PatientPortal() {
           <h3>Subir documento personal</h3>
           <p>Guarda un resultado externo sin incorporarlo a la ficha oficial de una institución.</p>
           <form className="portal-document-form" onSubmit={uploadDocument}>
+            <label className="wide-field">Archivo<input name="file" type="file" required accept="application/pdf,image/jpeg,image/png,application/dicom,.dcm" onChange={(event) => { const file = event.target.files?.[0], name = event.currentTarget.form?.elements.namedItem("displayName") as HTMLInputElement | null; if (file && name && !name.value) name.value = suggestedPatientDocumentName(file.name); }} /></label>
+            <label>Nombre del documento<input name="displayName" required maxLength={240} placeholder="Ej. Exámenes de julio" /><small>Puedes cambiarlo antes de guardar.</small></label>
             <label>Institución de origen<input name="sourceInstitution" required maxLength={160} placeholder="Ej. RedSalud" /></label>
-            <label>Fecha del documento<input name="documentDate" type="date" /></label>
+            <label>Fecha del documento <span className="optional">Opcional</span><input name="documentDate" type="date" /><small>Si la dejas vacía, intentaremos detectarla al analizar el laboratorio.</small></label>
             <label>Tipo<select name="documentType" defaultValue="imaging"><option value="imaging">Informe de radiología / imagenología</option><option value="laboratory">Laboratorio</option><option value="prescription">Receta u orden</option><option value="other">Otro</option></select></label>
-            <label className="wide-field">Archivo<input name="file" type="file" required accept="application/pdf,image/jpeg,image/png,application/dicom,.dcm" /></label>
             <button className="button primary" type="submit" disabled={documentBusy}>{documentBusy ? "Subiendo…" : "Guardar documento"}</button>
           </form>
           <p className="empty-inline">PDF, JPG, PNG o una instancia DICOM, hasta 20 MB. El archivo quedará marcado como subido por el paciente.</p>
