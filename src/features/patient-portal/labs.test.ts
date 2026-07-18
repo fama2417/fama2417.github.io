@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildPhrLabTrend, phrLabDisplayName, phrLabDraftOf, phrLabTrendKey, phrLoincDecision, phrSpecimenLabel, reusedPhrLoinc, reviewPhrLabIdentity, validatePhrLabDraft, vettedPhrLabIdentity, type PhrLabResult } from "./labs.ts";
+import { buildPhrLabTrend, phrLabDisplayName, phrLabDraftOf, phrLabTrendKey, phrLoincDecision, phrSpecimenLabel, preferredSpanishLoincNames, reusedPhrLoinc, reviewPhrLabIdentity, validatePhrLabDraft, vettedPhrLabIdentity, type PhrLabResult } from "./labs.ts";
 
 const row = (id: string, date: string, value: number, unit = "mg/dL", status: PhrLabResult["reviewStatus"] = "confirmed"): PhrLabResult => ({
   id, documentId: id, analyte: "Glucosa", loincCode: "", valueNum: value, valueText: "", unit,
@@ -110,4 +110,13 @@ test("phrLabDisplayName muestra el componente LOINC, no los cinco ejes técnicos
   assert.equal(phrLabDisplayName({ analyte: "TSH", canonicalAnalyte: "" }), "TSH");
   // Override curado por código LOINC gana sobre el componente para los índices del hemograma.
   assert.equal(phrLabDisplayName({ analyte: "C.H.C.M.", loincCode: "786-4", canonicalAnalyte: "Concentración media de hemoglobina corpuscular en eritrocitos: Eritrocitos. Cuantitativo" }), "Concentración de hemoglobina corpuscular media (CHCM)");
+});
+
+test("prefiere la designación LOINC chilena y omite nombres ingleses", () => {
+  const names = preferredSpanishLoincNames([
+    { code: "2345-7", display: "Glucose", languageVariant: "enUS" },
+    { code: "2345-7", display: "Glucosa", languageVariant: "esES" },
+    { code: "2345-7", display: "Glicemia", languageVariant: "esCL" },
+  ]);
+  assert.equal(names.get("2345-7"), "Glicemia");
 });

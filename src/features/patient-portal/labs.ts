@@ -210,6 +210,11 @@ const LOINC_FRIENDLY_NAME: Record<string, string> = {
 const loincComponent = (canonical: string) => canonical.split(":")[0].replace(/\s+/g, " ").trim();
 export const phrLabDisplayName = (result: Pick<PhrLabResult, "analyte" | "canonicalAnalyte"> & Partial<Pick<PhrLabResult, "loincCode">>) =>
   (result.loincCode ? LOINC_FRIENDLY_NAME[result.loincCode] : "") || (result.canonicalAnalyte?.trim() && loincComponent(result.canonicalAnalyte)) || result.analyte;
+
+export function preferredSpanishLoincNames(rows: { code: string; display: string; languageVariant: string }[]) {
+  const rank = (language: string) => ["esCL", "esES", "esMX", "esAR"].indexOf(language);
+  return new Map([...rows].filter((row) => rank(row.languageVariant) >= 0).sort((a, b) => rank(b.languageVariant) - rank(a.languageVariant)).map((row) => [row.code, row.display]));
+}
 export const phrLoincDecision = (semanticConfidence: number, lexicalSimilarity: number) => {
   const confidence = Math.round((semanticConfidence * .75 + lexicalSimilarity * .25) * 100) / 100;
   return { confidence, status: confidence >= .88 ? "matched" : confidence >= .55 ? "review" : "unmapped" } as const;
