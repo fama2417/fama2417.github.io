@@ -69,7 +69,7 @@ export function parseLabNumber(value: string): number | null {
 }
 
 export function parseLabReference(value: string): { refLow: number | null; refHigh: number | null; refText: string } {
-  const clean = value.replace(/\[\s*\*\s*\]/g, "").replace(/\s+/g, " ").trim();
+  const clean = value.replace(/\[\s*\*\s*\]/g, "").replace(/[\[\]]/g, "").replace(/[↑↓]/g, "").replace(/\s+/g, " ").trim();
   const range = clean.match(/^(-?\d+(?:[.,]\d+)?)\s*[-–]\s*(-?\d+(?:[.,]\d+)?)(?:\s*-\s*\.)?$/);
   if (range) return { refLow: parseLabNumber(range[1]), refHigh: parseLabNumber(range[2]), refText: "" };
   const high = clean.match(/^(?:hasta|menor\s+a|<)\s*:?[ ]*(-?\d+(?:[.,]\d+)?)(?:\s*-\s*\.)?$/i);

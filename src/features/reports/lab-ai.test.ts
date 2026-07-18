@@ -33,6 +33,32 @@ test("parseLabLayoutPages extrae columnas, identidad y fecha sin IA", () => {
   assert.equal(parsed.observations[1].flag, "abnormal");
 });
 
+test("parseLabLayoutPages acepta encabezados partidos con unidad antes del resultado", () => {
+  const header = (unitX: number, resultX: number, referenceX: number, historyX: number) => [
+    item("Unidad de", unitX - 6, 650), item("Intervalo de", referenceX - 2, 650), item("Resultado Anterior", historyX, 650),
+    item("Examen", 43, 640), item("Medida", unitX, 640), item("Resultado", resultX, 640), item("Referencia", referenceX, 640), item("Valor", historyX, 640),
+  ];
+  const parsed = parseLabLayoutPages([
+    [
+      item("Fecha Toma de Muestra", 43, 700), item(":", 170, 700), item("22/07/22 09:43", 180, 700),
+      ...header(129, 194, 276, 357),
+      item("Glucosa", 43, 610), item("mg/dL", 129, 610), item("77", 194, 610), item("[", 262, 610), item("70", 273, 610), item("-", 293, 610), item("99", 310, 610), item("]", 328, 610), item("85", 357, 610), item("Enzimático", 468, 610),
+      item(".", 43, 600), item("mmol/L", 129, 600), item("4.28", 194, 600), item("3.89 - 5.49", 272, 600),
+    ],
+    [
+      ...header(233, 282, 382, 468),
+      item("25-OH-Vitamina D", 43, 610), item("ng/mL", 233, 610), item("14", 282, 610), item("↓", 332, 610), item("[ 20", 367, 610), item("-", 403, 610), item("50 ]", 416, 610),
+    ],
+  ]);
+
+  assert.equal(parsed.observedAt, "2022-07-22");
+  assert.equal(parsed.needsAi, false);
+  assert.deepEqual(parsed.observations.map(({ analyte, valueNum, unit, refLow, refHigh, flag }) => ({ analyte, valueNum, unit, refLow, refHigh, flag })), [
+    { analyte: "Glucosa", valueNum: 77, unit: "mg/dL", refLow: 70, refHigh: 99, flag: "normal" },
+    { analyte: "25-OH-Vitamina D", valueNum: 14, unit: "ng/mL", refLow: 20, refHigh: 50, flag: "low" },
+  ]);
+});
+
 test("labPatientMatches prioriza identificador y no acepta documentos sin identidad", () => {
   const expected = { patientName: "María Pérez", patientIdentifier: "12.345.678-5" };
   assert.equal(labPatientMatches({ patientName: "OTRA PERSONA", patientIdentifier: "12345678-5" }, expected), true);
