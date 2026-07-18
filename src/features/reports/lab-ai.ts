@@ -145,27 +145,36 @@ export function labSourceHighlight(items: StructuredTextItem[], value: string, a
 
 function findHeader(rows: LayoutRow[]): Header | null {
   for (const row of rows) {
-    const labels = row.items.map((item) => ({ item, text: plain(item.str) }));
+    const labels = rows
+      .filter((candidate) => Math.abs(candidate.y - row.y) <= 15)
+      .flatMap((candidate) => candidate.items)
+      .map((item) => ({ item, text: plain(item.str) }));
     const exam = labels.find(({ text }) => text === "examen");
     const result = labels.find(({ text }) => text === "resultado");
-    const unit = labels.find(({ text }) => /^unidad(?:es)?$/.test(text));
-    const reference = labels.find(({ text }) => /valor(?:es)? de referencia/.test(text));
+    const unit = labels.find(({ text }) => /^(?:unidad(?:es)?(?: de)?|medida)$/.test(text));
+    const reference = labels.find(({ text }) => /^(?:valor(?:es)? de referencia|intervalo de|referencia)$/.test(text));
     if (!result || !unit || !reference) continue;
-    const method = labels.find(({ text }) => text === "metodo" || /resultados? historicos?/.test(text));
-    const skip = labels.find(({ item, text }) => item.x > unit.item.x && item.x < reference.item.x && /^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$/.test(text));
-    return { y: row.y, exam: exam?.item.x ?? 0, result: result.item.x, unit: unit.item.x, reference: reference.item.x, skip: skip?.item.x ?? Number.POSITIVE_INFINITY, method: method?.item.x ?? Number.POSITIVE_INFINITY };
+    const method = labels.find(({ text }) => text === "metodo");
+    const skip = labels.find(({ text }) => /resultado(?:s)? (?:anterior(?:es)?|historico(?:s)?)/.test(text))
+      ?? labels.find(({ text }) => /^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$/.test(text));
+    return { y: Math.min(...labels.map(({ item }) => item.y)), exam: exam?.item.x ?? 0, result: result.item.x, unit: unit.item.x, reference: reference.item.x, skip: skip?.item.x ?? Number.POSITIVE_INFINITY, method: method?.item.x ?? Number.POSITIVE_INFINITY };
   }
   return null;
 }
 
 function columns(row: LayoutRow, header: Header) {
-  const first = (header.exam + header.result) / 2, second = (header.result + header.unit) / 2;
-  const third = (header.unit + (Number.isFinite(header.skip) ? header.skip : header.reference)) / 2;
-  const referenceStart = Number.isFinite(header.skip) ? (header.skip + header.reference) / 2 : third;
-  const referenceEnd = Number.isFinite(header.method) ? (header.reference + header.method) / 2 : Number.POSITIVE_INFINITY;
   const values = ["", "", "", "", ""];
+  const roles = [
+    { x: header.exam, index: 0 },
+    { x: header.result, index: 1 },
+    { x: header.unit, index: 2 },
+    { x: header.reference, index: 3 },
+    ...(Number.isFinite(header.skip) ? [{ x: header.skip, index: 4 }] : []),
+    ...(Number.isFinite(header.method) ? [{ x: header.method, index: 4 }] : []),
+  ].sort((left, right) => left.x - right.x);
   for (const item of row.items) {
-    const index = item.x < first ? 0 : item.x < second ? 1 : item.x < third ? 2 : item.x < referenceStart ? 4 : item.x < referenceEnd ? 3 : 4;
+    const role = roles.find((candidate, index) => index === roles.length - 1 || item.x < (candidate.x + roles[index + 1].x) / 2) ?? roles[roles.length - 1];
+    const index = role.index;
     values[index] = `${values[index]} ${item.str}`.trim();
   }
   return values;
@@ -179,7 +188,7 @@ const cleanExtractedUnit = (value: string) => value
   .replace(/mEg\/L/gi, "mEq/L")
   .replace(/^mEqg\/L$/i, "mEq/L")
   .replace(/^nmol\/$/i, "nmol/L");
-const ignored = (value: string) => /^(?:_{4,}|tipo de muestra|examen procesado|fecha de recepcion|metodo analitico|el resultado de este examen)/i.test(plain(value));
+const ignored = (value: string) => /^(?:[._-]+|tipo de muestra|examen procesado|fecha de recepcion|metodo analitico|el resultado de este examen)/i.test(plain(value));
 const specimenFromRows = (rows: LayoutRow[]) => {
   const pageText = plain(rows.map(rowText).join(" "));
   const explicit = pageText.match(/(?:tipo(?: de)? muestra|muestra)\s*:\s*(sangre total|suero|plasma|orina)\b/)?.[1];
@@ -203,8 +212,10 @@ const panelFromRows = (rows: LayoutRow[]) => {
 const dateOnly = (value: string) => {
   const iso = value.match(/\b(20\d{2})-(\d{2})-(\d{2})\b/);
   if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
-  const local = value.match(/\b(\d{1,2})[/-](\d{1,2})[/-](20\d{2})\b/);
-  return local ? `${local[3]}-${local[2].padStart(2, "0")}-${local[1].padStart(2, "0")}` : "";
+  const local = value.match(/\b(\d{1,2})[/-](\d{1,2})[/-](\d{2}|20\d{2})\b/);
+  if (!local) return "";
+  const year = local[3].length === 2 ? `20${local[3]}` : local[3];
+  return `${year}-${local[2].padStart(2, "0")}-${local[1].padStart(2, "0")}`;
 };
 
 function metadata(rows: LayoutRow[][]) {
@@ -415,12 +426,14 @@ export function parseLabLayoutPages(pages: StructuredTextItem[][]): Omit<Prepare
     for (const row of rows.filter((candidate) => candidate.y < header.y - 2)) {
       const values = columns(row, header).map((value) => value.replace(/\s+/g, " ").trim());
       const text = rowText(row);
-      if (/^(?:a partir|procesado por|autorizado por|tecnologia|metodo|el resultado de este examen|laboratorio adscrito|survey del college|informe emitido)/.test(plain(text))) break;
+      const normalizedText = plain(text);
+      if (/^(?:a partir|procesado por|autorizado por|tecnologia|el resultado de este examen|laboratorio adscrito|survey del college|informe emitido)/.test(normalizedText)) break;
+      if (/^metodo\b/.test(normalizedText)) continue;
       if (ignored(text)) continue;
-      const result = values[1].replace(/\s+(?:<|>|\*)$/, "").trim();
-      if (values[0] && resultValue(result)) {
+      const result = values[1].replace(/\s+(?:<|>|\*|↑|↓)$/, "").trim();
+      if (values[0] && !ignored(values[0]) && resultValue(result)) {
         candidateRows += 1;
-        const reportedFlag = /\s<$/.test(values[1]) ? "low" as const : /\s>$/.test(values[1]) ? "high" as const : /\*$|\[\s*\*\s*\]/.test(`${values[1]} ${values[3]}`) ? "abnormal" as const : "" as const;
+        const reportedFlag = /(?:\s<|↓)$/.test(values[1]) ? "low" as const : /(?:\s>|↑)$/.test(values[1]) ? "high" as const : /\*$|\[\s*\*\s*\]/.test(`${values[1]} ${values[3]}`) ? "abnormal" as const : "" as const;
         const compact = { sourceId: row.id, analyte: values[0], value: result, unit: values[2], reference: values[3], specimen: pageSpecimen, reportedFlag };
         const parsed = normalizedCandidate(compact, documentMetadata.observedAt, "ocr", pageSpecimen, pagePanel);
         if (parsed) {
