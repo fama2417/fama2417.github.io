@@ -24,7 +24,14 @@ test("estructura informes de distintas especialidades con el mismo flujo", () =>
   assert.deepEqual([pulmonology.clinicalIndication, pulmonology.technique, pulmonology.findings, pulmonology.impression], ["Disnea.", "Espirometría.", "Patrón ventilatorio conservado.", "Examen dentro de límites informados."]);
 });
 
+test("reconoce encabezados capitalizados sin dos puntos en texto PDF continuo", () => {
+  const text = structurePhrImagingText("CENTRO CLINICO Endoscopia digestiva Servicio Gastroenterologia Hallazgos Mucosa esofagica y gastrica sin lesiones focales. Conclusion Examen sin hallazgos relevantes. Documento sintetico.");
+  assert.equal(text.findings, "Mucosa esofagica y gastrica sin lesiones focales.");
+  assert.equal(text.impression, "Examen sin hallazgos relevantes. Documento sintetico.");
+});
+
 test("presenta la explicación simple como puntos legibles", () => {
   assert.deepEqual(phrImagingPlainLanguagePoints("1. Primer punto. 2. Segundo punto."), ["Primer punto.", "Segundo punto."]);
   assert.deepEqual(phrImagingPlainLanguagePoints("Primer punto. Segundo punto."), ["Primer punto.", "Segundo punto."]);
+  assert.deepEqual(phrImagingPlainLanguagePoints("Primer punto.\n- Segundo punto.\n- Tercer punto."), ["Primer punto.", "Segundo punto.", "Tercer punto."]);
 });
