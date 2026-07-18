@@ -43,6 +43,17 @@ test("clasifica nombres habituales aunque LOINC todavía esté pendiente", () =>
   assert.equal(labCategory({ analyte: "Aspecto", sourceSentence: "p33-r27 | Aspecto | Muy Turb | Muestra: Orina" }), "urine");
 });
 
+test("clasifica los nombres canonicos observados en la importacion real", () => {
+  const category = (component: string, analyte: string) => labCategory({ analyte, loincMetadata: {
+    component, property: "", timeAspect: "Pt", specimen: "Ser/Plas", scaleType: "Qn", methodType: "", className: "", status: "ACTIVE", exampleUcumUnits: "",
+  } });
+  assert.deepEqual([
+    category("Lactate dehydrogenase", "LDH"), category("25-Hydroxyvitamin D", "25-OH Vitamina D"),
+    category("Thyroxine.free", "Tiroxina Libre"), category("Alkaline phosphatase", "Fosf Alcalinas"),
+    category("Mean platelet volume", "VPM"), category("Urate", "Acido urico"), category("Phosphate", "Fosforo"),
+  ], ["chemistry", "nutrition", "hormones", "hepatic", "hematology", "renal", "nutrition"]);
+});
+
 test("convierte unidades UCUM compatibles sin mezclar masa y cantidad molar", () => {
   assert.equal(convertLabValue(100, "mg/dL", "g/L"), 1);
   assert.equal(convertLabValue(1, "10^3/uL", "10^9/L"), 1);

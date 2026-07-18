@@ -113,15 +113,16 @@ export function labCategory(observation: Pick<LabObservation, "analyte" | "loinc
   if (/^(PANEL\.)?(HEM\/BC|COAG|BLDBK)/.test(className)) return "hematology";
   if (/^(PANEL\.)?(MICRO|ABXBACT)/.test(className)) return "microbiology";
   if (/DRUG|TOX/.test(className)) return "toxicology";
-  if (/eritroc|hemoglobin|hematocrit|\bv\.?c\.?m\b|\bh\.?c\.?m\b|c\.?h\.?c\.?m|r\.?d\.?w|\br\.?a\.?n\b|leucocit|plaquet|basofil|eosinofil|mielocit|juvenil|baciliform|segmentad|linfocit|monocit|blasto|promielocit|neutrofil|globulos? (?:rojos?|blancos?)|\bvhs\b|protrombin|\binr\b/.test(text)) return "hematology";
+  if (/lactate dehydrogenase|desh.*lactica|\bldh\b/.test(text)) return "chemistry";
+  if (/eritroc|hemoglobin|hematocrit|\bv\.?c\.?m\b|\bh\.?c\.?m\b|c\.?h\.?c\.?m|r\.?d\.?w|\br\.?a\.?n\b|leucocit|plaquet|mean platelet volume|\bvpm\b|basofil|eosinofil|mielocit|juvenil|baciliform|segmentad|linfocit|monocit|blasto|promielocit|neutrofil|globulos? (?:rojos?|blancos?)|\bvhs\b|protrombin|\binr\b/.test(text)) return "hematology";
   if (/glucos|glyc|hemoglobin a1c|hba1c|insulin|c-peptide|peptido c|lactat/.test(text)) return "metabolic";
   if (/cholesterol|colesterol|triglycer|triglicer|apolipoprotein|lipoprotein|hdl|ldl|vldl/.test(text)) return "lipids";
-  if (/creatinin|cystatin|urea|uremia|nitrogeno ureico|uric acid|acido urico|glomerular|\bvfg\b|beta 2 microglobulin|sodium|sodio|potassium|potasio|chloride|cloro|electrolyte/.test(text)) return "renal";
+  if (/creatinin|cystatin|urea|uremia|nitrogeno ureico|uric acid|acido urico|\burate\b|\burato\b|glomerular|\bvfg\b|beta 2 microglobulin|sodium|sodio|potassium|potasio|chloride|cloro|electrolyte/.test(text)) return "renal";
   if (/bilirubin|bilirrubin|albumin|alanine aminotransferase|aspartate aminotransferase|transaminasa|\b(gpt|got|alat|asat|sgpt|sgot|alt|ast|ggt)\b|gamma (?:gt|glutam)|alkaline phosphatase|fosfatasa alcalina/.test(text)) return "hepatic";
-  if (/thyro|tiroid|tsh|triiodothyronine|\bt3\b|\bt4\b|cortisol|testosterone|estradiol|progesterone|prolactin|gonadotropin|luteinizing|follicle.stimulating|parathyroid|hormona/.test(text) || /FERT/.test(className)) return "hormones";
-  if (/ferritin|transferrin|ferremia|fijacion (?:de )?(?:fe|fierro|hierro)|saturacion (?:de )?transferrin|\biron\b|hierro|folate|folato|vitamin|vitamina|cobalamin|calcium|calcio|magnesium|magnesio|phosphorus|fosforo/.test(text)) return "nutrition";
+  if (/thyro|tiroid|tiroxin|tsh|triiodothyronine|\bt3\b|\bt4\b|cortisol|testosterone|estradiol|progesterone|prolactin|gonadotropin|luteinizing|follicle.stimulating|parathyroid|hormona/.test(text) || /FERT/.test(className)) return "hormones";
+  if (/ferritin|transferrin|ferremia|fijacion (?:de )?(?:fe|fierro|hierro)|saturacion (?:de )?transferrin|\biron\b|hierro|folate|folato|vitamin|vitamina|25-hydroxy|calcidiol|cobalamin|calcium|calcio|magnesium|magnesio|phosphorus|phosphate|fosforo|fosfato/.test(text)) return "nutrition";
   if (/c.reactive|reactive protein|proteina c|immunoglobulin|anticuer|antibody|complement|rheumatoid|reumato|sedimentation|eritrosediment/.test(text) || /SERO|ALLERGY|CELLMARK|HLA/.test(className)) return "immunology";
-  return /CHEM|CHAL/.test(className) || /proteinas? totales|desh.*lactica|\bldh\b|troponina|electrofores|\balfa[- ]?[12]\b|\bbeta[- ]?[12]\b|ratio a\/g|\bgamma\b/.test(text) ? "chemistry" : "other";
+  return /CHEM|CHAL/.test(className) || /proteinas? totales|desh.*lactica|lactate dehydrogenase|\bldh\b|troponina|electrofores|\balfa[- ]?[12]\b|\bbeta[- ]?[12]\b|ratio a\/g|\bgamma\b/.test(text) ? "chemistry" : "other";
 }
 
 const unitKey = (unit: string) => plain(unit).replace(/μ|µ/g, "u").replace(/\s+/g, "").replace(/litro|litre/g, "l");
