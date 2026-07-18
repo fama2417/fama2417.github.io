@@ -198,10 +198,10 @@ const cleanExtractedUnit = (value: string) => value
 const ignored = (value: string) => /^(?:[._-]+|tipo de muestra|examen procesado|fecha de recepcion|metodo analitico|el resultado de este examen)/i.test(plain(value));
 const specimenFromRows = (rows: LayoutRow[]) => {
   const pageText = plain(rows.map(rowText).join(" "));
-  const explicit = pageText.match(/(?:tipo(?: de)? muestra|muestra)\s*:\s*(sangre total|suero|plasma|orina)\b/)?.[1];
+  const explicit = pageText.match(/(?:tipo(?: de)? muestra|muestra)\s*:\s*(sangre total|sangre|suero|plasma|orina)\b/)?.[1];
   if (explicit) return explicit.replace(/\b\w/g, (letter) => letter.toUpperCase());
   if (/tipo(?: de)? muestra/.test(pageText)) {
-    const nearby = pageText.match(/\b(sangre total|suero|plasma|orina)\b/)?.[1];
+    const nearby = pageText.match(/\b(sangre total|sangre|suero|plasma|orina)\b/)?.[1];
     if (nearby) return nearby.replace(/\b\w/g, (letter) => letter.toUpperCase());
   }
   if (/orina completa|uroanalisis/.test(pageText)) return "Orina";
@@ -500,7 +500,8 @@ export function dedupeLabCandidates(rows: LabCandidate[]) {
   const seen = new Set<string>();
   return rows.filter((row) => {
     const analyte = plain(row.analyte).replace(/\s+/g, " ").trim();
-    if (/^(?:paciente|fono|rut|r u t|conclusion\b)/.test(analyte) || /^\d+(?:[.,]\d+)?\s*(?:mg|g|ug|ng|pg|u)\//.test(analyte)) return false;
+    if (/^(?:paciente|fono|rut|r u t|conclusion\b)/.test(analyte) || /^\d+(?:[.,]\d+)?\s*(?:mg|g|ug|ng|pg|u)\//.test(analyte)
+      || (/^normales?$/.test(analyte) && plain(row.valueText) === analyte && !/[a-z0-9]/i.test(row.unit))) return false;
     const value = row.valueNum === null ? normalizeIdentity(row.valueText) : String(row.valueNum);
     const key = [normalizeIdentity(row.analyte), value, normalizeIdentity(row.unit), row.observedAt].join("|");
     if (seen.has(key)) return false;

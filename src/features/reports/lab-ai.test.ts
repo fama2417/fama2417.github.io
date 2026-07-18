@@ -275,6 +275,7 @@ test("descarta filas administrativas y referencias confundidas con analitos", ()
   const clean = dedupeLabCandidates([
     row("Paciente", 5173440, "", "R.u.t."), row("Fono", 48624837, "", "Fec. Solicitud"),
     row("1339.0 mg/dL", 650, "", "-1600.0"), row("Conclusión del trazado", null, "normal", ""),
+    row("Normales", null, "Normales", "."),
     row("25 OH VITAMINA D", 26.8, "", "ng/mL"),
   ]);
   assert.deepEqual(clean.map((item) => item.analyte), ["25 OH VITAMINA D"]);
