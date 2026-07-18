@@ -180,7 +180,14 @@ function columns(row: LayoutRow, header: Header) {
   return values;
 }
 
-const resultValue = (value: string) => parseLabNumber(value) !== null || /^(?:positivo|negativo|reactivo|no reactivo|indeterminado|detectado|no detectado|ausente|presente)$/i.test(value.trim());
+const textualResult = /^(?:positivo|negativo|reactivo|no reactivo|indeterminado|detectado|no detectado|ausente|presente|susceptible|sensible|resistente|intermedio|compatible|incompatible|heterocigoto|homocigoto|normal(?:es)?\.?)$/i;
+const resultValue = (value: string, analyte = "") => {
+  const clean = value.trim();
+  if (parseLabNumber(clean) !== null || textualResult.test(clean) || /^\d+\s*:\s*\d+$/.test(clean)) return true;
+  return /^(?:microorganismo|germen(?: aislado)?|identificaci[oó]n|patr[oó]n(?: ana)?|grupo (?:sangu[ií]neo|abo))$/i.test(analyte.trim())
+    && clean.length <= 80
+    && !/[|\t]/.test(clean);
+};
 const cleanExtractedUnit = (value: string) => value
   .trim()
   .replace(/^\((.*)\)$/, "$1")
@@ -229,6 +236,7 @@ function metadata(rows: LayoutRow[][]) {
   const patientLine = firstPageText.find((text) => /\bpaciente\s*:/i.test(text)) ?? "";
   const identifierLine = firstPageText.find((text) => /r\.?\s*u\.?\s*t\.?\s*:/i.test(text)) ?? "";
   const requestLine = firstPageText.find((text) => /fec\.?\s*solicitud/i.test(text)) ?? "";
+  const documentDateLine = firstPageText.find((text) => /fecha (?:del documento|de (?:informe|emisi[oó]n|resultado))|fec\.?\s*(?:informe|emisi[oó]n|resultado)/i.test(text)) ?? "";
   return {
     patientName: labelledValue("nombre", 85, 400)
       || patientLine.match(/\bpaciente\s*:\s*(.+?)(?=\s+edad\s*:|\s+id\.?\s*atenci[oó]n\b|\s+r\.?\s*u\.?\s*t\.?\s*:|$)/i)?.[1]?.trim()
@@ -236,7 +244,7 @@ function metadata(rows: LayoutRow[][]) {
     patientIdentifier: identifierLine.match(/r\.?\s*u\.?\s*t\.?\s*:\s*([0-9.\-k]+)/i)?.[1]
       || labelledValue("rut", 85, 400)
       || "",
-    observedAt: dateOnly(sampleText) || dateOnly(requestLine),
+    observedAt: dateOnly(sampleText) || dateOnly(requestLine) || dateOnly(documentDateLine),
   };
 }
 
@@ -356,7 +364,7 @@ function parseMonospacedLabRows(rows: LayoutRow[], observedAt: string, defaultSp
       };
     }
     if (!compact) {
-      match = text.match(/^(.+?)\s+(no reactivo|no detectado|indeterminado|positivo|negativo|reactivo|detectado|normales?\.?|ausente|presente)$/i);
+      match = text.match(/^(.+?)\s+(no reactivo|no detectado|indeterminado|positivo|negativo|reactivo|detectado|normales?\.?|ausente|presente|susceptible|sensible|resistente|intermedio|compatible|incompatible|heterocigoto|homocigoto|\d+\s*:\s*\d+)$/i);
       if (match) compact = { sourceId: row.id, analyte: match[1], value: match[2], unit: "", reference: "", specimen: "", reportedFlag: "" };
     }
 
@@ -431,7 +439,7 @@ export function parseLabLayoutPages(pages: StructuredTextItem[][]): Omit<Prepare
       if (/^metodo\b/.test(normalizedText)) continue;
       if (ignored(text)) continue;
       const result = values[1].replace(/\s+(?:<|>|\*|↑|↓)$/, "").trim();
-      if (values[0] && !ignored(values[0]) && resultValue(result)) {
+      if (values[0] && !ignored(values[0]) && resultValue(result, values[0])) {
         candidateRows += 1;
         const reportedFlag = /(?:\s<|↓)$/.test(values[1]) ? "low" as const : /(?:\s>|↑)$/.test(values[1]) ? "high" as const : /\*$|\[\s*\*\s*\]/.test(`${values[1]} ${values[3]}`) ? "abnormal" as const : "" as const;
         const compact = { sourceId: row.id, analyte: values[0], value: result, unit: values[2], reference: values[3], specimen: pageSpecimen, reportedFlag };

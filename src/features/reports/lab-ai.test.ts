@@ -195,6 +195,30 @@ test("parseLabLayoutPages conserva resultados textuales de orina en formato de d
   assert.match(parsed.observations[0].sourceSentence, /Muestra: Orina \| Panel: Sedimento urinario$/);
 });
 
+test("extrae microbiologia, serologia, banco de sangre y genetica sin inventar valores", () => {
+  const parsed = parseLabLayoutPages([[
+    item("Fecha del documento: 18/07/2026", 30, 700),
+    item("Resultado", 220, 640), item("Unidad", 340, 640), item("Valores de Referencia", 430, 640),
+    item("Cultivo", 30, 610), item("Positivo", 220, 610),
+    item("Microorganismo", 30, 580), item("Escherichia coli", 220, 580),
+    item("Amoxicilina", 30, 550), item("Resistente", 220, 550),
+    item("Ceftriaxona", 30, 520), item("Susceptible", 220, 520),
+    item("ANA", 30, 490), item("1:160", 220, 490),
+    item("Grupo ABO", 30, 460), item("A", 220, 460),
+    item("RhD", 30, 430), item("Positivo", 220, 430),
+    item("Factor V Leiden", 30, 400), item("Heterocigoto", 220, 400),
+  ]]);
+
+  assert.equal(parsed.needsAi, false);
+  assert.equal(parsed.observedAt, "2026-07-18");
+  assert.deepEqual(parsed.observations.map(({ analyte, valueText }) => [analyte, valueText]), [
+    ["Cultivo", "Positivo"], ["Microorganismo", "Escherichia coli"],
+    ["Amoxicilina", "Resistente"], ["Ceftriaxona", "Susceptible"],
+    ["ANA", "1:160"], ["Grupo ABO", "A"], ["RhD", "Positivo"],
+    ["Factor V Leiden", "Heterocigoto"],
+  ]);
+});
+
 test("ubica el valor en columnas y en una fila monoespaciada", () => {
   assert.deepEqual(labSourceHighlight([item("8.4", 145, 578)], "8.4"), { x: 145, y: 578, width: 15, height: 10 });
   const box = labSourceHighlight([item("Colesterol VLDL 8.4 mg/dL", 30, 500)], "8.4", "Colesterol VLDL");
